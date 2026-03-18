@@ -30,3 +30,6 @@ spec/
 
 # Generated / exported artifacts
 *.html
+
+# Daily pipeline logs (local only — rotated automatically at startup)
+logs/

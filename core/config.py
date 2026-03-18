@@ -198,6 +198,12 @@ class Settings(BaseSettings):
         le=500,
     )
 
+    # ---- Logging --------------------------------------------------------------
+    log_dir: str = Field(
+        default="logs",
+        description="Directory for daily pipeline log files, relative to the project root.",
+    )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

@@ -20,6 +20,8 @@ from typing import Any
 
 import streamlit as st
 
+from core.config import get_settings
+from core.logging import PipelineLogger
 from core.models import AudioBuffer
 
 # (key, display label, estimated wall-clock seconds on ZeroGPU free tier, tooltip description)
@@ -275,110 +277,135 @@ def render_loading(source: Any) -> None:
 
         completed      = 0
         step_durations: list[float] = []
+        log            = PipelineLogger(get_settings().log_dir)
+        pipeline_start = time.time()
+
+        log.pipeline_start(source=str(source))
 
         def _tick(label: str) -> None:
             _draw(header_ph, bar_ph, steps_ph, completed, label, step_durations)
 
-        def _advance(step_start: float) -> None:
+        def _advance(key: str, step_start: float, error: str | None = None) -> None:
             nonlocal completed
-            step_durations.append(time.time() - step_start)
+            duration = time.time() - step_start
+            step_durations.append(duration)
             completed += 1
+            if error:
+                log.step_error(key, error=error)
+            else:
+                log.step_end(key, duration_s=duration)
 
         # ── Step 1: Ingestion (fatal on failure) ──────────────────────────────
         _tick("Fetching Audio")
         t0 = time.time()
+        log.step_start("ingestion")
         try:
             from services.ingestion import Ingestion
             audio: AudioBuffer = Ingestion().load(source)
         except Exception as exc:
+            log.step_error("ingestion", error=str(exc))
+            log.pipeline_error(error=str(exc))
             error_ph.error(f"Could not load audio: {exc}")
             return
-        _advance(t0)
+        _advance("ingestion", t0)
 
         # ── Step 2: Transcription ─────────────────────────────────────────────
         _tick("Transcribing Lyrics")
         t0 = time.time()
         transcript = []
+        log.step_start("transcription")
         try:
             from services.transcription import Transcription
             transcript = Transcription().transcribe(audio)
-        except Exception:
-            pass
-        _advance(t0)
+        except Exception as exc:
+            _advance("transcription", t0, error=str(exc))
+        else:
+            _advance("transcription", t0)
 
         # ── Step 3: Structure analysis ────────────────────────────────────────
         _tick("Analysing Structure")
         t0 = time.time()
         structure = None
+        log.step_start("structure")
         try:
             from services.analysis import Analysis
             structure = Analysis().analyze(audio)
-        except Exception:
-            pass
-        _advance(t0)
+        except Exception as exc:
+            _advance("structure", t0, error=str(exc))
+        else:
+            _advance("structure", t0)
 
         # ── Step 4: Forensics ─────────────────────────────────────────────────
         _tick("Forensic Scan")
         t0 = time.time()
         forensics = None
+        log.step_start("forensics")
         try:
             from services.forensics import Forensics
             forensics = Forensics().analyze(audio)
-        except Exception:
-            pass
-        _advance(t0)
+        except Exception as exc:
+            _advance("forensics", t0, error=str(exc))
+        else:
+            _advance("forensics", t0)
 
         # ── Step 5: Compliance ────────────────────────────────────────────────
         _tick("Compliance Audit")
         t0 = time.time()
         compliance = None
+        log.step_start("compliance")
         try:
             from services.compliance import Compliance
             sections = structure.sections if structure else []
             beats    = structure.beats    if structure else []
             compliance = Compliance().check(audio, transcript, sections, beats)
-        except Exception:
-            pass
-        _advance(t0)
+        except Exception as exc:
+            _advance("compliance", t0, error=str(exc))
+        else:
+            _advance("compliance", t0)
 
         # ── Step 6: Authorship ────────────────────────────────────────────────
         _tick("Authorship Check")
         t0 = time.time()
         authorship = None
+        log.step_start("authorship")
         try:
             from services.authorship import Authorship
             authorship = Authorship().analyze(transcript)
-        except Exception:
-            pass
-        _advance(t0)
+        except Exception as exc:
+            _advance("authorship", t0, error=str(exc))
+        else:
+            _advance("authorship", t0)
 
         # ── Step 7: Track discovery ───────────────────────────────────────────
         _tick("Track Discovery")
         t0 = time.time()
         similar = []
+        log.step_start("discovery")
+        title  = structure.metadata.get("title", "")  if structure else ""
+        artist = structure.metadata.get("artist", "") if structure else ""
         try:
             from services.discovery import Discovery
-            title  = structure.metadata.get("title", "")  if structure else ""
-            artist = structure.metadata.get("artist", "") if structure else ""
             similar = Discovery().find_similar(title, artist) or []
-        except Exception:
-            pass
-        _advance(t0)
+        except Exception as exc:
+            _advance("discovery", t0, error=str(exc))
+        else:
+            _advance("discovery", t0)
 
         # ── Step 8: Legal links ───────────────────────────────────────────────
         _tick("Legal Links")
         t0 = time.time()
         legal = None
+        log.step_start("legal")
         try:
             from services.legal import Legal
-            title  = structure.metadata.get("title", "")  if structure else ""
-            artist = structure.metadata.get("artist", "") if structure else ""
             legal = Legal().get_links(title, artist)
-        except Exception:
-            pass
-        _advance(t0)
+        except Exception as exc:
+            _advance("legal", t0, error=str(exc))
+        else:
+            _advance("legal", t0)
 
         # ── All done — render final state then transition ─────────────────────
+        log.pipeline_end(duration_s=time.time() - pipeline_start)
         _draw(header_ph, bar_ph, steps_ph, completed, "", step_durations)
 
         from core.models import AnalysisResult
