@@ -12,8 +12,18 @@ from pathlib import Path
 import streamlit as st
 
 from core.config import get_settings
-from core.logging import LogCleaner
+from core.logging import DEFAULT_LOG_DIR, LogCleaner
 from ui.styles import STYLES
+
+# ── Logging setup (runs once per process) ────────────────────────────────────
+# Module-level flag ensures LogCleaner runs exactly once per process, not once
+# per browser session. session_state would run it once per tab, which causes
+# concurrent unlink() races when multiple users open the app simultaneously.
+_log_cleaner_ran = False
+if not _log_cleaner_ran:
+    _log_dir = get_settings().log_dir or DEFAULT_LOG_DIR
+    LogCleaner(_log_dir).clean()
+    _log_cleaner_ran = True
 
 # ── Assets ────────────────────────────────────────────────────────────────────
 
@@ -27,16 +37,6 @@ st.set_page_config(
     page_icon=str(_LOGO_PATH),
     layout="wide",
 )
-
-# ── Logging setup (runs once per process) ────────────────────────────────────
-# LogCleaner deletes any log files that aren't today's before the app serves
-# any traffic. Stored in session_state so it only runs on the first script
-# execution in a given browser session, not on every Streamlit rerun.
-
-if "logging_initialised" not in st.session_state:
-    _settings = get_settings()
-    LogCleaner(_settings.log_dir).clean()
-    st.session_state.logging_initialised = True
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 

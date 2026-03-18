@@ -21,7 +21,7 @@ from typing import Any
 import streamlit as st
 
 from core.config import get_settings
-from core.logging import PipelineLogger
+from core.logging import DEFAULT_LOG_DIR, PipelineLogger
 from core.models import AudioBuffer
 
 # (key, display label, estimated wall-clock seconds on ZeroGPU free tier, tooltip description)
@@ -277,7 +277,8 @@ def render_loading(source: Any) -> None:
 
         completed      = 0
         step_durations: list[float] = []
-        log            = PipelineLogger(get_settings().log_dir)
+        _log_dir       = get_settings().log_dir or DEFAULT_LOG_DIR
+        log            = PipelineLogger(_log_dir)
         pipeline_start = time.time()
 
         log.pipeline_start(source=str(source))
@@ -303,7 +304,6 @@ def render_loading(source: Any) -> None:
             from services.ingestion import Ingestion
             audio: AudioBuffer = Ingestion().load(source)
         except Exception as exc:
-            log.step_error("ingestion", error=str(exc))
             log.pipeline_error(error=str(exc))
             error_ph.error(f"Could not load audio: {exc}")
             return
