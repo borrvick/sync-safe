@@ -2,12 +2,11 @@
 ui/nav.py
 Shared site navigation bar and footer rendered on all public-facing pages.
 
-Both components use components.html() so that onclick JS navigation works.
-st.markdown() does NOT execute scripts and React processes onclick="string"
-as a prop (error #231) — components.html() runs in a real srcdoc iframe
-where standard DOM events work correctly.
+Navigation uses <a href="?p=..." target="_parent"> anchor tags rather than
+onclick JS. target="_parent" navigates the parent browsing context (the
+Streamlit page) from within the components.html() iframe — this works
+reliably across all browsers without requiring sandbox permissions.
 
-Navigation model: nav links set window.parent.location.href to ?p=<page>.
 app.py reads st.query_params["p"] on every load and routes accordingly.
 """
 from __future__ import annotations
@@ -22,8 +21,7 @@ _FONTS = (
     "&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
 )
 
-# EQ bar keyframes — duplicated from styles.py because each iframe has its
-# own style context and cannot inherit from the parent document.
+# EQ bar keyframes — duplicated from styles.py; each iframe has its own style context.
 _EQ_KF = (
     "@keyframes eq-a{0%,100%{transform:scaleY(.14)}25%{transform:scaleY(.88)}"
     "50%{transform:scaleY(.38)}75%{transform:scaleY(.62)}}"
@@ -60,6 +58,7 @@ body.dark{
   --border:rgba(255,255,255,.07);--s1:#0C1825;--s2:#111F30;
 }
 body{background:transparent;font-family:'Figtree',sans-serif;}
+a{text-decoration:none;}
 """
 
 
@@ -94,8 +93,7 @@ nav{
   padding:14px 2px;border-bottom:1px solid var(--border);
 }
 .brand{
-  display:flex;align-items:center;gap:10px;
-  cursor:pointer;border:none;background:none;padding:0;text-decoration:none;
+  display:flex;align-items:center;gap:10px;text-decoration:none;
 }
 .eq{display:flex;align-items:flex-end;gap:2px;height:20px;}
 .brand-name{
@@ -110,8 +108,8 @@ nav{
 .nl{
   font-family:'Figtree',sans-serif;font-size:.72rem;font-weight:500;
   letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
-  cursor:pointer;border:none;background:none;padding:0 0 3px;
-  border-bottom:2px solid transparent;transition:color .15s,border-color .15s;
+  padding:0 0 3px;border-bottom:2px solid transparent;
+  transition:color .15s,border-color .15s;display:inline-block;
 }
 .nl:hover{color:var(--text);}
 .nl.active{color:var(--text);border-bottom-color:var(--accent);}
@@ -119,32 +117,31 @@ nav{
   font-family:'Chakra Petch',monospace;font-size:.65rem;font-weight:700;
   letter-spacing:.1em;text-transform:uppercase;
   color:#fff;background:var(--accent);
-  padding:8px 18px;border-radius:6px;
-  cursor:pointer;border:none;transition:opacity .15s;
+  padding:8px 18px;border-radius:6px;transition:opacity .15s;display:inline-block;
 }
 .cta:hover{opacity:.85;}
 """
 
 
 def render_site_nav(current_page: str) -> None:
-    """Render the full-width sticky site navigation bar."""
-    eq = _eq_html(6, "#F5640A", 20)
+    """Render the full-width site navigation bar."""
+    eq   = _eq_html(6, "#F5640A", 20)
     hiw  = " active" if current_page == "how_it_works" else ""
     leg  = " active" if current_page == "legal"        else ""
 
     html = f"""<!doctype html><html><head>{_head(_NAV_CSS)}</head><body>
 <nav>
-  <button class="brand" onclick="window.parent.location.href=window.parent.location.pathname">
+  <a class="brand" href="./" target="_parent">
     <div class="eq">{eq}</div>
     <div>
       <div class="brand-name">SYNC-SAFE™</div>
       <div class="brand-sub">Forensic Portal</div>
     </div>
-  </button>
+  </a>
   <div class="links">
-    <button class="nl{hiw}"  onclick="window.parent.location.href='?p=how_it_works'">How it Works</button>
-    <button class="nl{leg}"  onclick="window.parent.location.href='?p=legal'">Legal</button>
-    <button class="cta"      onclick="window.parent.location.href='?p=portal'">Launch Portal →</button>
+    <a class="nl{hiw}" href="?p=how_it_works" target="_parent">How it Works</a>
+    <a class="nl{leg}" href="?p=legal"        target="_parent">Legal</a>
+    <a class="cta"     href="?p=portal"        target="_parent">Launch Portal →</a>
   </div>
 </nav>
 {_THEME_JS}</body></html>"""
@@ -155,10 +152,7 @@ def render_site_nav(current_page: str) -> None:
 # ── Footer ────────────────────────────────────────────────────────────────────
 
 _FOOTER_CSS = """
-footer{
-  border-top:1px solid var(--border);
-  padding:36px 4px 24px;
-}
+footer{border-top:1px solid var(--border);padding:36px 4px 24px;}
 .grid{display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr;gap:32px;}
 .brand-name{
   font-family:'Chakra Petch',monospace;font-size:.88rem;font-weight:700;
@@ -179,14 +173,11 @@ footer{
 }
 .col-title{
   font-family:'Chakra Petch',monospace;font-size:.6rem;font-weight:700;
-  letter-spacing:.18em;text-transform:uppercase;color:var(--dim);
-  margin-bottom:14px;
+  letter-spacing:.18em;text-transform:uppercase;color:var(--dim);margin-bottom:14px;
 }
 .lnk{
   display:block;font-family:'Figtree',sans-serif;font-size:.76rem;font-weight:500;
-  color:var(--muted);text-decoration:none;margin-bottom:9px;
-  cursor:pointer;border:none;background:none;padding:0;text-align:left;
-  transition:color .15s;
+  color:var(--muted);margin-bottom:9px;transition:color .15s;
 }
 .lnk:hover{color:var(--accent);}
 .lnk-ext::after{content:' ↗';font-size:.65rem;opacity:.6;}
@@ -195,14 +186,10 @@ footer{
   margin-top:32px;padding-top:20px;border-top:1px solid var(--border);
   flex-wrap:wrap;gap:8px;
 }
-.copy{
-  font-family:'JetBrains Mono',monospace;font-size:.58rem;
-  color:var(--dim);letter-spacing:.04em;
-}
+.copy{font-family:'JetBrains Mono',monospace;font-size:.58rem;color:var(--dim);letter-spacing:.04em;}
 .trust{
   display:flex;gap:16px;font-family:'JetBrains Mono',monospace;
-  font-size:.55rem;font-weight:500;color:var(--dim);letter-spacing:.1em;
-  text-transform:uppercase;
+  font-size:.55rem;font-weight:500;color:var(--dim);letter-spacing:.1em;text-transform:uppercase;
 }
 """
 
@@ -215,10 +202,10 @@ def render_site_footer() -> None:
 <footer>
   <div class="grid">
     <div>
-      <div style="display:flex;align-items:flex-end;gap:6px;margin-bottom:4px;">
+      <a href="./" target="_parent" style="display:inline-flex;align-items:flex-end;gap:6px;margin-bottom:4px;text-decoration:none;">
         <div style="display:flex;align-items:flex-end;gap:2px;height:16px;">{eq}</div>
         <div class="brand-name">SYNC-SAFE™</div>
-      </div>
+      </a>
       <div class="brand-sub">Forensic Portal</div>
       <div class="tagline">
         Detect AI authorship · Audit sync compliance · Flag lyric risks
@@ -233,34 +220,32 @@ def render_site_footer() -> None:
 
     <div>
       <div class="col-title">Product</div>
-      <button class="lnk" onclick="window.parent.location.href='?p=portal'">The Portal</button>
-      <span class="lnk" style="cursor:default;">MP3 · WAV · FLAC · M4A · OGG</span>
-      <button class="lnk" onclick="window.parent.location.href='?p=how_it_works'">How it Works</button>
+      <a class="lnk" href="./"              target="_parent">Home</a>
+      <a class="lnk" href="?p=portal"       target="_parent">The Portal</a>
+      <a class="lnk" href="?p=how_it_works" target="_parent">How it Works</a>
     </div>
 
     <div>
       <div class="col-title">Rights Resources</div>
-      <a class="lnk lnk-ext" href="https://www.ascap.com/repertory" target="_blank" rel="noopener noreferrer">ASCAP Repertory</a>
-      <a class="lnk lnk-ext" href="https://www.bmi.com/search/" target="_blank" rel="noopener noreferrer">BMI Repertoire</a>
-      <a class="lnk lnk-ext" href="https://www.sesac.com/#!/repertory/search" target="_blank" rel="noopener noreferrer">SESAC Repertory</a>
-      <a class="lnk lnk-ext" href="https://www.globalmusicrights.com/search" target="_blank" rel="noopener noreferrer">GMR Search</a>
+      <a class="lnk lnk-ext" href="https://www.ascap.com/repertory"            target="_blank" rel="noopener noreferrer">ASCAP Repertory</a>
+      <a class="lnk lnk-ext" href="https://www.bmi.com/search/"                target="_blank" rel="noopener noreferrer">BMI Repertoire</a>
+      <a class="lnk lnk-ext" href="https://www.sesac.com/#!/repertory/search"  target="_blank" rel="noopener noreferrer">SESAC Repertory</a>
+      <a class="lnk lnk-ext" href="https://www.globalmusicrights.com/search"   target="_blank" rel="noopener noreferrer">GMR Search</a>
     </div>
 
     <div>
       <div class="col-title">Legal</div>
-      <button class="lnk" onclick="window.parent.location.href='?p=legal'">Copyright &amp; IP</button>
-      <button class="lnk" onclick="window.parent.location.href='?p=legal'">Privacy Policy</button>
-      <button class="lnk" onclick="window.parent.location.href='?p=legal'">Terms of Service</button>
+      <a class="lnk" href="?p=legal" target="_parent">Copyright &amp; IP</a>
+      <a class="lnk" href="?p=legal" target="_parent">Privacy Policy</a>
+      <a class="lnk" href="?p=legal" target="_parent">Terms of Service</a>
     </div>
   </div>
 
   <div class="bottom">
     <span class="copy">© 2026 Sync-Safe. All rights reserved.</span>
     <div class="trust">
-      <span>Stateless</span>
-      <span>·</span>
-      <span>No Audio Stored</span>
-      <span>·</span>
+      <span>Stateless</span><span>·</span>
+      <span>No Audio Stored</span><span>·</span>
       <span>ZeroGPU</span>
     </div>
   </div>
