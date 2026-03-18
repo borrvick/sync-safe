@@ -10,6 +10,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from ui.components import eq_bars
+from ui.nav import render_site_nav, render_site_footer
 
 # ── Bento card data ───────────────────────────────────────────────────────────
 
@@ -143,27 +144,9 @@ def render_landing() -> None:
         '<a href="#main-content" class="skip-link">Skip to main content</a>',
         unsafe_allow_html=True,
     )
+    render_site_nav("landing")
     _, col, _ = st.columns([1, 2.2, 1])
     with col:
-        # Header bar
-        _eq = eq_bars(6, color="#F5640A", h=22)
-        st.markdown(f"""
-        <div style="display:flex;align-items:center;justify-content:space-between;
-                    padding:28px 0 44px;animation:fade-up .5s ease both;">
-          <div style="display:flex;align-items:center;gap:12px;">
-            <div style="display:flex;align-items:flex-end;gap:2px;height:22px;">{_eq}</div>
-            <div>
-              <div style="font-family:'Chakra Petch',monospace;font-size:.9rem;
-                          font-weight:700;color:var(--accent);letter-spacing:.14em;">SYNC-SAFE</div>
-              <div style="font-family:'Chakra Petch',monospace;font-size:.5rem;
-                          font-weight:500;color:var(--dim);letter-spacing:.22em;
-                          text-transform:uppercase;margin-top:1px;">Forensic Portal</div>
-            </div>
-          </div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:.6rem;
-                      color:var(--dim);letter-spacing:.05em;">v2.0</div>
-        </div>
-        """, unsafe_allow_html=True)
 
         # Hero
         st.markdown(f"""
@@ -272,6 +255,7 @@ def render_landing() -> None:
 
         components.html(_BENTO, height=740, scrolling=False)
 
+    render_site_footer()
 
 
 def _submit_source(source) -> None:
