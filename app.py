@@ -138,10 +138,15 @@ for key, default in [
 # page renders immediately on load without an extra rerun.
 
 _nav_page = st.query_params.get("p", "")
-if _nav_page in ("how_it_works", "legal"):
+if _nav_page in ("how_it_works", "legal", "portal"):
     st.session_state.page = _nav_page
 
 # ── Routing ───────────────────────────────────────────────────────────────────
+
+if st.session_state.page == "portal":
+    from ui.pages.portal import render_portal
+    render_portal()
+    st.stop()
 
 if st.session_state.page == "how_it_works":
     from ui.pages.how_it_works import render_how_it_works

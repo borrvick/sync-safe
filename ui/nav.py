@@ -144,7 +144,7 @@ def render_site_nav(current_page: str) -> None:
   <div class="links">
     <button class="nl{hiw}"  onclick="window.parent.location.href='?p=how_it_works'">How it Works</button>
     <button class="nl{leg}"  onclick="window.parent.location.href='?p=legal'">Legal</button>
-    <button class="cta"      onclick="window.parent.location.href=window.parent.location.pathname">Launch Portal →</button>
+    <button class="cta"      onclick="window.parent.location.href='?p=portal'">Launch Portal →</button>
   </div>
 </nav>
 {_THEME_JS}</body></html>"""
@@ -233,7 +233,7 @@ def render_site_footer() -> None:
 
     <div>
       <div class="col-title">Product</div>
-      <button class="lnk" onclick="window.parent.location.href=window.parent.location.pathname">The Portal</button>
+      <button class="lnk" onclick="window.parent.location.href='?p=portal'">The Portal</button>
       <span class="lnk" style="cursor:default;">MP3 · WAV · FLAC · M4A · OGG</span>
       <button class="lnk" onclick="window.parent.location.href='?p=how_it_works'">How it Works</button>
     </div>

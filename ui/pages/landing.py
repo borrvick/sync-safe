@@ -194,50 +194,14 @@ def render_landing() -> None:
 
         st.markdown('<span id="main-content" tabindex="-1"></span>', unsafe_allow_html=True)
 
-        # Input card
-        with st.container(border=True):
-            st.markdown("""
-            <div style="margin-bottom:22px;animation:fade-up .7s ease .2s both;">
-              <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
-                          letter-spacing:.2em;text-transform:uppercase;color:var(--dim);
-                          display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-                <span>▶</span><span>Analyse a Track</span>
-                <div style="flex:1;height:1px;background:var(--border-hr);"></div>
-              </div>
-              <div style="font-family:'Chakra Petch',monospace;font-size:1.5rem;font-weight:700;
-                          color:var(--text);letter-spacing:-.02em;line-height:1.15;">
-                Run your forensic<br><span style="color:var(--accent);">audit.</span>
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-            mode = st.radio("mode", ["🔗  YouTube URL", "📁  Upload File"],
-                            horizontal=True, label_visibility="collapsed")
-
-            if mode == "🔗  YouTube URL":
-                url = st.text_input("url", placeholder="https://youtube.com/watch?v=...",
-                                    label_visibility="collapsed")
-                if st.button("Initiate Scan →", type="primary",
-                             use_container_width=True, key="run_url"):
-                    if url:
-                        _submit_source(url)
-                    else:
-                        st.warning("Paste a YouTube URL first.")
-            else:
-                uploaded = st.file_uploader("file", type=["mp3", "wav", "flac", "m4a", "ogg"],
-                                            label_visibility="collapsed")
-                if st.button("Initiate Scan →", type="primary",
-                             use_container_width=True, key="run_upload",
-                             disabled=uploaded is None):
-                    if uploaded:
-                        _submit_source(uploaded)
-
-        st.markdown("""
-        <p style="text-align:center;font-family:'Chakra Petch',monospace;font-size:.56rem;
-                  color:var(--dim);font-weight:500;letter-spacing:.14em;text-transform:uppercase;
-                  margin-top:10px;">No audio stored · API keys via HF Secrets</p>
-        <br>
-        """, unsafe_allow_html=True)
+        # CTA
+        st.markdown("<div style='margin-bottom:8px;animation:fade-up .7s ease .2s both;'>",
+                    unsafe_allow_html=True)
+        if st.button("Launch Portal →", type="primary",
+                     use_container_width=True, key="cta_portal"):
+            st.session_state.page = "portal"
+            st.rerun()
+        st.markdown("</div><br>", unsafe_allow_html=True)
 
         # Feature grid label
         st.markdown("""
@@ -256,12 +220,3 @@ def render_landing() -> None:
         components.html(_BENTO, height=740, scrolling=False)
 
     render_site_footer()
-
-
-def _submit_source(source) -> None:
-    """Store source and navigate to the loading page."""
-    st.session_state.source   = source
-    st.session_state.audio    = None
-    st.session_state.analysis = None
-    st.session_state.page     = "loading"
-    st.rerun()
