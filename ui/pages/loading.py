@@ -22,16 +22,32 @@ import streamlit as st
 
 from core.models import AudioBuffer
 
-# (key, display label, estimated wall-clock seconds on ZeroGPU free tier)
-_STEPS: list[tuple[str, str, int]] = [
-    ("ingestion",     "Fetching Audio",       8),
-    ("transcription", "Transcribing Lyrics",  50),
-    ("structure",     "Analysing Structure",  65),
-    ("forensics",     "Forensic Scan",        20),
-    ("compliance",    "Compliance Audit",     12),
-    ("authorship",    "Authorship Check",      8),
-    ("discovery",     "Track Discovery",      10),
-    ("legal",         "Legal Links",           2),
+# (key, display label, estimated wall-clock seconds on ZeroGPU free tier, tooltip description)
+_STEPS: list[tuple[str, str, int, str]] = [
+    ("ingestion",     "Fetching Audio",      8,
+     "Downloads audio from YouTube via yt-dlp, or reads your uploaded file. "
+     "Audio is held as a BytesIO buffer in memory — nothing is written to disk."),
+    ("transcription", "Transcribing Lyrics", 50,
+     "Runs OpenAI Whisper to convert vocals into timestamped text segments. "
+     "Each segment gets a start/end time so you can click any lyric line in the report to seek the player."),
+    ("structure",     "Analysing Structure", 20,
+     "Uses allin1 to detect BPM, musical key, and section labels (intro, verse, chorus, outro). "
+     "Also reads embedded ID3 / VorbisComment metadata tags from the file."),
+    ("forensics",     "Forensic Scan",       20,
+     "Runs six AI-origin signals: C2PA manifest check, IBI beat-timing variance, groove profile, "
+     "4-bar loop cross-correlation, spectral slop above 16 kHz, and SynthID HF phase-coherence scan."),
+    ("compliance",    "Compliance Audit",    12,
+     "Gallo-Method checks: sting/fade ending detection, 4–8 bar energy evolution, intro length, "
+     "and lyric flags for explicit content, brand names, locations, violence, and drug references."),
+    ("authorship",    "Authorship Check",     8,
+     "Scores lyrics on four signals — burstiness, vocabulary diversity, rhyme density, repetition — "
+     "plus a RoBERTa classifier. Verdicts: Likely Human, Uncertain, or Likely AI."),
+    ("discovery",     "Track Discovery",     10,
+     "Queries Last.fm's similarity graph for comparable tracks, then resolves each result to a live "
+     "YouTube preview URL via yt-dlp. Fully stateless — no database involved."),
+    ("legal",         "Legal Links",          2,
+     "Generates direct search links for ASCAP, BMI, and SESAC repertory databases "
+     "so you can identify publishers and rights holders before any outreach."),
 ]
 
 _TOTAL_EST: int = sum(s[2] for s in _STEPS)
@@ -55,13 +71,11 @@ def _draw(
     header_ph: Any,
     bar_ph: Any,
     steps_ph: Any,
-    timer_ph: Any,
     completed: int,
     current_label: str,   # empty string when all steps done
-    elapsed: float,
     step_durations: list[float],
 ) -> None:
-    """Redraw all four placeholder slots with current pipeline state."""
+    """Redraw header, progress bar, and step checklist. Timer is managed separately."""
     n = len(_STEPS)
 
     # Header
@@ -75,79 +89,160 @@ def _draw(
         headline = "<span style='color:#3DB87A'>Analysis Complete</span>"
         headline_color = "#3DB87A"
 
-    header_ph.markdown(f"""
-    <div style="text-align:center;padding:36px 0 20px;">
-      <div style="font-family:'Chakra Petch',monospace;font-size:.54rem;font-weight:600;
-                  letter-spacing:.28em;color:#364C5C;margin-bottom:14px;
-                  text-transform:uppercase;">◈ INITIALIZING SCAN</div>
-      <div style="font-family:'Chakra Petch',monospace;font-size:1.55rem;font-weight:700;
-                  color:{headline_color};letter-spacing:-.02em;min-height:2.2rem;">
-        {headline}
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
+    header_ph.html(
+        f'<div style="text-align:center;padding:36px 0 20px;">'
+        f'<div style="font-family:\'Chakra Petch\',monospace;font-size:.54rem;font-weight:600;'
+        f'letter-spacing:.28em;color:#364C5C;margin-bottom:14px;text-transform:uppercase;">'
+        f'◈ INITIALIZING SCAN</div>'
+        f'<div style="font-family:\'Chakra Petch\',monospace;font-size:1.55rem;font-weight:700;'
+        f'color:{headline_color};letter-spacing:-.02em;min-height:2.2rem;">'
+        f'{headline}</div></div>'
+    )
 
     bar_ph.progress(completed / n)
 
-    # Step checklist rows
+    # CSS for tooltips (opens downward to stay within bounds) + progress bar animation.
+    # Progress bar uses a pure CSS animation so it runs even while Python blocks on a step.
+    # st.html() injects via innerHTML; browsers do not execute <script> tags that way.
+    _TIP_CSS = (
+        '<style>'
+        # Tooltip trigger wrapper
+        '.sp-tip{position:relative;display:inline-flex;align-items:center;cursor:default}'
+        # Orange ? badge
+        '.sp-ti{display:inline-flex;align-items:center;justify-content:center;'
+        'width:13px;height:13px;border-radius:50%;background:rgba(245,100,10,.12);'
+        'color:#F5640A;font-size:.5rem;font-weight:700;font-family:monospace;'
+        'border:1px solid rgba(245,100,10,.28);margin-left:7px;flex-shrink:0;'
+        'line-height:1;transition:background .15s}'
+        '.sp-tip:hover .sp-ti{background:rgba(245,100,10,.28)}'
+        # Tooltip card — opens DOWNWARD so it never escapes the top of the frame
+        '.sp-tb{display:none;position:absolute;'
+        'top:calc(100% + 5px);left:-8px;'
+        'background:#0D1926;border:1px solid rgba(245,100,10,.22);color:#B8D0E0;'
+        'font-size:.71rem;font-family:Figtree,sans-serif;font-weight:400;line-height:1.52;'
+        'padding:10px 13px;border-radius:8px;width:230px;z-index:9999;'
+        'box-shadow:0 8px 24px rgba(0,0,0,.5);pointer-events:none;white-space:normal}'
+        '.sp-tip:hover .sp-tb{display:block}'
+        # Progress bar: grows 0 → 99% over animation-duration set inline per step
+        '@keyframes pb-run{from{width:0%}to{width:99%}}'
+        '.pb-run{animation:pb-run linear forwards}'
+        # "running…" text pulses to signal activity
+        '@keyframes run-pulse{0%,100%{opacity:.45}50%{opacity:1}}'
+        '.run-txt{animation:run-pulse 1.4s ease-in-out infinite}'
+        '</style>'
+    )
+
+    # Step checklist rows.
     rows = ""
-    for i, (_, label, est) in enumerate(_STEPS):
+    current_est = 1  # fallback; overwritten when current step is found
+    for i, (_, label, est, desc) in enumerate(_STEPS):
+        is_last = (i == n - 1)
+        # Only add border-bottom on rows that aren't the last one; removing
+        # overflow:hidden from the container means we can't rely on clipping.
+        row_border = '' if is_last else 'border-bottom:1px solid rgba(255,255,255,.03);'
+
         if i < completed:
-            icon, icon_color  = "✓", "#3DB87A"
+            icon, icon_color    = "✓", "#3DB87A"
             label_color, weight = "#7A95AA", "400"
+            pb_inner = '<div style="height:100%;width:100%;background:#3DB87A;border-radius:1px;"></div>'
             right = (
                 f"<span style='font-family:JetBrains Mono,monospace;"
                 f"font-size:.65rem;color:#2A3D4C;'>{_fmt(step_durations[i])}</span>"
             )
         elif label == current_label:
-            icon, icon_color  = "▶", "#F5640A"
+            icon, icon_color    = "▶", "#F5640A"
             label_color, weight = "#D8E6F2", "600"
+            current_est         = est
+            # CSS animation grows bar 0→99% over est seconds — no JS required
+            pb_inner = (
+                f'<div class="pb-run" style="height:100%;animation-duration:{est}s;'
+                f'background:#F5640A;border-radius:1px;"></div>'
+            )
             right = (
-                "<span style='font-family:JetBrains Mono,monospace;"
+                "<span class='run-txt' style='font-family:JetBrains Mono,monospace;"
                 "font-size:.65rem;color:#F5640A;'>running…</span>"
             )
         else:
-            icon, icon_color  = "○", "#1E2D3A"
+            icon, icon_color    = "○", "#1E2D3A"
             label_color, weight = "#364C5C", "400"
+            pb_inner            = ""  # empty track for pending steps
             right = (
                 f"<span style='font-family:JetBrains Mono,monospace;"
                 f"font-size:.65rem;color:#1A2830;'>~{_fmt(est)}</span>"
             )
 
-        rows += f"""
-        <div style="display:flex;align-items:center;justify-content:space-between;
-                    padding:10px 18px;border-bottom:1px solid rgba(255,255,255,.035);">
-          <div style="display:flex;align-items:center;gap:14px;">
-            <span style="font-family:'Chakra Petch',monospace;font-size:.78rem;
-                         color:{icon_color};font-weight:700;width:14px;">{icon}</span>
-            <span style="font-family:'Figtree',sans-serif;font-size:.84rem;
-                         color:{label_color};font-weight:{weight};">{label}</span>
-          </div>
-          {right}
-        </div>"""
+        rows += (
+            f'<div style="padding:10px 18px 0;{row_border}">'
+            f'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;">'
+            f'<div style="display:flex;align-items:center;gap:10px;">'
+            f'<span style="font-family:\'Chakra Petch\',monospace;font-size:.78rem;'
+            f'color:{icon_color};font-weight:700;width:14px;flex-shrink:0;">{icon}</span>'
+            f'<span style="font-family:\'Figtree\',sans-serif;font-size:.84rem;'
+            f'color:{label_color};font-weight:{weight};">{label}</span>'
+            f'<span class="sp-tip">'
+            f'<span class="sp-ti">?</span>'
+            f'<span class="sp-tb">{desc}</span>'
+            f'</span>'
+            f'</div>'
+            f'{right}'
+            f'</div>'
+            f'<div style="height:2px;background:rgba(255,255,255,.04);border-radius:1px;margin-bottom:6px;">'
+            f'{pb_inner}'
+            f'</div>'
+            f'</div>'
+        )
 
-    steps_ph.markdown(f"""
-    <div style="border:1px solid rgba(255,255,255,.06);border-radius:12px;
-                overflow:hidden;margin:6px 0 18px;background:rgba(11,19,32,.5);">
-      <div style="padding:9px 18px;border-bottom:1px solid rgba(255,255,255,.05);">
-        <span style="font-family:'Chakra Petch',monospace;font-size:.5rem;font-weight:600;
-                     letter-spacing:.18em;text-transform:uppercase;color:#364C5C;">
-          Pipeline · {completed} / {n} steps complete
-        </span>
-      </div>
-      {rows}
-    </div>
-    """, unsafe_allow_html=True)
+    # overflow:hidden removed — it was clipping absolutely-positioned tooltip cards.
+    # The last row's border-bottom is suppressed instead to keep the bottom edge clean.
+    steps_ph.html(
+        _TIP_CSS
+        + f'<div style="border:1px solid rgba(255,255,255,.06);border-radius:12px;'
+        f'margin:6px 0 18px;background:rgba(11,19,32,.5);">'
+        f'<div style="padding:9px 18px;border-bottom:1px solid rgba(255,255,255,.05);">'
+        f'<span style="font-family:\'Chakra Petch\',monospace;font-size:.5rem;font-weight:600;'
+        f'letter-spacing:.18em;text-transform:uppercase;color:#364C5C;">'
+        f'Pipeline · {completed} / {n} steps complete</span></div>'
+        + rows
+        + '</div>'
+    )
 
-    remaining_est = sum(_STEPS[i][2] for i in range(completed, n))
-    timer_ph.markdown(f"""
-    <div style="text-align:center;padding-bottom:16px;">
-      <span style="font-family:'JetBrains Mono',monospace;font-size:.68rem;
-                   color:#364C5C;letter-spacing:.08em;">
-        Elapsed {_fmt(elapsed)} · ETA ~{_fmt(remaining_est)}
-      </span>
-    </div>
-    """, unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
+# One-time timer — set once before pipeline starts, never replaced
+# ---------------------------------------------------------------------------
+
+def _start_timer() -> None:
+    """
+    Render the elapsed / ETA timer using st.components.v1.html(), which runs
+    inside a real sandboxed iframe where <script> tags execute.
+
+    st.html() injects via innerHTML and scripts are silently ignored by browsers;
+    st.components.v1.html() is required for any live JS behaviour.
+
+    Called once before the pipeline starts — never replaced, so the setInterval
+    ticks every second for the full run without interruption.
+    """
+    import streamlit.components.v1 as components
+    components.html(
+        f'<div style="text-align:center;padding-bottom:4px;">'
+        f'<span id="t-el" style="font-family:JetBrains Mono,monospace;font-size:.68rem;'
+        f'color:#7A95AA;letter-spacing:.08em;">Elapsed 0:00</span>'
+        f'<span style="font-family:JetBrains Mono,monospace;font-size:.68rem;color:#364C5C;"> · ETA ~</span>'
+        f'<span id="t-et" style="font-family:JetBrains Mono,monospace;font-size:.68rem;'
+        f'color:#7A95AA;letter-spacing:.08em;">{_fmt(_TOTAL_EST)}</span>'
+        f'</div>'
+        f'<script>'
+        f'var el=0,et={_TOTAL_EST};'
+        f'function f(s){{s=Math.max(0,s|0);return Math.floor(s/60)+":"+(s%60<10?"0":"")+s%60;}}'
+        f'setInterval(function(){{'
+        f'el++;et=Math.max(0,et-1);'
+        f'document.getElementById("t-el").textContent="Elapsed "+f(el);'
+        f'document.getElementById("t-et").textContent=f(et);'
+        f'}},1000);'
+        f'</script>',
+        height=36,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -172,16 +267,17 @@ def render_loading(source: Any) -> None:
         header_ph = st.empty()
         bar_ph    = st.empty()
         steps_ph  = st.empty()
-        timer_ph  = st.empty()
+        # Timer uses st.components.v1.html() (real iframe, JS executes).
+        # Placed here in layout order before error_ph. Never updated — the
+        # JS setInterval runs for the full pipeline duration on its own.
+        _start_timer()
         error_ph  = st.empty()
 
-        start          = time.time()
         completed      = 0
         step_durations: list[float] = []
 
         def _tick(label: str) -> None:
-            _draw(header_ph, bar_ph, steps_ph, timer_ph,
-                  completed, label, time.time() - start, step_durations)
+            _draw(header_ph, bar_ph, steps_ph, completed, label, step_durations)
 
         def _advance(step_start: float) -> None:
             nonlocal completed
@@ -283,8 +379,7 @@ def render_loading(source: Any) -> None:
         _advance(t0)
 
         # ── All done — render final state then transition ─────────────────────
-        _draw(header_ph, bar_ph, steps_ph, timer_ph,
-              completed, "", time.time() - start, step_durations)
+        _draw(header_ph, bar_ph, steps_ph, completed, "", step_durations)
 
         from core.models import AnalysisResult
         st.session_state.audio    = audio

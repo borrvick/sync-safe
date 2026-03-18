@@ -144,9 +144,15 @@ class Analysis:
             device = self._resolve_device()
             result = allin1.analyze(
                 tmp_path,
+                model=self._params.allin1_model,
                 device=device,
                 demix_dir=os.path.join(tmp_dir, "demix"),
                 spec_dir=os.path.join(tmp_dir, "spec"),
+                # multiprocess=True (allin1 default) spawns worker processes via
+                # Python's 'spawn' start method on macOS. Each worker re-executes
+                # app.py as __main__ to initialise itself, which crashes because
+                # there is no Streamlit session state in the subprocess.
+                multiprocess=False,
             )
 
             bpm = (

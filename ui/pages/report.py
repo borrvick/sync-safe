@@ -101,7 +101,6 @@ def _render_audio_player(audio: AudioBuffer) -> None:
     st.audio(
         audio.raw,
         start_time=st.session_state.get("start_time", 0),
-        key=f"player_{st.session_state.get('player_key', 0)}",
     )
     st.markdown("<div style='margin-bottom:28px;'></div>", unsafe_allow_html=True)
 

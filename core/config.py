@@ -265,6 +265,17 @@ class ModelParams(BaseModel):
         description="Inference batch size. Reduce if OOM on CPU.",
     )
 
+    # ---- allin1 (structure analysis) ------------------------------------------
+    allin1_model: str = Field(
+        default="harmonix-fold0",
+        description=(
+            "allin1 model name passed to allin1.analyze(). "
+            "'harmonix-all' is an 8-model ensemble (more accurate but 8× slower). "
+            "'harmonix-fold0' … 'harmonix-fold7' are single-fold models — "
+            "fold0 is the default: fast, one HF download, good accuracy for sync use."
+        ),
+    )
+
     # ---- Demucs (source separation — called by allin1) ------------------------
     demucs_model: str = Field(
         default="htdemucs",

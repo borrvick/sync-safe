@@ -67,6 +67,7 @@ analysis = st.session_state.analysis
 if audio is None or analysis is None:
     st.session_state.page = "landing"
     st.rerun()
+    st.stop()
 
 from ui.pages.report import render_report
 render_report(_LOGO_B64, audio, analysis)
