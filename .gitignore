@@ -1,0 +1,32 @@
+# Secrets / credentials
+cookies.txt
+.env
+.env.*
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Test / tooling cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# allin1 runtime cache (demucs stems + spectrograms written to CWD)
+demix/
+spec/
+
+# macOS
+.DS_Store
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Claude Code local memory (personal, not project source)
+.claude/
+
+# Generated / exported artifacts
+*.html

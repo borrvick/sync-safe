@@ -1,0 +1,36 @@
+streamlit>=1.35.0
+spaces>=0.30.0
+
+# Audio ingestion
+yt-dlp>=2024.11.0
+
+# Forensics
+c2pa-python>=0.29.0
+librosa>=0.10.2
+numpy>=1.26.0
+scipy>=1.13.0
+
+# Structure analysis
+allin1>=1.0.0
+
+# NLP / Transcription
+openai-whisper>=20231117
+
+# Compliance — Gallo-Method (free, open-source)
+transformers>=4.40.0
+torch>=2.1.0
+spacy>=3.7.0
+https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+
+# Discovery
+requests>=2.31.0
+
+# Metadata
+mutagen>=1.47.0
+
+# Core architecture
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# Testing
+pytest>=8.0.0
