@@ -2,8 +2,8 @@
 ui/nav.py
 Shared site navigation bar and footer rendered on all public-facing pages.
 
-Navigation uses <a href="?p=..." target="_parent"> anchor tags rather than
-onclick JS. target="_parent" navigates the parent browsing context (the
+Navigation uses <a href="?p=..." target="_top"> anchor tags rather than
+onclick JS. target="_top" navigates the parent browsing context (the
 Streamlit page) from within the components.html() iframe — this works
 reliably across all browsers without requiring sandbox permissions.
 
@@ -131,7 +131,7 @@ def render_site_nav(current_page: str) -> None:
 
     html = f"""<!doctype html><html><head>{_head(_NAV_CSS)}</head><body>
 <nav>
-  <a class="brand" href="./" target="_parent">
+  <a class="brand" href="./" target="_top">
     <div class="eq">{eq}</div>
     <div>
       <div class="brand-name">SYNC-SAFE™</div>
@@ -139,9 +139,9 @@ def render_site_nav(current_page: str) -> None:
     </div>
   </a>
   <div class="links">
-    <a class="nl{hiw}" href="?p=how_it_works" target="_parent">How it Works</a>
-    <a class="nl{leg}" href="?p=legal"        target="_parent">Legal</a>
-    <a class="cta"     href="?p=portal"        target="_parent">Launch Portal →</a>
+    <a class="nl{hiw}" href="?p=how_it_works" target="_top">How it Works</a>
+    <a class="nl{leg}" href="?p=legal"        target="_top">Legal</a>
+    <a class="cta"     href="?p=portal"        target="_top">Launch Portal →</a>
   </div>
 </nav>
 {_THEME_JS}</body></html>"""
@@ -202,7 +202,7 @@ def render_site_footer() -> None:
 <footer>
   <div class="grid">
     <div>
-      <a href="./" target="_parent" style="display:inline-flex;align-items:flex-end;gap:6px;margin-bottom:4px;text-decoration:none;">
+      <a href="./" target="_top" style="display:inline-flex;align-items:flex-end;gap:6px;margin-bottom:4px;text-decoration:none;">
         <div style="display:flex;align-items:flex-end;gap:2px;height:16px;">{eq}</div>
         <div class="brand-name">SYNC-SAFE™</div>
       </a>
@@ -220,9 +220,9 @@ def render_site_footer() -> None:
 
     <div>
       <div class="col-title">Product</div>
-      <a class="lnk" href="./"              target="_parent">Home</a>
-      <a class="lnk" href="?p=portal"       target="_parent">The Portal</a>
-      <a class="lnk" href="?p=how_it_works" target="_parent">How it Works</a>
+      <a class="lnk" href="./"              target="_top">Home</a>
+      <a class="lnk" href="?p=portal"       target="_top">The Portal</a>
+      <a class="lnk" href="?p=how_it_works" target="_top">How it Works</a>
     </div>
 
     <div>
@@ -235,9 +235,9 @@ def render_site_footer() -> None:
 
     <div>
       <div class="col-title">Legal</div>
-      <a class="lnk" href="?p=legal" target="_parent">Copyright &amp; IP</a>
-      <a class="lnk" href="?p=legal" target="_parent">Privacy Policy</a>
-      <a class="lnk" href="?p=legal" target="_parent">Terms of Service</a>
+      <a class="lnk" href="?p=legal" target="_top">Copyright &amp; IP</a>
+      <a class="lnk" href="?p=legal" target="_top">Privacy Policy</a>
+      <a class="lnk" href="?p=legal" target="_top">Terms of Service</a>
     </div>
   </div>
 
