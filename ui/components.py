@@ -21,15 +21,15 @@ ISSUE_META: dict[str, dict] = {
 # ── Authorship verdict → display color ───────────────────────────────────────
 
 _AUTHORSHIP_COLORS: dict[str, str] = {
-    "Likely AI":         "#FF3060",
+    "Likely AI":         "var(--danger)",
     "Uncertain":         "#F5A623",
-    "Likely Human":      "#0DF5A0",
-    "Insufficient data": "#364C5C",
+    "Likely Human":      "var(--ok)",
+    "Insufficient data": "var(--dim)",
 }
 
 
 def authorship_color(verdict: str) -> str:
-    return _AUTHORSHIP_COLORS.get(verdict, "#364C5C")
+    return _AUTHORSHIP_COLORS.get(verdict, "var(--dim)")
 
 
 # ── EQ bar animation HTML ─────────────────────────────────────────────────────

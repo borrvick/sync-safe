@@ -6,25 +6,95 @@ app.py is intentionally thin: page config, session state, CSS injection,
 and routing. All rendering logic lives in ui/pages/. All business logic
 lives in pipeline.py and services/.
 """
-import base64
-from pathlib import Path
-
 import streamlit as st
+import streamlit.components.v1 as components
 
 from core.config import get_settings
 from core.logging import LogCleaner
 from ui.styles import STYLES
 
-# ── Assets ────────────────────────────────────────────────────────────────────
+# ── Theme FAB HTML + JS ───────────────────────────────────────────────────────
+# The FAB is injected via st.markdown (position:fixed, always on screen).
+# The JS runs via components.html() because st.markdown() does NOT execute
+# <script> tags — React's dangerouslySetInnerHTML intentionally skips them.
+# The JS accesses window.parent to reach the top-level Streamlit document.
 
-_LOGO_PATH = Path(__file__).parent / "assets" / "logo.png"
-_LOGO_B64  = base64.b64encode(_LOGO_PATH.read_bytes()).decode()
+_THEME_FAB = """
+<div id="theme-fab">
+  <button id="theme-toggle"
+          aria-label="Toggle light and dark theme"
+          aria-pressed="false">&#9790;</button>
+</div>
+"""
+
+# NOTE: onclick is intentionally NOT on the button above.
+# Putting onclick="string" in st.markdown HTML causes React error #231
+# (React sees it as an onClick prop with a string value).
+# Instead we attach the listener via addEventListener from the JS below.
+#
+# localStorage is wrapped in its own try/catch because Safari's ITP blocks
+# iframe storage access; the rest of the JS still runs without it.
+
+_THEME_JS = """<script>
+(function() {
+  try {
+    var p = window.parent;
+
+    // No localStorage — accessing window.parent.localStorage in a srcdoc iframe
+    // causes a console error in Safari (ITP blocks it below try/catch level).
+    // data-theme on <html> already survives Streamlit reruns (React never touches
+    // that attribute), so theme persists for the whole browser session.
+    var saved = p.document.documentElement.getAttribute('data-theme') || 'light';
+
+    function applyTheme(t) {
+      if (t === 'dark') {
+        p.document.documentElement.setAttribute('data-theme', 'dark');
+      } else {
+        p.document.documentElement.removeAttribute('data-theme');
+      }
+      var b = p.document.getElementById('theme-toggle');
+      if (b) {
+        b.textContent = t === 'dark' ? '\u2600' : '\u263e';
+        b.setAttribute('aria-pressed', t === 'dark' ? 'true' : 'false');
+      }
+    }
+
+    applyTheme(saved);
+
+    var btn = p.document.getElementById('theme-toggle');
+    if (btn && !btn._ssListenerAttached) {
+      btn._ssListenerAttached = true;
+      btn.addEventListener('click', function() {
+        var isDark = p.document.documentElement.getAttribute('data-theme') === 'dark';
+        applyTheme(isDark ? 'light' : 'dark');
+      });
+    }
+
+    /* Tooltip ARIA enhancement — runs on every page */
+    function enhanceTips(root) {
+      root.querySelectorAll('.tip-icon:not([tabindex])').forEach(function(el) {
+        el.setAttribute('tabindex', '0');
+        el.setAttribute('role', 'button');
+        el.setAttribute('aria-label', 'Show more information');
+      });
+      root.querySelectorAll('.tip-box:not([role])').forEach(function(el) {
+        el.setAttribute('role', 'tooltip');
+      });
+    }
+    enhanceTips(p.document);
+    if (!p._ssTooltipObserver) {
+      p._ssTooltipObserver = new p.MutationObserver(function() { enhanceTips(p.document); });
+      p._ssTooltipObserver.observe(p.document.body, { childList: true, subtree: true });
+    }
+  } catch(e) { console.warn('Theme init:', e); }
+})();
+</script>"""
 
 # ── Page config ───────────────────────────────────────────────────────────────
 
 st.set_page_config(
     page_title="Sync-Safe Forensic Portal",
-    page_icon=str(_LOGO_PATH),
+    page_icon="🎚️",
     layout="wide",
 )
 
@@ -38,9 +108,11 @@ if "logging_initialised" not in st.session_state:
     LogCleaner(_settings.log_dir).clean()
     st.session_state.logging_initialised = True
 
-# ── CSS ───────────────────────────────────────────────────────────────────────
+# ── CSS + Theme FAB ───────────────────────────────────────────────────────────
 
 st.markdown(STYLES, unsafe_allow_html=True)
+st.markdown(_THEME_FAB, unsafe_allow_html=True)
+components.html(_THEME_JS, height=0, scrolling=False)
 
 # ── Session state defaults ────────────────────────────────────────────────────
 # audio:    AudioBuffer | None — ingested on landing page submit
@@ -63,7 +135,7 @@ for key, default in [
 
 if st.session_state.page == "landing":
     from ui.pages.landing import render_landing
-    render_landing(_LOGO_B64)
+    render_landing()
     st.stop()
 
 if st.session_state.page == "loading":
@@ -82,4 +154,4 @@ if audio is None or analysis is None:
     st.stop()
 
 from ui.pages.report import render_report
-render_report(_LOGO_B64, audio, analysis)
+render_report(audio, analysis)

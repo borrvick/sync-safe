@@ -25,7 +25,7 @@ from core.models import (
     StructureResult,
     TranscriptSegment,
 )
-from ui.components import ISSUE_META, authorship_color, fmt_ts, issue_pill
+from ui.components import ISSUE_META, authorship_color, eq_bars, fmt_ts, issue_pill
 
 
 # ---------------------------------------------------------------------------
@@ -33,15 +33,37 @@ from ui.components import ISSUE_META, authorship_color, fmt_ts, issue_pill
 # ---------------------------------------------------------------------------
 
 def render_report(
-    logo_b64: str,
     audio: AudioBuffer,
     result: AnalysisResult,
 ) -> None:
     """Render the full analysis report for a completed pipeline run."""
-    _render_nav(logo_b64, audio.label)
+    st.markdown(
+        '<a href="#main-content" class="skip-link">Skip to main content</a>',
+        unsafe_allow_html=True,
+    )
+    _render_nav(audio.label)
+    st.markdown('<span id="main-content" tabindex="-1"></span>', unsafe_allow_html=True)
     _render_audio_player(audio)
-    _render_forensics_and_structure(result)
-    _render_lyric_section(result)
+
+    with st.expander("Track Overview", expanded=True):
+        c_left, c_right = st.columns([1, 1], gap="large")
+        with c_left:
+            _render_metadata_card(result.structure)
+        with c_right:
+            _render_structure_card(result.structure)
+
+    with st.expander("Authenticity Audit", expanded=True):
+        _render_forensics_card(result.forensics)
+
+    with st.expander("Sync Readiness Checks", expanded=True):
+        _render_sync_readiness(result.compliance)
+
+    with st.expander("Discovery & Licensing", expanded=True):
+        _render_legal_and_discovery(result)
+
+    with st.expander("Lyrics & Content Audit", expanded=True):
+        _render_lyric_section(result)
+
     _render_footer()
 
 
@@ -49,17 +71,18 @@ def render_report(
 # Navigation bar
 # ---------------------------------------------------------------------------
 
-def _render_nav(logo_b64: str, source_label: str) -> None:
+def _render_nav(source_label: str) -> None:
+    _eq = eq_bars(6, color="#F5640A", h=22)
     c_logo, c_nav = st.columns([6, 1])
     with c_logo:
         st.markdown(f"""
         <div style="display:flex;align-items:center;gap:12px;padding:24px 0 10px;">
-          <img src="data:image/png;base64,{logo_b64}" style="height:30px;width:auto;">
+          <div style="display:flex;align-items:flex-end;gap:2px;height:22px;">{_eq}</div>
           <div>
             <div style="font-family:'Chakra Petch',monospace;font-size:.88rem;font-weight:700;
                         color:#F5640A;letter-spacing:.14em;">SYNC-SAFE</div>
             <div style="font-family:'Chakra Petch',monospace;font-size:.48rem;font-weight:500;
-                        color:#364C5C;letter-spacing:.2em;text-transform:uppercase;">Forensic Portal</div>
+                        color:var(--dim);letter-spacing:.2em;text-transform:uppercase;">Forensic Portal</div>
           </div>
         </div>
         """, unsafe_allow_html=True)
@@ -71,23 +94,23 @@ def _render_nav(logo_b64: str, source_label: str) -> None:
             st.rerun()
 
     st.markdown(
-        "<hr style='border:none;border-top:1px solid rgba(255,255,255,.055);margin:2px 0 28px;'>",
+        "<hr style='border:none;border-top:1px solid var(--border-hr);margin:2px 0 28px;'>",
         unsafe_allow_html=True,
     )
 
     src_html = (
-        f'<div style="font-family:var(--mono,monospace);font-size:.7rem;color:#364C5C;'
+        f'<div style="font-family:var(--mono,monospace);font-size:.7rem;color:var(--dim);'
         f'margin-top:6px;letter-spacing:.04em;">{source_label}</div>'
         if source_label else ""
     )
     st.markdown(f"""
     <div style="margin-bottom:24px;">
       <div style="font-family:'Chakra Petch',monospace;font-size:.58rem;font-weight:600;
-                  letter-spacing:.2em;text-transform:uppercase;color:#364C5C;margin-bottom:8px;">
+                  letter-spacing:.2em;text-transform:uppercase;color:var(--dim);margin-bottom:8px;">
         ▶ Forensic Report
       </div>
       <div style="font-family:'Chakra Petch',monospace;font-size:2.4rem;font-weight:700;
-                  color:#D8E6F2;letter-spacing:-.03em;line-height:1;">Analysis</div>
+                  color:var(--text);letter-spacing:-.03em;line-height:1;">Analysis</div>
       {src_html}
     </div>
     """, unsafe_allow_html=True)
@@ -106,26 +129,82 @@ def _render_audio_player(audio: AudioBuffer) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Forensics + structure columns
+# Track Overview: metadata + structure
 # ---------------------------------------------------------------------------
 
-def _render_forensics_and_structure(result: AnalysisResult) -> None:
-    col_l, col_r = st.columns([7, 5], gap="large")
+def _render_metadata_card(sr: Optional[StructureResult]) -> None:
+    meta       = sr.metadata if sr else {}
+    title_str  = meta.get("title", "")  or ""
+    artist_str = meta.get("artist", "") or ""
 
-    with col_l:
-        _render_forensics_card(result.forensics)
-        _render_structure_card(result.structure)
+    title_html = (
+        f"<div style='font-family:\"JetBrains Mono\",monospace;font-size:1.4rem;"
+        f"font-weight:700;color:var(--text);line-height:1.2;margin-bottom:5px;'>{title_str}</div>"
+        if title_str else
+        "<div style='font-size:.9rem;color:var(--dim);margin-bottom:5px;'>No tags found</div>"
+    )
+    artist_html = (
+        f"<div style='font-family:\"Chakra Petch\",monospace;font-size:.6rem;"
+        f"font-weight:600;color:#F5640A;letter-spacing:.12em;text-transform:uppercase;'>{artist_str}</div>"
+        if artist_str else ""
+    )
 
-    with col_r:
-        _render_metadata_card(result.structure)
-        _render_legal_and_discovery(result)
+    st.markdown(f"""
+    <div class="sig" style="margin-bottom:14px;">
+      <div class="sig-head">Track Metadata</div>
+      {title_html}
+      {artist_html}
+    </div>
+    """, unsafe_allow_html=True)
 
+
+def _render_structure_card(sr: Optional[StructureResult]) -> None:
+    bpm_fmt  = f"{sr.bpm:.1f}" if sr and isinstance(sr.bpm, float) else (sr.bpm if sr else "—")
+    key      = sr.key if sr else "—"
+    sections = sr.sections if sr else []
+
+    pills = "".join(
+        f"<span class='s-pill'>{s.label} {s.start:.0f}s–{s.end:.0f}s</span>"
+        for s in sections
+    ) if sections else "<span style='font-family:var(--mono);font-size:.8rem;color:var(--dim);'>No section data</span>"
+
+    st.markdown(f"""
+    <div class="sig">
+      <div class="sig-head">Structure Analysis</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px;">
+        <div>
+          <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
+                      letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:8px;">Tempo</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:2.6rem;font-weight:700;
+                      color:#F5640A;line-height:1;">
+            {bpm_fmt}<span style="font-size:.8rem;font-weight:400;color:var(--dim);
+                                   margin-left:5px;font-family:'Chakra Petch',monospace;
+                                   letter-spacing:.1em;">BPM</span>
+          </div>
+        </div>
+        <div>
+          <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
+                      letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:8px;">Key</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:2.6rem;font-weight:700;
+                      color:#F5640A;line-height:1;">{key}</div>
+        </div>
+      </div>
+      <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
+                  letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:10px;">Detected Sections</div>
+      <div style="display:flex;flex-wrap:wrap;">{pills}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
+# Authenticity Audit: forensics
+# ---------------------------------------------------------------------------
 
 def _render_forensics_card(fr: Optional[ForensicsResult]) -> None:
     if fr is None:
         st.markdown(
             "<div class='sig'><div class='sig-head'>Authenticity Audit</div>"
-            "<div style='color:#364C5C;'>Forensics analysis unavailable.</div></div>",
+            "<div style='color:var(--dim);'>Forensics analysis unavailable.</div></div>",
             unsafe_allow_html=True,
         )
         return
@@ -170,15 +249,15 @@ def _render_forensics_card(fr: Optional[ForensicsResult]) -> None:
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
         <div>
           <div style="font-family:'Chakra Petch',monospace;font-size:.64rem;font-weight:500;
-                      letter-spacing:.1em;text-transform:uppercase;color:#364C5C;margin-bottom:6px;">
+                      letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:6px;">
             Overall Verdict
           </div>
           <span class="verd {v_cls}">{verdict}</span>
         </div>
         <div style="text-align:right;">
-          <div style="font-family:'JetBrains Mono',monospace;font-size:.62rem;color:#364C5C;
+          <div style="font-family:'JetBrains Mono',monospace;font-size:.62rem;color:var(--dim);
                       margin-bottom:3px;">6 signals analysed</div>
-          <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;color:#364C5C;
+          <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;color:var(--dim);
                       letter-spacing:.1em;text-transform:uppercase;">C2PA · IBI · Groove · Loop · Spectral · SynthID</div>
         </div>
       </div>
@@ -234,69 +313,101 @@ def _render_forensics_card(fr: Optional[ForensicsResult]) -> None:
     """, unsafe_allow_html=True)
 
 
-def _render_structure_card(sr: Optional[StructureResult]) -> None:
-    bpm_fmt  = f"{sr.bpm:.1f}" if sr and isinstance(sr.bpm, float) else (sr.bpm if sr else "—")
-    key      = sr.key if sr else "—"
-    sections = sr.sections if sr else []
+# ---------------------------------------------------------------------------
+# Sync Readiness Checks (structural placement rules)
+# ---------------------------------------------------------------------------
 
-    pills = "".join(
-        f"<span class='s-pill'>{s.label} {s.start:.0f}s–{s.end:.0f}s</span>"
-        for s in sections
-    ) if sections else "<span style='font-family:var(--mono);font-size:.8rem;color:#364C5C;'>No section data</span>"
+def _render_sync_readiness(compliance: Optional[ComplianceReport]) -> None:
+    sting     = compliance.sting     if compliance else None
+    evolution = compliance.evolution if compliance else None
+    intro     = compliance.intro     if compliance else None
 
-    st.markdown(f"""
-    <div class="sig">
-      <div class="sig-head">Structure Analysis</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px;">
-        <div>
-          <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
-                      letter-spacing:.14em;text-transform:uppercase;color:#364C5C;margin-bottom:8px;">Tempo</div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:2.6rem;font-weight:700;
-                      color:#F5640A;line-height:1;">
-            {bpm_fmt}<span style="font-size:.8rem;font-weight:400;color:#364C5C;
-                                   margin-left:5px;font-family:'Chakra Petch',monospace;
-                                   letter-spacing:.1em;">BPM</span>
-          </div>
-        </div>
-        <div>
-          <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
-                      letter-spacing:.14em;text-transform:uppercase;color:#364C5C;margin-bottom:8px;">Key</div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:2.6rem;font-weight:700;
-                      color:#F5640A;line-height:1;">{key}</div>
-        </div>
-      </div>
-      <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
-                  letter-spacing:.14em;text-transform:uppercase;color:#364C5C;margin-bottom:10px;">Detected Sections</div>
-      <div style="display:flex;flex-wrap:wrap;">{pills}</div>
-    </div>
-    """, unsafe_allow_html=True)
+    if not (sting or evolution or intro):
+        st.markdown(
+            "<div style='color:var(--dim);font-size:.84rem;padding:8px 0;'>"
+            "No structural data available.</div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    if sting:
+        s_ratio   = sting.final_energy_ratio
+        ratio_str = f" — tail energy {s_ratio:.1%}" if s_ratio is not None else ""
+        flag_text = "Track ends with a fade — may bleed into dialogue or scene audio." if sting.flag else None
+        _sync_readiness_row(
+            icon="🔔", label="Sting / Ending Type",
+            value=sting.ending_type.title() + ratio_str,
+            ok=not sting.flag,
+            flag_text=flag_text,
+            tip="Detects how the track ends — critical for sync placement.<br><br>"
+                "<strong>Sting</strong>: sharp final hit with rapid silence after. ✓<br>"
+                "<strong>Cut</strong>: abrupt stop — neutral, workable. ✓<br>"
+                "<strong>Fade</strong>: gradual energy decline — can bleed into dialogue. ⚠ Flagged.",
+        )
+
+    if evolution:
+        n_stag   = evolution.stagnant_windows
+        e_passes = not evolution.flag
+        e_value  = f"{n_stag} stagnant window{'s' if n_stag != 1 else ''}" if evolution.flag else "Energy evolves consistently"
+        _sync_readiness_row(
+            icon="📊", label="4-8 Bar Energy Rule",
+            value=e_value,
+            ok=e_passes,
+            flag_text=evolution.detail if evolution.flag else None,
+            tip="Splits the track into 4-bar windows and measures spectral contrast evolution. "
+                "A delta below <strong>10%</strong> between windows flags stagnant energy.",
+        )
+
+    if intro:
+        i_ok    = not intro.flag
+        dur_str = f"{intro.intro_seconds:.1f}s"
+        source_suffix = (
+            " (allin1)" if intro.source == "allin1"
+            else " (pre-vocal estimate)" if intro.source == "whisper_fallback"
+            else ""
+        )
+        flag_text = (
+            f"Intro is {intro.intro_seconds:.1f}s — exceeds the {CONSTANTS.INTRO_MAX_SECONDS}s sync readiness limit."
+            if intro.flag else None
+        )
+        _sync_readiness_row(
+            icon="⏱", label="Intro Length",
+            value=dur_str + source_suffix,
+            ok=i_ok,
+            flag_text=flag_text,
+            tip=f"Sync readiness rule: intro sections longer than <strong>{CONSTANTS.INTRO_MAX_SECONDS}s</strong> risk losing the "
+                "picture editor's attention before the track establishes its feel.",
+        )
 
 
-def _render_metadata_card(sr: Optional[StructureResult]) -> None:
-    meta       = sr.metadata if sr else {}
-    title_str  = meta.get("title", "")  or ""
-    artist_str = meta.get("artist", "") or ""
-
-    title_html = (
-        f"<div style='font-family:\"JetBrains Mono\",monospace;font-size:1.4rem;"
-        f"font-weight:700;color:#D8E6F2;line-height:1.2;margin-bottom:5px;'>{title_str}</div>"
-        if title_str else
-        "<div style='font-size:.9rem;color:#364C5C;margin-bottom:5px;'>No tags found</div>"
+def _sync_readiness_row(icon: str, label: str, value: str, ok: bool,
+                        flag_text: Optional[str], tip: str) -> None:
+    status_color = "#0DF5A0" if ok else "#FF6B35"
+    status_icon  = "✓" if ok else "⚠"
+    st.markdown(
+        f"<div style='display:flex;align-items:flex-start;gap:10px;"
+        f"padding:8px 0;border-bottom:1px solid var(--border-hr);'>"
+        f"<div style='font-size:.9rem;flex-shrink:0;margin-top:1px;'>{icon}</div>"
+        f"<div style='flex:1;'>"
+        f"<div style='display:flex;align-items:center;gap:6px;margin-bottom:2px;'>"
+        f"<span style='font-family:\"Chakra Petch\",monospace;font-size:.6rem;font-weight:600;"
+        f"letter-spacing:.07em;color:var(--muted);text-transform:uppercase;'>{label}</span>"
+        f"<span class='tip-wrap'><span class='tip-icon'>?</span>"
+        f"<span class='tip-box'>{tip}</span></span>"
+        f"</div>"
+        f"<div style='font-family:\"JetBrains Mono\",monospace;font-size:.74rem;"
+        f"color:{status_color};'>{status_icon} {value}</div>"
+        + (f"<div style='font-family:\"Figtree\",sans-serif;font-size:.73rem;"
+           f"color:#FF6B35;margin-top:3px;line-height:1.45;'>{flag_text}</div>"
+           if flag_text else "")
+        + "</div></div>",
+        unsafe_allow_html=True,
     )
-    artist_html = (
-        f"<div style='font-family:\"Chakra Petch\",monospace;font-size:.6rem;"
-        f"font-weight:600;color:#F5640A;letter-spacing:.12em;text-transform:uppercase;'>{artist_str}</div>"
-        if artist_str else ""
-    )
 
-    st.markdown(f"""
-    <div class="sig" style="margin-bottom:14px;">
-      <div class="sig-head">Track Metadata</div>
-      {title_html}
-      {artist_html}
-    </div>
-    """, unsafe_allow_html=True)
 
+# ---------------------------------------------------------------------------
+# Discovery & Licensing
+# ---------------------------------------------------------------------------
 
 def _render_legal_and_discovery(result: AnalysisResult) -> None:
     if result.legal:
@@ -307,10 +418,10 @@ def _render_legal_and_discovery(result: AnalysisResult) -> None:
     st.markdown("<div style='height:20px;'></div>", unsafe_allow_html=True)
     st.markdown("""
     <div style="font-family:'Chakra Petch',monospace;font-size:.58rem;font-weight:600;
-                letter-spacing:.18em;text-transform:uppercase;color:#364C5C;
+                letter-spacing:.18em;text-transform:uppercase;color:var(--dim);
                 display:flex;align-items:center;gap:10px;margin-bottom:14px;">
-      <span>◈ Discovery Engine</span>
-      <div style="flex:1;height:1px;background:rgba(255,255,255,.055);"></div>
+      <span>◈ Similar Tracks</span>
+      <div style="flex:1;height:1px;background:var(--border-hr);"></div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -318,9 +429,10 @@ def _render_legal_and_discovery(result: AnalysisResult) -> None:
         rows = ""
         for t in result.similar_tracks:
             btn = (
-                f'<a href="{t.youtube_url}" target="_blank" class="t-btn">▶ Preview</a>'
+                f'<a href="{t.youtube_url}" target="_blank" rel="noopener noreferrer"'
+                f' class="t-btn" aria-label="Preview {t.title} by {t.artist} on YouTube">▶ Preview</a>'
                 if t.youtube_url
-                else '<span class="t-btn" style="opacity:.3;">No link</span>'
+                else '<button disabled class="t-btn" style="opacity:.3;cursor:not-allowed;">No link</button>'
             )
             rows += f"""
             <div class="t-row">
@@ -330,13 +442,13 @@ def _render_legal_and_discovery(result: AnalysisResult) -> None:
         st.markdown(f"<div class='sig' style='padding:18px;'>{rows}</div>", unsafe_allow_html=True)
     else:
         st.markdown(
-            "<div style='color:#364C5C;font-size:.84rem;'>No similar tracks found.</div>",
+            "<div style='color:var(--dim);font-size:.84rem;'>No similar tracks found.</div>",
             unsafe_allow_html=True,
         )
 
 
 # ---------------------------------------------------------------------------
-# Lyric analysis + compliance section
+# Lyrics & Content Audit
 # ---------------------------------------------------------------------------
 
 def _render_lyric_section(result: AnalysisResult) -> None:
@@ -346,27 +458,12 @@ def _render_lyric_section(result: AnalysisResult) -> None:
     sections   = result.structure.sections if result.structure else []
 
     flags    = compliance.flags    if compliance else []
-    sting    = compliance.sting    if compliance else None
-    evolution = compliance.evolution if compliance else None
-    intro    = compliance.intro    if compliance else None
     grade    = compliance.grade    if compliance else "N/A"
 
     flagged_ts  = {f.timestamp_s for f in flags}
     flags_by_ts: dict[int, list[ComplianceFlag]] = {}
     for f in flags:
         flags_by_ts.setdefault(f.timestamp_s, []).append(f)
-
-    st.markdown("""
-    <div style="margin-top:44px;margin-bottom:20px;">
-      <div style="font-family:'Chakra Petch',monospace;font-size:.58rem;font-weight:600;
-                  letter-spacing:.18em;text-transform:uppercase;color:#364C5C;
-                  display:flex;align-items:center;gap:10px;">
-        <span>◈ Lyric Analysis & Compliance Audit</span>
-        <div style="flex:1;height:1px;background:rgba(255,255,255,.055);"></div>
-        <span style="font-size:.52rem;">Whisper AI</span>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
 
     # Lyric authorship banner
     if authorship:
@@ -380,7 +477,7 @@ def _render_lyric_section(result: AnalysisResult) -> None:
 
         def _note_html(note: str) -> str:
             arrow      = "✓" if "✓" in note else "▲"
-            note_color = "#7A95AA" if "✓" in note else "#D8E6F2"
+            note_color = "var(--muted)" if "✓" in note else "var(--text)"
             return (
                 f"<div style='display:flex;align-items:center;gap:6px;padding:3px 0;'>"
                 f"<span style='color:{av_color};font-size:.7rem;flex-shrink:0;'>{arrow}</span>"
@@ -401,7 +498,7 @@ def _render_lyric_section(result: AnalysisResult) -> None:
                           color:{av_color};letter-spacing:.1em;text-transform:uppercase;">
                 Lyric Authorship — {sig_str}
               </div>
-              <div style="font-family:'Figtree',sans-serif;font-size:.74rem;color:#7A95AA;margin-top:2px;">
+              <div style="font-family:'Figtree',sans-serif;font-size:.74rem;color:var(--muted);margin-top:2px;">
                 {rob_str}Note: short creative text is harder to classify than prose.</div>
             </div>
           </div>
@@ -417,13 +514,13 @@ def _render_lyric_section(result: AnalysisResult) -> None:
     with col_lyr:
         st.markdown("""
         <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
-                    letter-spacing:.16em;text-transform:uppercase;color:#364C5C;
+                    letter-spacing:.16em;text-transform:uppercase;color:var(--dim);
                     margin-bottom:10px;">Formatted Lyrics — Click timestamp to jump</div>
         """, unsafe_allow_html=True)
 
         if not segments:
             st.markdown(
-                "<div style='color:#364C5C;font-size:.84rem;padding:20px 0;'>"
+                "<div style='color:var(--dim);font-size:.84rem;padding:20px 0;'>"
                 "No lyrics detected — track may be instrumental.</div>",
                 unsafe_allow_html=True,
             )
@@ -434,7 +531,7 @@ def _render_lyric_section(result: AnalysisResult) -> None:
                     f"<div style='font-family:\"Chakra Petch\",monospace;font-size:.6rem;"
                     f"font-weight:700;color:#F5640A;letter-spacing:.14em;text-transform:uppercase;"
                     f"margin:16px 0 6px;padding-top:14px;"
-                    f"border-top:1px solid rgba(255,255,255,.055);'>"
+                    f"border-top:1px solid var(--border-hr);'>"
                     f"[ {sec_label} ]</div>",
                     unsafe_allow_html=True,
                 )
@@ -449,6 +546,7 @@ def _render_lyric_section(result: AnalysisResult) -> None:
                     with c_btn:
                         btn_type = "primary" if is_flagged else "secondary"
                         if st.button(fmt_ts(ts_s), key=f"lyr_{id(seg)}_{ts_s}",
+                                     help=f"Jump to {fmt_ts(ts_s)} in the audio player",
                                      use_container_width=True, type=btn_type):
                             st.session_state.start_time = ts_s
                             st.session_state.player_key = st.session_state.get("player_key", 0) + 1
@@ -457,7 +555,7 @@ def _render_lyric_section(result: AnalysisResult) -> None:
                         if is_flagged:
                             ts_flags   = flags_by_ts.get(ts_s, [])
                             confirmed  = any(f.confidence == "confirmed" for f in ts_flags)
-                            line_color = "#D8E6F2" if confirmed else "#A8B8C8"
+                            line_color = "var(--text)" if confirmed else "var(--muted)"
                             pills_html = " ".join(issue_pill(f) for f in ts_flags)
                             st.markdown(
                                 f"<div style='padding:7px 0;font-family:\"Figtree\",sans-serif;"
@@ -468,7 +566,7 @@ def _render_lyric_section(result: AnalysisResult) -> None:
                         else:
                             st.markdown(
                                 f"<div style='padding:7px 0;font-family:\"Figtree\",sans-serif;"
-                                f"font-size:.88rem;color:#7A95AA;line-height:1.4;'>{text}</div>",
+                                f"font-size:.88rem;color:var(--muted);line-height:1.4;'>{text}</div>",
                                 unsafe_allow_html=True,
                             )
 
@@ -502,11 +600,11 @@ def _render_lyric_section(result: AnalysisResult) -> None:
             for t, fl in first.items():
                 pill = issue_pill(fl, size)
                 if counts[t] > 1:
-                    badge_color = "#C8E86A" if fl.confidence == "potential" else "#7A95AA"
+                    badge_color = "#C8E86A" if fl.confidence == "potential" else "var(--muted)"
                     pill += (
                         f"<span style='font-family:\"JetBrains Mono\",monospace;font-size:.52rem;"
                         f"font-weight:600;padding:1px 5px;border-radius:3px;"
-                        f"background:rgba(255,255,255,.06);color:{badge_color};"
+                        f"background:var(--badge-bg);color:{badge_color};"
                         f"margin-left:3px;'>×{counts[t]}</span>"
                     )
                 parts.append(pill)
@@ -519,7 +617,7 @@ def _render_lyric_section(result: AnalysisResult) -> None:
         <div class="sig" style="margin-bottom:16px;">
           <div class="sig-head">Sync Compliance Grade
             <span class="tip-wrap" style="margin-left:6px;"><span class="tip-icon">?</span>
-              <span class="tip-box">Gallo-Method compliance scoring for sync licensing.<br><br>
+              <span class="tip-box">Sync readiness scoring for sync licensing.<br><br>
               <strong>A</strong> — No issues. Clear for submission.<br>
               <strong>B</strong> — Minor or potential flags only. Confirm clearances.<br>
               <strong>C</strong> — Explicit/violent content or multiple brand mentions.<br>
@@ -535,7 +633,7 @@ def _render_lyric_section(result: AnalysisResult) -> None:
               <div style="font-family:'Chakra Petch',monospace;font-size:.58rem;font-weight:600;
                           color:{grade_color};letter-spacing:.1em;text-transform:uppercase;
                           margin-bottom:5px;">{issue_count_label}</div>
-              <div style="font-family:'Figtree',sans-serif;font-size:.8rem;color:#7A95AA;
+              <div style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);
                           line-height:1.55;">{grade_reason}</div>
             </div>
           </div>
@@ -559,7 +657,7 @@ def _render_lyric_section(result: AnalysisResult) -> None:
                     flag          = row["flag"]
                     all_flags_row = [flag] + row["extra"]
                     is_potential  = flag.confidence == "potential"
-                    text_color    = "#7A95AA" if is_potential else "#D8E6F2"
+                    text_color    = "var(--muted)" if is_potential else "var(--text)"
                     text_preview  = flag.text[:52] + ("…" if len(flag.text) > 52 else "")
                     review_badge  = (
                         "<span style='font-family:\"Chakra Petch\",monospace;font-size:.5rem;"
@@ -574,6 +672,7 @@ def _render_lyric_section(result: AnalysisResult) -> None:
                     with c_ts:
                         if st.button(fmt_ts(ts_s),
                                      key=f"{prefix}_{i}_{ts_s}_{flag.issue_type}",
+                                     help=f"Jump to {fmt_ts(ts_s)} — {flag.issue_type} flag",
                                      use_container_width=True):
                             st.session_state.start_time = ts_s
                             st.session_state.player_key = st.session_state.get("player_key", 0) + 1
@@ -585,19 +684,19 @@ def _render_lyric_section(result: AnalysisResult) -> None:
                             f"<div style='font-family:\"JetBrains Mono\",monospace;font-size:.74rem;"
                             f"color:{text_color};margin-bottom:2px;'>{text_preview}</div>"
                             f"<div style='font-family:\"Figtree\",sans-serif;font-size:.75rem;"
-                            f"color:#364C5C;line-height:1.4;margin-bottom:6px;'>"
+                            f"color:var(--dim);line-height:1.4;margin-bottom:6px;'>"
                             f"{flag.recommendation}</div>",
                             unsafe_allow_html=True,
                         )
                     st.markdown(
-                        "<hr style='border:none;border-top:1px solid rgba(255,255,255,.04);margin:2px 0 6px;'>",
+                        "<hr style='border:none;border-top:1px solid var(--border-hr);margin:2px 0 6px;'>",
                         unsafe_allow_html=True,
                     )
 
             if conf_flags:
                 st.markdown("""
                 <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
-                            letter-spacing:.16em;text-transform:uppercase;color:#364C5C;
+                            letter-spacing:.16em;text-transform:uppercase;color:var(--dim);
                             margin-bottom:10px;">Confirmed Issues — Click to Jump</div>
                 """, unsafe_allow_html=True)
                 _render_flag_rows(conf_flags, "conf")
@@ -621,86 +720,6 @@ def _render_lyric_section(result: AnalysisResult) -> None:
             </div>
             """, unsafe_allow_html=True)
 
-    # Gallo-Method structural checks
-    if sting or evolution or intro:
-        st.markdown("""
-        <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
-                    letter-spacing:.16em;text-transform:uppercase;color:#364C5C;
-                    margin-top:22px;margin-bottom:10px;">
-          Gallo-Method Structural Checks
-        </div>
-        """, unsafe_allow_html=True)
-
-        if sting:
-            s_ratio = sting.final_energy_ratio
-            ratio_str = f" — tail energy {s_ratio:.1%}" if s_ratio is not None else ""
-            flag_text = "Track ends with a fade — may bleed into dialogue or scene audio." if sting.flag else None
-            _gallo_row(
-                icon="🔔", label="Sting / Ending Type",
-                value=sting.ending_type.title() + ratio_str,
-                ok=not sting.flag,
-                flag_text=flag_text,
-                tip="Detects how the track ends — critical for sync placement.<br><br>"
-                    "<strong>Sting</strong>: sharp final hit with rapid silence after. ✓<br>"
-                    "<strong>Cut</strong>: abrupt stop — neutral, workable. ✓<br>"
-                    "<strong>Fade</strong>: gradual energy decline — can bleed into dialogue. ⚠ Flagged.",
-            )
-
-        if evolution:
-            n_stag   = evolution.stagnant_windows
-            e_passes = not evolution.flag
-            e_value  = f"{n_stag} stagnant window{'s' if n_stag != 1 else ''}" if evolution.flag else "Energy evolves consistently"
-            _gallo_row(
-                icon="📊", label="4-8 Bar Energy Rule",
-                value=e_value,
-                ok=e_passes,
-                flag_text=evolution.detail if evolution.flag else None,
-                tip="Splits the track into 4-bar windows and measures spectral contrast evolution. "
-                    "A delta below <strong>10%</strong> between windows flags stagnant energy.",
-            )
-
-        if intro:
-            i_ok    = not intro.flag
-            dur_str = f"{intro.intro_seconds:.1f}s"
-            source_suffix = " (allin1)" if intro.source == "allin1" else " (pre-vocal estimate)" if intro.source == "whisper_fallback" else ""
-            flag_text = (
-                f"Intro is {intro.intro_seconds:.1f}s — exceeds the {CONSTANTS.INTRO_MAX_SECONDS}s Gallo-Method limit."
-                if intro.flag else None
-            )
-            _gallo_row(
-                icon="⏱", label="Intro Length",
-                value=dur_str + source_suffix,
-                ok=i_ok,
-                flag_text=flag_text,
-                tip=f"Gallo-Method rule: intro sections longer than <strong>{CONSTANTS.INTRO_MAX_SECONDS}s</strong> risk losing the "
-                    "picture editor's attention before the track establishes its feel.",
-            )
-
-
-def _gallo_row(icon: str, label: str, value: str, ok: bool,
-               flag_text: Optional[str], tip: str) -> None:
-    status_color = "#0DF5A0" if ok else "#FF6B35"
-    status_icon  = "✓" if ok else "⚠"
-    st.markdown(
-        f"<div style='display:flex;align-items:flex-start;gap:10px;"
-        f"padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);'>"
-        f"<div style='font-size:.9rem;flex-shrink:0;margin-top:1px;'>{icon}</div>"
-        f"<div style='flex:1;'>"
-        f"<div style='display:flex;align-items:center;gap:6px;margin-bottom:2px;'>"
-        f"<span style='font-family:\"Chakra Petch\",monospace;font-size:.6rem;font-weight:600;"
-        f"letter-spacing:.07em;color:#7A95AA;text-transform:uppercase;'>{label}</span>"
-        f"<span class='tip-wrap'><span class='tip-icon'>?</span>"
-        f"<span class='tip-box'>{tip}</span></span>"
-        f"</div>"
-        f"<div style='font-family:\"JetBrains Mono\",monospace;font-size:.74rem;"
-        f"color:{status_color};'>{status_icon} {value}</div>"
-        + (f"<div style='font-family:\"Figtree\",sans-serif;font-size:.73rem;"
-           f"color:#FF6B35;margin-top:3px;line-height:1.45;'>{flag_text}</div>"
-           if flag_text else "")
-        + "</div></div>",
-        unsafe_allow_html=True,
-    )
-
 
 # ---------------------------------------------------------------------------
 # Footer
@@ -709,9 +728,9 @@ def _gallo_row(icon: str, label: str, value: str, ok: bool,
 def _render_footer() -> None:
     st.markdown("""
     <div style="text-align:center;margin-top:64px;margin-bottom:32px;
-                border-top:1px solid rgba(255,255,255,.04);padding-top:28px;">
+                border-top:1px solid var(--border-hr);padding-top:28px;">
       <span style="font-family:'Chakra Petch',monospace;font-size:.54rem;font-weight:500;
-                   color:#364C5C;letter-spacing:.22em;text-transform:uppercase;">
+                   color:var(--dim);letter-spacing:.22em;text-transform:uppercase;">
         End of Forensic Report &nbsp;·&nbsp; Strictly Confidential &nbsp;·&nbsp; Sync-Safe v2
       </span>
     </div>
@@ -743,10 +762,6 @@ def _assign_sections(
     return result
 
 
-def _grove_flag_label(ibi: float) -> str:
-    return _groove_label(ibi)
-
-
 def _groove_label(ibi: float) -> str:
     if ibi < 0:
         return "Insufficient data"
@@ -769,12 +784,12 @@ def _synthid_confidence(bins: int) -> str:
 
 def _grade_color(grade: str) -> str:
     return {
-        "A": "#0DF5A0",
-        "B": "#C8E86A",
+        "A": "var(--ok)",
+        "B": "#6ECC8A",
         "C": "#F5A623",
-        "D": "#FF6B35",
-        "F": "#FF3060",
-    }.get(grade, "#364C5C")
+        "D": "#F57A35",
+        "F": "var(--danger)",
+    }.get(grade, "var(--dim)")
 
 
 def _grade_reason(conf_flags: list[ComplianceFlag], grade: str) -> str:

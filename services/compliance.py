@@ -1,6 +1,6 @@
 """
 services/compliance.py
-Gallo-Method compliance checks — implements the ComplianceChecker protocol.
+Sync readiness compliance checks — implements the ComplianceChecker protocol.
 
 Five checks, one class:
   1. Sting / ending type  — librosa RMS + onset strength
@@ -129,7 +129,7 @@ _NER_RECOMMENDATIONS: dict[IssueType, str] = {
 
 class Compliance:
     """
-    Applies Gallo-Method compliance rules to audio and lyrics.
+    Applies sync readiness compliance rules to audio and lyrics.
 
     Implements: ComplianceChecker protocol (core/protocols.py)
 
@@ -170,7 +170,7 @@ class Compliance:
         beats: list[float],
     ) -> ComplianceReport:
         """
-        Run all Gallo-Method checks and return a typed ComplianceReport.
+        Run all sync readiness checks and return a typed ComplianceReport.
 
         Args:
             audio:      In-memory audio buffer.
