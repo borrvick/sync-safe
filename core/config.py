@@ -58,7 +58,7 @@ class SystemConstants:
     # Inter-beat interval variance below this → "Perfect Quantization" (AI signal)
     IBI_VARIANCE_THRESHOLD: float = 0.001
 
-    # Cross-correlation score above this → likely stock loop (Gallo-Method)
+    # Cross-correlation score above this → likely stock loop (sync readiness)
     LOOP_SCORE_CEILING: float = 0.98
 
     # Frequency above which spectral energy is checked for AI artefacts ("slop")

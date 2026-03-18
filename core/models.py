@@ -194,7 +194,7 @@ class IntroResult(BaseModel):
 
 
 class ComplianceReport(BaseModel):
-    """Aggregated output of all Gallo-Method compliance checks."""
+    """Aggregated output of all sync readiness compliance checks."""
 
     model_config = ConfigDict(frozen=True)
 

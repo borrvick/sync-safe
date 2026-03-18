@@ -18,7 +18,7 @@ Swap guide:
   TranscriptionProvider → swap Whisper for Deepgram, AssemblyAI, or Azure STT
   StructureAnalyzer  → swap allin1 for a custom BPM/section detector
   ForensicsAnalyzer  → swap the librosa heuristics for a trained classifier
-  ComplianceChecker  → swap Gallo-Method for a different editorial standard
+  ComplianceChecker  → swap sync readiness rules for a different editorial standard
   AuthorshipAnalyzer → swap RoBERTa for GPTZero API or a fine-tuned model
   TrackDiscovery     → swap Last.fm for Spotify, Soundcharts, or internal DB
   LegalLinksProvider → swap static URL templates for a live licensing API
@@ -165,7 +165,7 @@ class ComplianceChecker(Protocol):
     """
     Apply editorial compliance rules to audio and its transcript.
 
-    Implementations: services/compliance.py (Gallo-Method)
+    Implementations: services/compliance.py (sync readiness rules)
     Swap candidates:  A different editorial standard, a paid compliance API
     """
 

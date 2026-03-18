@@ -1,6 +1,6 @@
 """
 ui/styles.py
-Global CSS for the Sync-Safe Forensic Portal.
+Global CSS for the Sync-Safe Forensic Portal — dual light/dark theme.
 
 Inject once at app startup:
     from ui.styles import STYLES
@@ -12,28 +12,62 @@ STYLES = """
 @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;400;500;600;700&family=Figtree:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
 :root {
-  --bg:      #050911;
-  --s1:      #0B1320;
-  --s2:      #0F1A28;
-  --border:  rgba(255,255,255,0.06);
-  --accent:  #F5640A;
-  --ok:      #0DF5A0;
-  --danger:  #FF3060;
-  --text:    #D8E6F2;
-  --muted:   #7A95AA;
-  --dim:     #364C5C;
-  --ui:      'Chakra Petch', monospace;
-  --body:    'Figtree', sans-serif;
-  --mono:    'JetBrains Mono', monospace;
+  /* ── Light theme (default) ── */
+  --bg:           #EFF3F8;
+  --s1:           #FFFFFF;
+  --s2:           #E4EAF2;
+  --tip-bg:       #0D1B2A;
+  --border:       rgba(13,27,42,0.09);
+  --border-hr:    rgba(13,27,42,0.06);
+  --badge-bg:     rgba(13,27,42,0.05);
+  --accent:       #F5640A;
+  --ok:           #059669;
+  --danger:       #DC2626;
+  --text:         #0D1B2A;
+  --muted:        #4B6478;
+  --dim:          #8AA4B8;
+  --shadow:       0 1px 3px rgba(13,27,42,0.07), 0 4px 20px rgba(13,27,42,0.05), inset 0 1px 0 rgba(255,255,255,0.9);
+  --shadow-sm:    0 1px 2px rgba(13,27,42,0.06), 0 3px 10px rgba(13,27,42,0.05);
+  --pulse-drop:   0 4px 24px rgba(13,27,42,0.12);
+  --bg-dot:       rgba(13,27,42,0.04);
+  --audio-filter: none;
+  --ui:           'Chakra Petch', monospace;
+  --body:         'Figtree', sans-serif;
+  --mono:         'JetBrains Mono', monospace;
 }
 
+:root[data-theme="dark"] {
+  --bg:           #060C15;
+  --s1:           #0C1825;
+  --s2:           #111F30;
+  --tip-bg:       #0C1825;
+  --border:       rgba(255,255,255,0.07);
+  --border-hr:    rgba(255,255,255,0.055);
+  --badge-bg:     rgba(255,255,255,0.06);
+  --ok:           #10B981;
+  --danger:       #F43F5E;
+  --text:         #DCE8F4;
+  --muted:        #6E8EA8;
+  --dim:          #354F64;
+  --shadow:       0 8px 48px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03);
+  --shadow-sm:    0 4px 20px rgba(0,0,0,0.4);
+  --pulse-drop:   0 24px 80px rgba(0,0,0,0.65);
+  --bg-dot:       rgba(245,100,10,0.05);
+  --audio-filter: invert(1) hue-rotate(180deg);
+}
+
+/* NOTE: !important here overrides ALL font families including icon fonts (e.g. Material Symbols).
+   Streamlit's expander chevron icon is a font ligature — this rule makes it render as literal text.
+   We hide it via [data-testid="stIconMaterial"] and replace it with a CSS-only chevron.
+   See the "Expander sections" block below before removing this rule. */
 *, *::before, *::after { font-family: var(--body) !important; box-sizing: border-box; }
 
 /* ── Shell ── */
 [data-testid="stAppViewContainer"] {
   background-color: var(--bg) !important;
-  background-image: radial-gradient(circle, rgba(245,100,10,0.055) 1px, transparent 0) !important;
+  background-image: radial-gradient(circle, var(--bg-dot) 1px, transparent 0) !important;
   background-size: 30px 30px !important;
+  transition: background-color .3s ease !important;
 }
 [data-testid="stSidebar"]             { display: none !important; }
 [data-testid="stMainBlockContainer"]  { padding-top: 0 !important; }
@@ -42,8 +76,8 @@ STYLES = """
 
 /* ── Keyframes ── */
 @keyframes pulse-border {
-  0%,100% { box-shadow: 0 0 0 1px rgba(245,100,10,0.10), 0 24px 80px rgba(0,0,0,0.65); }
-  50%     { box-shadow: 0 0 0 1px rgba(245,100,10,0.28), 0 24px 80px rgba(0,0,0,0.65), 0 0 40px rgba(245,100,10,0.08); }
+  0%,100% { box-shadow: 0 0 0 1px rgba(245,100,10,0.10), var(--pulse-drop); }
+  50%     { box-shadow: 0 0 0 1px rgba(245,100,10,0.28), var(--pulse-drop), 0 0 40px rgba(245,100,10,0.08); }
 }
 @keyframes shimmer {
   from { background-position: -200% center; }
@@ -94,19 +128,74 @@ STYLES = """
 }
 
 /* ── Text Input ── */
-[data-testid="stTextInput"] input {
-  background: var(--bg) !important; border: 1px solid var(--border) !important;
-  border-radius: 10px !important; font-family: var(--mono) !important;
-  font-size: .88rem !important; color: var(--text) !important;
-  padding: 13px 16px !important; transition: border-color .2s, box-shadow .2s !important;
-}
-[data-testid="stTextInput"] input:focus {
-  border-color: var(--accent) !important;
-  box-shadow: 0 0 0 3px rgba(245,100,10,.1), 0 0 20px rgba(245,100,10,.06) !important;
+/* Structural resets — shared across both themes */
+[data-testid="stTextInput"] [data-baseweb="input"] {
+  border-radius: 10px !important;
+  box-shadow: none !important;
   outline: none !important;
+  transition: border-color .2s, box-shadow .2s !important;
 }
-[data-testid="stTextInput"] input::placeholder { color: var(--dim) !important; }
+[data-testid="stTextInput"] [data-baseweb="input"]:focus-within {
+  border-color: #F5640A !important;
+  box-shadow: 0 0 0 3px rgba(245,100,10,.1) !important;
+}
+[data-testid="stTextInput"] input {
+  border: none !important; outline: none !important; box-shadow: none !important;
+  font-family: 'JetBrains Mono', monospace !important;
+  font-size: .88rem !important;
+  caret-color: #F5640A !important;
+  padding: 13px 16px !important;
+}
 [data-testid="stTextInput"] label { display: none !important; }
+
+/* ── Light theme input ──
+   html:not([data-theme="dark"]) is unambiguous — active when no data-theme
+   attribute is present. Explicit hex values sidestep variable cascade issues.
+   color-scheme:light resets the browser UA form styles to light mode. */
+html:not([data-theme="dark"]) [data-testid="stTextInput"] [data-baseweb="input"],
+html:not([data-theme="dark"]) [data-testid="stTextInput"] [data-baseweb="input"] > div {
+  background: #FFFFFF !important;
+  border: 1px solid rgba(13,27,42,0.12) !important;
+  color-scheme: light !important;
+}
+html:not([data-theme="dark"]) [data-testid="stTextInput"] input {
+  background: #FFFFFF !important;
+  color: #1A2B3C !important;
+  -webkit-text-fill-color: #1A2B3C !important;
+}
+html:not([data-theme="dark"]) [data-testid="stTextInput"] input::placeholder {
+  color: #8AA4B8 !important;
+  -webkit-text-fill-color: #8AA4B8 !important;
+  opacity: 1 !important;
+}
+html:not([data-theme="dark"]) [data-testid="stTextInput"] input:-webkit-autofill {
+  -webkit-text-fill-color: #1A2B3C !important;
+  -webkit-box-shadow: 0 0 0 100px #FFFFFF inset !important;
+}
+
+/* ── Dark theme input ──
+   html[data-theme="dark"] is set by the theme-toggle JS on <html>.
+   color-scheme:dark resets UA form styles to dark mode. */
+html[data-theme="dark"] [data-testid="stTextInput"] [data-baseweb="input"],
+html[data-theme="dark"] [data-testid="stTextInput"] [data-baseweb="input"] > div {
+  background: #0C1825 !important;
+  border: 1px solid rgba(255,255,255,0.1) !important;
+  color-scheme: dark !important;
+}
+html[data-theme="dark"] [data-testid="stTextInput"] input {
+  background: #0C1825 !important;
+  color: #DCE8F4 !important;
+  -webkit-text-fill-color: #DCE8F4 !important;
+}
+html[data-theme="dark"] [data-testid="stTextInput"] input::placeholder {
+  color: #354F64 !important;
+  -webkit-text-fill-color: #354F64 !important;
+  opacity: 1 !important;
+}
+html[data-theme="dark"] [data-testid="stTextInput"] input:-webkit-autofill {
+  -webkit-text-fill-color: #DCE8F4 !important;
+  -webkit-box-shadow: 0 0 0 100px #0C1825 inset !important;
+}
 
 /* ── Primary Button ── */
 button[kind="primary"], [data-testid="stBaseButton-primary"] {
@@ -152,7 +241,8 @@ button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover {
 .sig {
   background: var(--s1); border: 1px solid var(--border); border-radius: 14px;
   padding: 26px 26px 20px; margin-bottom: 14px;
-  box-shadow: 0 8px 48px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.035);
+  box-shadow: var(--shadow);
+  transition: background .3s, box-shadow .3s;
 }
 .sig-head {
   font-family: var(--ui); font-size: .58rem; font-weight: 600;
@@ -184,16 +274,16 @@ button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover {
 .tip-wrap:hover .tip-icon { background:rgba(245,100,10,.28); }
 .tip-box {
   display:none; position:absolute; bottom:calc(100% + 8px); left:0;
-  background:#0D1926; border:1px solid rgba(245,100,10,.22);
-  color:#B8D0E0; font-size:.72rem; font-family:'Figtree',sans-serif;
+  background:var(--tip-bg); border:1px solid rgba(245,100,10,.22);
+  color:var(--text); font-size:.72rem; font-family:'Figtree',sans-serif;
   font-weight:400; line-height:1.55; letter-spacing:0; text-transform:none;
   padding:9px 13px; border-radius:7px; width:240px; z-index:9999;
-  box-shadow:0 8px 24px rgba(0,0,0,.45);
+  box-shadow:var(--shadow-sm);
   pointer-events:none;
 }
 .tip-box::after {
   content:''; position:absolute; top:100%; left:14px;
-  border:5px solid transparent; border-top-color:#0D1926;
+  border:5px solid transparent; border-top-color:var(--tip-bg);
 }
 .tip-wrap:hover .tip-box { display:block; }
 
@@ -230,6 +320,203 @@ button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover {
          transition:all .15s; }
 .t-btn:hover { color:var(--accent); border-color:var(--accent); }
 
+/* ── Expander sections ── */
+[data-testid="stExpander"] {
+  background: var(--s1) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 14px !important;
+  margin-bottom: 12px !important;
+  box-shadow: var(--shadow-sm) !important;
+  transition: background .3s, box-shadow .3s !important;
+  overflow: visible !important;
+}
+[data-testid="stExpander"] details,
+[data-testid="stExpander"] details[open] {
+  border-radius: 14px !important;
+  background: transparent !important;
+}
+
+/* Hide the native browser disclosure triangle */
+[data-testid="stExpander"] summary {
+  list-style: none !important;
+  -webkit-appearance: none !important;
+  padding: 16px 20px !important;
+  border-radius: 14px !important;
+  background: transparent !important;
+  cursor: pointer !important;
+  transition: background .15s !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+}
+[data-testid="stExpander"] summary::marker { content: '' !important; }
+[data-testid="stExpander"] summary::-webkit-details-marker { display: none !important; }
+
+/* Hide Streamlit's icon element entirely.
+   Our global * { font-family } overrides the Material Symbols icon font,
+   turning "keyboard_arrow_down" into visible literal text.
+   Strategy: hide ALL h3 children, then explicitly re-show only the label wrapper. */
+[data-testid="stExpander"] summary h3 > * {
+  display: none !important;
+}
+[data-testid="stExpander"] summary h3 > .stExpanderLabelWrapper {
+  display: inline-flex !important;
+  align-items: center !important;
+}
+/* Belt-and-suspenders: target by all known testids, aria-hidden, and class patterns */
+[data-testid="stIconMaterial"],
+[data-testid="stExpanderToggleIcon"],
+[data-testid="stExpander"] summary svg,
+[data-testid="stExpander"] summary [aria-hidden="true"],
+[data-testid="stExpander"] summary [class*="material"] {
+  display: none !important;
+}
+
+/* CSS-only chevron — no font, no glyph, always renders correctly */
+[data-testid="stExpander"] summary::before {
+  content: '' !important;
+  width: 7px !important;
+  height: 7px !important;
+  border-right: 2px solid var(--dim) !important;
+  border-bottom: 2px solid var(--dim) !important;
+  transform: rotate(-45deg) !important;
+  display: inline-block !important;
+  flex-shrink: 0 !important;
+  transition: transform .2s ease !important;
+  margin-top: 1px !important;
+}
+[data-testid="stExpander"] details[open] > summary::before {
+  transform: rotate(45deg) !important;
+  margin-top: -3px !important;
+}
+
+[data-testid="stExpander"] summary:hover { background: var(--s2) !important; }
+
+/* Open state — theme-aware tint */
+[data-testid="stExpander"] details[open] > summary {
+  background: var(--s2) !important;
+  border-radius: 14px 14px 0 0 !important;
+}
+
+/* Label text — only .stExpanderLabelWrapper p, nothing else */
+[data-testid="stExpander"] summary .stExpanderLabelWrapper p {
+  color: var(--text) !important;
+  font-family: var(--ui) !important;
+  font-size: .72rem !important;
+  font-weight: 600 !important;
+  letter-spacing: .1em !important;
+  text-transform: uppercase !important;
+  margin: 0 !important;
+}
+
+[data-testid="stExpander"] > div > div { padding: 0 20px 20px !important; }
+
+/* ── Theme FAB ── */
+#theme-fab {
+  position: fixed;
+  bottom: 28px;
+  right: 28px;
+  z-index: 99999;
+}
+#theme-toggle {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--s1);
+  color: var(--accent);
+  font-size: 1.15rem;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: transform .2s, border-color .2s, box-shadow .2s, background .3s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+#theme-toggle:hover {
+  transform: scale(1.12);
+  border-color: var(--accent);
+  box-shadow: 0 0 20px rgba(245,100,10,.3);
+}
+
+/* ── Skip-to-main-content link ── */
+.skip-link {
+  position: fixed;
+  top: -100%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 999999;
+  background: var(--s1);
+  color: var(--accent);
+  padding: 10px 22px;
+  border-radius: 8px;
+  border: 2px solid var(--accent);
+  font-family: var(--ui);
+  font-size: .78rem;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-decoration: none;
+  text-transform: uppercase;
+  white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+  transition: top .15s;
+}
+.skip-link:focus { top: 12px; }
+
+/* ── Global focus-visible ring ── */
+:focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px !important;
+}
+
+/* ── Per-element focus-visible overrides ── */
+button[kind="primary"]:focus-visible,
+[data-testid="stBaseButton-primary"]:focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 3px !important;
+  box-shadow: 0 0 0 4px rgba(245,100,10,.25), 0 4px 24px rgba(245,100,10,.35) !important;
+}
+button[kind="secondary"]:focus-visible,
+[data-testid="stBaseButton-secondary"]:focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px !important;
+  border-color: var(--accent) !important;
+}
+[data-testid="stTextInput"] input:focus-visible {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px rgba(245,100,10,.1), 0 0 20px rgba(245,100,10,.06) !important;
+  outline: none !important;
+}
+[data-testid="stExpander"] summary:focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: -2px !important;
+  border-radius: 14px !important;
+}
+#theme-toggle:focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 3px !important;
+  box-shadow: 0 0 0 4px rgba(245,100,10,.2) !important;
+}
+audio:focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px !important;
+  border-radius: 10px !important;
+}
+[data-testid="stLinkButton"] a:focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px !important;
+}
+
+/* ── Tooltip: keyboard access via focus-within ── */
+.tip-icon { cursor: pointer !important; }
+.tip-wrap:focus-within .tip-box { display: block !important; }
+.tip-icon:focus-visible {
+  outline: 2px solid var(--accent) !important;
+  border-radius: 50% !important;
+  outline-offset: 1px !important;
+}
+
 /* Misc */
 h1,h2,h3 { color:var(--text) !important; }
 p,li { color:var(--text); }
@@ -249,11 +536,6 @@ hr { border-color:var(--border) !important; }
   border-radius:10px !important; color:var(--text) !important;
   font-family:var(--mono) !important; font-size:.84rem !important;
 }
-[data-testid="stExpander"] {
-  background:var(--s1) !important; border:1px solid var(--border) !important;
-  border-radius:10px !important;
-}
-[data-testid="stExpander"] summary span { color:var(--muted) !important; }
 [data-testid="stLinkButton"] a {
   background:var(--s2) !important; border:1px solid var(--border) !important;
   color:var(--muted) !important; border-radius:10px !important;
@@ -264,6 +546,15 @@ hr { border-color:var(--border) !important; }
   border-color:var(--accent) !important; color:var(--accent) !important;
   background:rgba(245,100,10,.06) !important;
 }
-audio { border-radius:10px !important; filter:invert(1) hue-rotate(180deg) !important; }
+audio { border-radius:10px !important; filter:var(--audio-filter) !important; }
+
+/* ── Suppress gap from 0-height theme-injection iframe ── */
+[data-testid="stCustomComponentV1"]:has(iframe[height="0"]) {
+  height: 0 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
 </style>
 """
