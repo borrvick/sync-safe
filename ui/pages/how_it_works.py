@@ -421,13 +421,17 @@ def render_how_it_works() -> None:
                       margin-bottom:8px;">🔒 Stateless Assurance</div>
           <p style="font-family:'Figtree',sans-serif;font-size:.84rem;color:var(--muted);
                     line-height:1.65;margin:0;">
-            Every analysis runs in an ephemeral ZeroGPU session scoped to your browser tab.
-            Audio data is processed entirely in-memory using <code style="font-family:
+            Audio submitted for analysis is processed in-memory using <code style="font-family:
             'JetBrains Mono',monospace;font-size:.72rem;background:var(--badge-bg);
-            padding:1px 5px;border-radius:3px;">io.BytesIO</code> and is never written
-            to disk, cached, logged, or used for model training. When your session ends,
-            nothing persists. This is by design — unreleased tracks submitted for clearance
-            auditing remain yours alone.
+            padding:1px 5px;border-radius:3px;">io.BytesIO</code> where possible. Any
+            temporary files required by the analysis pipeline are written to isolated temp
+            directories and deleted immediately after processing via <code style="font-family:
+            'JetBrains Mono',monospace;font-size:.72rem;background:var(--badge-bg);
+            padding:1px 5px;border-radius:3px;">try/finally</code> cleanup — they do not
+            persist beyond the call that creates them. No audio is retained, logged, or
+            transmitted to any storage system after your session ends. All models — Whisper,
+            spaCy, allin1, librosa — run locally on the ZeroGPU instance. Your audio never
+            leaves the analysis server.
           </p>
         </div>
         """, unsafe_allow_html=True)

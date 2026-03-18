@@ -156,9 +156,9 @@ def render_legal() -> None:
                             margin-bottom:8px;">🔒 Stateless by Design</div>
                 <p style="font-family:'Figtree',sans-serif;font-size:.88rem;color:var(--muted);
                            line-height:1.65;margin:0;">
-                  Sync-Safe collects no personal data and stores no audio. Every analysis
-                  session is ephemeral. When your browser tab closes, nothing about your
-                  session persists anywhere.
+                  Sync-Safe collects no personal data and retains no audio after a session
+                  ends. All models run locally on the ZeroGPU server — your audio never
+                  leaves the analysis infrastructure.
                 </p>
               </div>
 
@@ -168,14 +168,17 @@ def render_legal() -> None:
               </h3>
               <p style="font-family:'Figtree',sans-serif;font-size:.88rem;color:var(--muted);
                         line-height:1.7;margin-bottom:24px;">
-                Audio submitted for analysis — whether via YouTube URL or direct file upload —
-                is processed entirely in-memory using <code style="font-family:'JetBrains Mono',
+                Audio submitted for analysis is processed in-memory using <code style="font-family:
+                'JetBrains Mono',monospace;font-size:.76rem;background:var(--badge-bg);
+                padding:1px 5px;border-radius:3px;">io.BytesIO</code> where possible. Some
+                analysis stages (structural analysis, compliance checks) require temporary
+                files on disk; these are written to isolated temp directories and deleted
+                immediately after processing via <code style="font-family:'JetBrains Mono',
                 monospace;font-size:.76rem;background:var(--badge-bg);padding:1px 5px;
-                border-radius:3px;">io.BytesIO</code> within a ZeroGPU session. No audio
-                is written to disk, cached to a database, stored in any cloud object store,
-                or transmitted to any third party other than the AI model APIs required for
-                analysis (Whisper, spaCy). These APIs process the audio in real time and
-                return results — they do not retain the audio after the call completes.
+                border-radius:3px;">try/finally</code> cleanup. No audio is cached to a
+                database, stored in any cloud object store, or retained after your session
+                ends. All models — Whisper, spaCy, allin1, librosa — run locally on the
+                ZeroGPU instance. Your audio never leaves the analysis server.
               </p>
 
               <h3 style="font-family:'Chakra Petch',monospace;font-size:.88rem;font-weight:700;
@@ -197,9 +200,9 @@ def render_legal() -> None:
               <p style="font-family:'Figtree',sans-serif;font-size:.88rem;color:var(--muted);
                         line-height:1.7;margin-bottom:24px;">
                 Application state (audio buffer, analysis results, current page) is held
-                in Streamlit's in-memory session state, scoped to your browser tab. This
-                state is never serialised to disk or transmitted to any storage system.
-                It is automatically discarded when the session ends.
+                in Streamlit's server-side in-memory session state. This state is never
+                serialised to disk or transmitted to any storage system, and is automatically
+                discarded when the session ends.
               </p>
 
               <h3 style="font-family:'Chakra Petch',monospace;font-size:.88rem;font-weight:700;
@@ -208,9 +211,10 @@ def render_legal() -> None:
               </h3>
               <p style="font-family:'Figtree',sans-serif;font-size:.88rem;color:var(--muted);
                         line-height:1.7;margin-bottom:24px;">
-                All API keys (Last.fm, Whisper service credentials) are stored as environment
-                variables in Hugging Face Secrets and are never exposed to the client,
-                logged, or included in any response payload.
+                All API keys (Last.fm) are stored as environment variables in Hugging Face
+                Secrets and are never exposed to the client, logged, or included in any
+                response payload. All AI models run locally — no external model API
+                credentials are required or used.
               </p>
 
               <h3 style="font-family:'Chakra Petch',monospace;font-size:.88rem;font-weight:700;
