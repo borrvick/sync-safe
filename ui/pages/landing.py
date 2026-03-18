@@ -226,18 +226,9 @@ def render_landing(logo_b64: str) -> None:
 
 
 def _submit_source(source) -> None:
-    """Ingest the audio source and transition to the report page."""
-    from services.ingestion import Ingestion
-    from core.exceptions import SyncSafeError
-
-    try:
-        with st.spinner("Fetching audio…"):
-            audio = Ingestion().load(source)
-        st.session_state.audio          = audio
-        st.session_state.analysis       = None
-        st.session_state.page           = "report"
-        st.rerun()
-    except SyncSafeError as exc:
-        st.error(f"Could not load audio: {exc}")
-    except Exception as exc:
-        st.error(f"Unexpected error: {exc}")
+    """Store source and navigate to the loading page."""
+    st.session_state.source   = source
+    st.session_state.audio    = None
+    st.session_state.analysis = None
+    st.session_state.page     = "loading"
+    st.rerun()

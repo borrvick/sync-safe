@@ -38,6 +38,7 @@ st.markdown(STYLES, unsafe_allow_html=True)
 
 for key, default in [
     ("page",        "landing"),
+    ("source",      None),
     ("audio",       None),
     ("analysis",    None),
     ("start_time",  0),
@@ -53,57 +54,19 @@ if st.session_state.page == "landing":
     render_landing(_LOGO_B64)
     st.stop()
 
+if st.session_state.page == "loading":
+    from ui.pages.loading import render_loading
+    render_loading(st.session_state.source)
+    st.stop()
+
 # ── Report page ───────────────────────────────────────────────────────────────
 
-audio = st.session_state.audio
-if audio is None:
+audio    = st.session_state.audio
+analysis = st.session_state.analysis
+
+if audio is None or analysis is None:
     st.session_state.page = "landing"
     st.rerun()
 
-# Run analysis once and cache in session state
-if st.session_state.analysis is None:
-    from pipeline import Pipeline
-    with st.spinner("Transcribing lyrics…"):
-        pipeline = Pipeline()
-        # Run transcription + structure first so we can show partial progress
-        transcript = pipeline._run_step(
-            "transcription", lambda: pipeline._transcription.transcribe(audio)
-        )
-    with st.spinner("Analysing structure & forensics…"):
-        structure  = pipeline._run_step("structure",  lambda: pipeline._structure.analyze(audio))
-        forensics  = pipeline._run_step("forensics",  lambda: pipeline._forensics.analyze(audio))
-    with st.spinner("Running compliance audit & authorship check…"):
-        sections   = structure.sections if structure else []
-        beats      = structure.beats    if structure else []
-        compliance = pipeline._run_step(
-            "compliance",
-            lambda: pipeline._compliance.check(audio, transcript or [], sections, beats),
-        )
-        authorship = pipeline._run_step(
-            "authorship",
-            lambda: pipeline._authorship.analyze(transcript or []),
-        )
-    with st.spinner("Querying Last.fm…"):
-        title  = structure.metadata.get("title", "")  if structure else ""
-        artist = structure.metadata.get("artist", "") if structure else ""
-        similar = pipeline._run_step(
-            "discovery", lambda: pipeline._discovery.find_similar(title, artist)
-        )
-        legal = pipeline._run_step(
-            "legal", lambda: pipeline._legal.get_links(title, artist)
-        )
-
-    from core.models import AnalysisResult
-    st.session_state.analysis = AnalysisResult(
-        audio=audio,
-        structure=structure,
-        forensics=forensics,
-        transcript=transcript or [],
-        compliance=compliance,
-        authorship=authorship,
-        similar_tracks=similar or [],
-        legal=legal,
-    )
-
 from ui.pages.report import render_report
-render_report(_LOGO_B64, audio, st.session_state.analysis)
+render_report(_LOGO_B64, audio, analysis)
