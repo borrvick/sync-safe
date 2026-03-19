@@ -103,313 +103,223 @@ def render_how_it_works() -> None:
         # ── Stage 1: AI Authorship Detection ─────────────────────────────────
         with st.expander("Stage 1 — AI Authorship Detection", expanded=True):
             st.markdown("""
-            <div style="padding:4px 0 8px;">
-              <p style="font-family:'Figtree',sans-serif;font-size:.88rem;color:var(--muted);
-                        line-height:1.7;margin-bottom:20px;">
-                The authorship verdict draws on four independent signals. Each signal
-                can flag AI origin independently — they are combined for a final
-                <strong>Likely AI / Uncertain / Likely Human</strong> verdict.
-              </p>
-
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:8px;">
-
-                <div style="background:var(--s2);border-radius:10px;padding:18px;">
+            <p style="font-family:'Figtree',sans-serif;font-size:.88rem;color:var(--muted);
+                      line-height:1.7;margin:4px 0 20px;">
+              The authorship verdict draws on four independent signals. Each signal
+              can flag AI origin independently — they are combined for a final
+              <strong>Likely AI / Uncertain / Likely Human</strong> verdict.
+            </p>
+            """, unsafe_allow_html=True)
+            c1, c2 = st.columns(2, gap="small")
+            with c1:
+                st.markdown("""
+                <div style="background:var(--s2);border-radius:10px;padding:18px;margin-bottom:12px;">
                   <div style="font-family:'Chakra Petch',monospace;font-size:.58rem;font-weight:700;
                               color:var(--accent);letter-spacing:.14em;text-transform:uppercase;
                               margin-bottom:8px;">🔏 C2PA Manifest</div>
-                  <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);
-                             line-height:1.6;">
-                    The Coalition for Content Provenance and Authenticity (C2PA) standard
-                    embeds cryptographically signed metadata directly into audio and image
-                    files at the point of creation. AI generation tools that implement C2PA
-                    write a <code style="font-family:'JetBrains Mono',monospace;font-size:.72rem;
-                    background:var(--badge-bg);padding:1px 5px;border-radius:3px;">
-                    c2pa.ai.generative</code> assertion into the manifest.
-                    Sync-Safe parses this manifest using <code style="font-family:'JetBrains Mono',
-                    monospace;font-size:.72rem;background:var(--badge-bg);padding:1px 5px;
-                    border-radius:3px;">c2pa-python</code> v2.3+ and surfaces any AI origin
-                    claims. A positive C2PA assertion is the strongest possible signal —
-                    cryptographically certified by the creating tool.
+                  <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);line-height:1.6;margin:0;">
+                    The C2PA standard embeds cryptographically signed metadata into audio files at
+                    creation. AI tools that implement C2PA write a
+                    <code style="font-family:'JetBrains Mono',monospace;font-size:.72rem;
+                    background:var(--badge-bg);padding:1px 5px;border-radius:3px;">c2pa.ai.generative</code>
+                    assertion into the manifest. Sync-Safe parses this using
+                    <code style="font-family:'JetBrains Mono',monospace;font-size:.72rem;
+                    background:var(--badge-bg);padding:1px 5px;border-radius:3px;">c2pa-python</code> v2.3+.
+                    A positive assertion is the strongest possible signal — cryptographically certified.
                   </p>
-                </div>
-
-                <div style="background:var(--s2);border-radius:10px;padding:18px;">
-                  <div style="font-family:'Chakra Petch',monospace;font-size:.58rem;font-weight:700;
-                              color:var(--accent);letter-spacing:.14em;text-transform:uppercase;
-                              margin-bottom:8px;">🥁 IBI Variance</div>
-                  <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);
-                             line-height:1.6;">
-                    Human drummers exhibit natural micro-timing imperfections — a phenomenon
-                    musicians call "groove." These inter-beat interval (IBI) deviations
-                    typically range from ±8–30ms variance. AI-generated drums, by contrast,
-                    are locked to a mathematical grid, often with variance below 0.5ms².
-                    Sync-Safe uses <code style="font-family:'JetBrains Mono',monospace;
-                    font-size:.72rem;background:var(--badge-bg);padding:1px 5px;
-                    border-radius:3px;">librosa</code> beat tracking to extract IBI sequences
-                    and flags "Perfect Quantization" when variance falls below threshold —
-                    a strong statistical signal of AI or MIDI-locked generation.
-                  </p>
-                </div>
-
+                </div>""", unsafe_allow_html=True)
+                st.markdown("""
                 <div style="background:var(--s2);border-radius:10px;padding:18px;">
                   <div style="font-family:'Chakra Petch',monospace;font-size:.58rem;font-weight:700;
                               color:var(--accent);letter-spacing:.14em;text-transform:uppercase;
                               margin-bottom:8px;">📡 Spectral Fingerprint</div>
-                  <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);
-                             line-height:1.6;">
+                  <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);line-height:1.6;margin:0;">
                     Most AI audio synthesis models exhibit characteristic artifacts in the
-                    high-frequency spectrum (16 kHz+). This region is heavily shaped by
-                    the mel-filterbank and vocoder layers used in diffusion-based generation.
-                    Sync-Safe analyzes spectral contrast across frequency bands and flags
-                    anomalous distributions in the 16 kHz+ range that deviate from patterns
-                    typical of recorded acoustic instruments and studio-produced audio.
+                    high-frequency spectrum (16 kHz+), shaped by mel-filterbank and vocoder layers.
+                    Sync-Safe analyzes spectral contrast across frequency bands and flags anomalous
+                    distributions in the 16 kHz+ range that deviate from patterns typical of
+                    recorded acoustic instruments and studio-produced audio.
                   </p>
-                </div>
-
+                </div>""", unsafe_allow_html=True)
+            with c2:
+                st.markdown("""
+                <div style="background:var(--s2);border-radius:10px;padding:18px;margin-bottom:12px;">
+                  <div style="font-family:'Chakra Petch',monospace;font-size:.58rem;font-weight:700;
+                              color:var(--accent);letter-spacing:.14em;text-transform:uppercase;
+                              margin-bottom:8px;">🥁 IBI Variance</div>
+                  <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);line-height:1.6;margin:0;">
+                    Human drummers exhibit natural micro-timing imperfections — inter-beat interval
+                    (IBI) deviations typically ranging ±8–30ms. AI-generated drums are locked to a
+                    mathematical grid, often below 0.5ms² variance. Sync-Safe uses
+                    <code style="font-family:'JetBrains Mono',monospace;font-size:.72rem;
+                    background:var(--badge-bg);padding:1px 5px;border-radius:3px;">librosa</code>
+                    beat tracking and flags "Perfect Quantization" when variance falls below threshold.
+                  </p>
+                </div>""", unsafe_allow_html=True)
+                st.markdown("""
                 <div style="background:var(--s2);border-radius:10px;padding:18px;">
                   <div style="font-family:'Chakra Petch',monospace;font-size:.58rem;font-weight:700;
                               color:var(--accent);letter-spacing:.14em;text-transform:uppercase;
                               margin-bottom:8px;">🔁 Loop Detection</div>
-                  <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);
-                             line-height:1.6;">
-                    AI composition tools and stock music libraries frequently reuse identical
-                    audio segments across a track. Sync-Safe splits the audio into 4-bar and
-                    8-bar windows, extracts mel-spectrogram fingerprints for each, and computes
-                    cross-correlation across all segment pairs. A correlation score above
-                    <strong>0.98</strong> flags the segment pair as a likely stock loop or
-                    AI repetition artifact — a signal that the track may not be original
-                    compositional work.
+                  <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);line-height:1.6;margin:0;">
+                    Sync-Safe splits audio into 4-bar and 8-bar windows, extracts mel-spectrogram
+                    fingerprints for each, and computes cross-correlation across all segment pairs.
+                    A score above <strong>0.98</strong> flags the pair as a likely stock loop or
+                    AI repetition artifact — a signal the track may not be original compositional work.
                   </p>
-                </div>
-
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
+                </div>""", unsafe_allow_html=True)
+            st.markdown('<div style="padding-bottom:8px;"></div>', unsafe_allow_html=True)
 
         # ── Stage 2: Sync Compliance ──────────────────────────────────────────
         with st.expander("Stage 2 — Sync Compliance Auditing"):
             st.markdown("""
-            <div style="padding:4px 0 8px;">
-              <p style="font-family:'Figtree',sans-serif;font-size:.88rem;color:var(--muted);
-                        line-height:1.7;margin-bottom:20px;">
-                Sync licensing has implicit production standards that most AI-generated and
-                stock library tracks fail. These three checks identify tracks that will
-                cause problems for broadcast editors in post-production.
-              </p>
-
-              <div style="display:flex;flex-direction:column;gap:16px;">
-
-                <div style="background:var(--s2);border-radius:10px;padding:18px;
-                            border-left:3px solid var(--accent);">
-                  <div style="font-family:'Chakra Petch',monospace;font-size:.62rem;font-weight:700;
-                              color:var(--text);letter-spacing:.1em;margin-bottom:10px;">
-                    🔔 Sting Check — Does the track end cleanly?
-                  </div>
-                  <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);
-                             line-height:1.65;">
-                    A <strong>"sting"</strong> is a track that ends on a hard cut — the music
-                    stops cleanly rather than fading out or ringing. This is the preferred
-                    format for sync because editors can cut cleanly to dialogue or SFX without
-                    a tail of reverb or fade bleeding into the scene. Sync-Safe measures the
-                    RMS energy of the final 2 seconds as a ratio against the track mean. If the
-                    ratio falls below the configured threshold, or if the track ends on a
-                    root-note hold, the track is flagged. Conversely, tracks that fade or ring
-                    out may require editorial trimming before broadcast use.
-                  </p>
-                </div>
-
-                <div style="background:var(--s2);border-radius:10px;padding:18px;
-                            border-left:3px solid var(--accent);">
-                  <div style="font-family:'Chakra Petch',monospace;font-size:.62rem;font-weight:700;
-                              color:var(--text);letter-spacing:.1em;margin-bottom:10px;">
-                    📊 4–8 Bar Energy Evolution — Does the track breathe?
-                  </div>
-                  <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);
-                             line-height:1.65;">
-                    Broadcast editors work with tracks in 4-bar windows — cutting, looping, and
-                    layering music against picture. A track that doesn't evolve across those
-                    windows (same spectral density, same dynamic level, same energy) becomes
-                    aurally fatiguing and fights the edit rather than supporting it. Sync-Safe
-                    uses the beat grid from <code style="font-family:'JetBrains Mono',monospace;
-                    font-size:.72rem;background:var(--badge-bg);padding:1px 5px;
-                    border-radius:3px;">allin1</code> structure analysis combined with librosa
-                    spectral contrast to verify that energy evolves by at least the minimum
-                    configured delta across every 4-bar window. Stagnant segments are flagged
-                    with their timestamp for supervisor review.
-                  </p>
-                </div>
-
-                <div style="background:var(--s2);border-radius:10px;padding:18px;
-                            border-left:3px solid var(--accent);">
-                  <div style="font-family:'Chakra Petch',monospace;font-size:.62rem;font-weight:700;
-                              color:var(--text);letter-spacing:.1em;margin-bottom:10px;">
-                    ⏱️ Intro Timer — Does the track start within 15 seconds?
-                  </div>
-                  <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);
-                             line-height:1.65;">
-                    The 15-second intro standard is a practical constraint of the sync pitch
-                    process: music supervisors, trailer editors, and ad creative directors
-                    audition hundreds of tracks and rarely listen past the first 15 seconds
-                    before making a pass/continue decision. A track whose first vocal, melodic
-                    hook, or primary instrument doesn't enter until after 15 seconds is
-                    structurally unsuited for most sync contexts. Sync-Safe reads the section
-                    labels produced by the <code style="font-family:'JetBrains Mono',monospace;
-                    font-size:.72rem;background:var(--badge-bg);padding:1px 5px;
-                    border-radius:3px;">allin1</code> model and flags any segment labelled
-                    "intro" that exceeds the 15-second limit.
-                  </p>
-                </div>
-
+            <p style="font-family:'Figtree',sans-serif;font-size:.88rem;color:var(--muted);
+                      line-height:1.7;margin:4px 0 20px;">
+              Sync licensing has implicit production standards that most AI-generated and
+              stock library tracks fail. These three checks identify tracks that will
+              cause problems for broadcast editors in post-production.
+            </p>
+            """, unsafe_allow_html=True)
+            st.markdown("""
+            <div style="background:var(--s2);border-radius:10px;padding:18px;
+                        border-left:3px solid var(--accent);margin-bottom:12px;">
+              <div style="font-family:'Chakra Petch',monospace;font-size:.62rem;font-weight:700;
+                          color:var(--text);letter-spacing:.1em;margin-bottom:10px;">
+                🔔 Sting Check — Does the track end cleanly?
               </div>
+              <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);line-height:1.65;">
+                A <strong>"sting"</strong> is a track that ends on a hard cut — the music stops cleanly
+                rather than fading out or ringing. Sync-Safe measures the RMS energy of the final 2 seconds
+                as a ratio against the track mean. If the ratio falls below the configured threshold, or if
+                the track ends on a root-note hold, the track is flagged.
+              </p>
+            </div>
+            """, unsafe_allow_html=True)
+            st.markdown("""
+            <div style="background:var(--s2);border-radius:10px;padding:18px;
+                        border-left:3px solid var(--accent);margin-bottom:12px;">
+              <div style="font-family:'Chakra Petch',monospace;font-size:.62rem;font-weight:700;
+                          color:var(--text);letter-spacing:.1em;margin-bottom:10px;">
+                📊 4–8 Bar Energy Evolution — Does the track breathe?
+              </div>
+              <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);line-height:1.65;">
+                Sync-Safe uses the beat grid from
+                <code style="font-family:'JetBrains Mono',monospace;font-size:.72rem;
+                background:var(--badge-bg);padding:1px 5px;border-radius:3px;">allin1</code>
+                combined with librosa spectral contrast to verify that energy evolves by at least the
+                minimum configured delta across every 4-bar window. Stagnant segments are flagged with
+                their timestamp for supervisor review.
+              </p>
+            </div>
+            """, unsafe_allow_html=True)
+            st.markdown("""
+            <div style="background:var(--s2);border-radius:10px;padding:18px;
+                        border-left:3px solid var(--accent);margin-bottom:4px;">
+              <div style="font-family:'Chakra Petch',monospace;font-size:.62rem;font-weight:700;
+                          color:var(--text);letter-spacing:.1em;margin-bottom:10px;">
+                ⏱️ Intro Timer — Does the track start within 15 seconds?
+              </div>
+              <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);line-height:1.65;">
+                Sync-Safe reads the section labels produced by the
+                <code style="font-family:'JetBrains Mono',monospace;font-size:.72rem;
+                background:var(--badge-bg);padding:1px 5px;border-radius:3px;">allin1</code>
+                model and flags any segment labelled "intro" that exceeds the 15-second limit —
+                a practical constraint of the sync pitch process where supervisors rarely listen
+                past the first 15 seconds before making a pass/continue decision.
+              </p>
             </div>
             """, unsafe_allow_html=True)
 
         # ── Stage 3: Lyric Audit ──────────────────────────────────────────────
         with st.expander("Stage 3 — Lyric Risk Audit"):
             st.markdown("""
-            <div style="padding:4px 0 8px;">
-              <p style="font-family:'Figtree',sans-serif;font-size:.88rem;color:var(--muted);
-                        line-height:1.7;margin-bottom:20px;">
-                Lyric clearance is one of the most time-consuming parts of sync licensing.
-                Sync-Safe automates the first-pass audit: transcribing the track and running
-                four independent checks to surface risks before a human reviewer reads a word.
-              </p>
-              <div style="display:flex;flex-direction:column;gap:12px;">
-
-                <div style="display:flex;gap:14px;align-items:flex-start;background:var(--s2);
-                            border-radius:10px;padding:16px;">
-                  <div style="font-family:'Chakra Petch',monospace;font-size:1.2rem;flex-shrink:0;
-                              margin-top:2px;">①</div>
-                  <div>
-                    <div style="font-family:'Chakra Petch',monospace;font-size:.62rem;font-weight:700;
-                                color:var(--text);letter-spacing:.08em;margin-bottom:6px;">
-                      Whisper Transcription
-                    </div>
-                    <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);
-                               line-height:1.6;">
-                      OpenAI Whisper (Base model) converts vocals to timestamped JSON segments.
-                      Each segment carries a start time, end time, and text — providing the
-                      timestamp index that all downstream checks attach their flags to.
-                    </p>
-                  </div>
-                </div>
-
-                <div style="display:flex;gap:14px;align-items:flex-start;background:var(--s2);
-                            border-radius:10px;padding:16px;">
-                  <div style="font-family:'Chakra Petch',monospace;font-size:1.2rem;flex-shrink:0;
-                              margin-top:2px;">②</div>
-                  <div>
-                    <div style="font-family:'Chakra Petch',monospace;font-size:.62rem;font-weight:700;
-                                color:var(--text);letter-spacing:.08em;margin-bottom:6px;">
-                      Explicit Content Detection
-                    </div>
-                    <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);
-                               line-height:1.6;">
-                      The <code style="font-family:'JetBrains Mono',monospace;font-size:.72rem;
-                      background:var(--badge-bg);padding:1px 5px;border-radius:3px;">
-                      profanity-check</code> library runs against each Whisper segment and flags
-                      any segment containing explicit language. Flagged segments receive an
-                      <strong>EXPLICIT</strong> classification with the offending timestamp
-                      and a recommendation for editorial action.
-                    </p>
-                  </div>
-                </div>
-
-                <div style="display:flex;gap:14px;align-items:flex-start;background:var(--s2);
-                            border-radius:10px;padding:16px;">
-                  <div style="font-family:'Chakra Petch',monospace;font-size:1.2rem;flex-shrink:0;
-                              margin-top:2px;">③</div>
-                  <div>
-                    <div style="font-family:'Chakra Petch',monospace;font-size:.62rem;font-weight:700;
-                                color:var(--text);letter-spacing:.08em;margin-bottom:6px;">
-                      Named Entity Recognition — Brands &amp; Locations
-                    </div>
-                    <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);
-                               line-height:1.6;">
-                      spaCy's <code style="font-family:'JetBrains Mono',monospace;font-size:.72rem;
-                      background:var(--badge-bg);padding:1px 5px;border-radius:3px;">
-                      en_core_web_sm</code> model runs NER on the transcript. Organisation
-                      entities (<strong>ORG</strong>) flag potential brand mentions that may
-                      create trademark liability; geopolitical entities (<strong>GPE</strong>)
-                      flag location references that can restrict territorial clearance. Both
-                      are surfaced with timestamps and reviewer recommendations.
-                    </p>
-                  </div>
-                </div>
-
-                <div style="display:flex;gap:14px;align-items:flex-start;background:var(--s2);
-                            border-radius:10px;padding:16px;">
-                  <div style="font-family:'Chakra Petch',monospace;font-size:1.2rem;flex-shrink:0;
-                              margin-top:2px;">④</div>
-                  <div>
-                    <div style="font-family:'Chakra Petch',monospace;font-size:.62rem;font-weight:700;
-                                color:var(--text);letter-spacing:.08em;margin-bottom:6px;">
-                      Safety Zone Classification
-                    </div>
-                    <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);
-                               line-height:1.6;">
-                      Curated keyword dictionaries flag violence-adjacent and drug-related
-                      terminology that would disqualify a track from family-rated content,
-                      broadcast standards compliance, or brand-safe placement contexts.
-                      Segments matching these terms receive <strong>VIOLENCE</strong> or
-                      <strong>DRUGS</strong> classifications in the audit table.
-                    </p>
-                  </div>
-                </div>
-
-              </div>
-            </div>
+            <p style="font-family:'Figtree',sans-serif;font-size:.88rem;color:var(--muted);
+                      line-height:1.7;margin:4px 0 20px;">
+              Lyric clearance is one of the most time-consuming parts of sync licensing.
+              Sync-Safe automates the first-pass audit: transcribing the track and running
+              four independent checks to surface risks before a human reviewer reads a word.
+            </p>
             """, unsafe_allow_html=True)
+            for num, title, body in [
+                ("①", "Whisper Transcription",
+                 "OpenAI Whisper (Base model) converts vocals to timestamped JSON segments. "
+                 "Each segment carries a start time, end time, and text — providing the "
+                 "timestamp index that all downstream checks attach their flags to."),
+                ("②", "Explicit Content Detection",
+                 "The <code style=\"font-family:'JetBrains Mono',monospace;font-size:.72rem;"
+                 "background:var(--badge-bg);padding:1px 5px;border-radius:3px;\">profanity-check</code> "
+                 "library runs against each Whisper segment and flags any segment containing explicit "
+                 "language. Flagged segments receive an <strong>EXPLICIT</strong> classification with "
+                 "the offending timestamp and a recommendation for editorial action."),
+                ("③", "Named Entity Recognition — Brands &amp; Locations",
+                 "spaCy's <code style=\"font-family:'JetBrains Mono',monospace;font-size:.72rem;"
+                 "background:var(--badge-bg);padding:1px 5px;border-radius:3px;\">en_core_web_sm</code> "
+                 "model runs NER on the transcript. <strong>ORG</strong> entities flag potential brand "
+                 "mentions that may create trademark liability; <strong>GPE</strong> entities flag "
+                 "location references that can restrict territorial clearance."),
+                ("④", "Safety Zone Classification",
+                 "Curated keyword dictionaries flag violence-adjacent and drug-related terminology "
+                 "that would disqualify a track from family-rated content or brand-safe placement. "
+                 "Segments matching these terms receive <strong>VIOLENCE</strong> or "
+                 "<strong>DRUGS</strong> classifications in the audit table."),
+            ]:
+                c_num, c_body = st.columns([0.06, 0.94], gap="small")
+                with c_num:
+                    st.markdown(
+                        f'<div style="font-family:\'Chakra Petch\',monospace;font-size:1.2rem;'
+                        f'padding-top:18px;text-align:center;color:var(--text);">{num}</div>',
+                        unsafe_allow_html=True,
+                    )
+                with c_body:
+                    st.markdown(
+                        f'<div style="background:var(--s2);border-radius:10px;padding:16px;margin-bottom:10px;">'
+                        f'<div style="font-family:\'Chakra Petch\',monospace;font-size:.62rem;font-weight:700;'
+                        f'color:var(--text);letter-spacing:.08em;margin-bottom:6px;">{title}</div>'
+                        f'<p style="font-family:\'Figtree\',sans-serif;font-size:.8rem;color:var(--muted);'
+                        f'line-height:1.6;margin:0;">{body}</p></div>',
+                        unsafe_allow_html=True,
+                    )
 
         # ── Stage 4: Rights Discovery ─────────────────────────────────────────
         with st.expander("Stage 4 — Rights Discovery"):
             st.markdown("""
-            <div style="padding:4px 0 8px;">
-              <p style="font-family:'Figtree',sans-serif;font-size:.88rem;color:var(--muted);
-                        line-height:1.7;margin-bottom:20px;">
-                After analysis, the tool surfaces similar tracks and generates direct
-                licensing lookup links — reducing the time between "this track works"
-                and "I know who to call."
-              </p>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-
+            <p style="font-family:'Figtree',sans-serif;font-size:.88rem;color:var(--muted);
+                      line-height:1.7;margin:4px 0 20px;">
+              After analysis, the tool surfaces similar tracks and generates direct
+              licensing lookup links — reducing the time between "this track works"
+              and "I know who to call."
+            </p>
+            """, unsafe_allow_html=True)
+            c1, c2 = st.columns(2, gap="small")
+            with c1:
+                st.markdown("""
                 <div style="background:var(--s2);border-radius:10px;padding:18px;">
                   <div style="font-family:'Chakra Petch',monospace;font-size:.58rem;font-weight:700;
                               color:var(--accent);letter-spacing:.14em;text-transform:uppercase;
                               margin-bottom:8px;">🔍 Audio Similarity</div>
-                  <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);
-                             line-height:1.6;">
+                  <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);line-height:1.6;margin:0;">
                     Last.fm's <code style="font-family:'JetBrains Mono',monospace;font-size:.72rem;
-                    background:var(--badge-bg);padding:1px 5px;border-radius:3px;">
-                    track.getSimilar</code> API returns a ranked list of comparable tracks
-                    based on listener co-occurrence and editorial tagging. Each result is then
-                    resolved to a live YouTube preview URL via
+                    background:var(--badge-bg);padding:1px 5px;border-radius:3px;">track.getSimilar</code>
+                    API returns a ranked list of comparable tracks based on listener co-occurrence.
+                    Each result is resolved to a live YouTube preview via
                     <code style="font-family:'JetBrains Mono',monospace;font-size:.72rem;
-                    background:var(--badge-bg);padding:1px 5px;border-radius:3px;">
-                    yt-dlp ytsearch1:</code> — fully stateless, no database required.
-                    This gives supervisors an instant reference set for similar placements
-                    or safe alternatives if the analyzed track fails audit.
+                    background:var(--badge-bg);padding:1px 5px;border-radius:3px;">yt-dlp ytsearch1:</code>
+                    — fully stateless, no database required.
                   </p>
-                </div>
-
+                </div>""", unsafe_allow_html=True)
+            with c2:
+                st.markdown("""
                 <div style="background:var(--s2);border-radius:10px;padding:18px;">
                   <div style="font-family:'Chakra Petch',monospace;font-size:.58rem;font-weight:700;
                               color:var(--accent);letter-spacing:.14em;text-transform:uppercase;
                               margin-bottom:8px;">⚖️ PRO Licensing Links</div>
-                  <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);
-                             line-height:1.6;">
-                    Sync-Safe generates direct deep-link search URLs for the four major
-                    Performance Rights Organisations — ASCAP, BMI, SESAC, and GMR — pre-filled
-                    with the artist and track name. This gives the clearance agent a single
-                    click to identify publishers and rights holders, confirm registration
-                    status, and initiate licensing outreach. No PRO database credentials
-                    are required; all lookups are performed against public repertory portals.
+                  <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);line-height:1.6;margin:0;">
+                    Sync-Safe generates direct deep-link search URLs for ASCAP, BMI, SESAC, and GMR —
+                    pre-filled with the artist and track name. No PRO database credentials required;
+                    all lookups are performed against public repertory portals.
                   </p>
-                </div>
-
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
+                </div>""", unsafe_allow_html=True)
+            st.markdown('<div style="padding-bottom:8px;"></div>', unsafe_allow_html=True)
 
         # ── Stateless assurance note ──────────────────────────────────────────
         st.markdown("""

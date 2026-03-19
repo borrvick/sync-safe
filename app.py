@@ -86,6 +86,31 @@ _THEME_JS = """<script>
       p._ssTooltipObserver = new p.MutationObserver(function() { enhanceTips(p.document); });
       p._ssTooltipObserver.observe(p.document.body, { childList: true, subtree: true });
     }
+
+    // Nav/footer button styling.
+    // React re-renders overwrite className, so we stamp data-nav-btn="nav" / "footer"
+    // directly onto button elements — data-* attributes survive reconciliation.
+    // CSS in styles.py targets these to make buttons look like plain text links.
+    function markNavBtns(root) {
+      [['ss-nav-marker', 'nav'], ['ss-footer-marker', 'footer']].forEach(function(pair) {
+        root.querySelectorAll('.' + pair[0]).forEach(function(marker) {
+          var wrapper = marker.closest('[data-testid="stVerticalBlock"]');
+          var container = wrapper ? wrapper.parentElement : null;
+          while (container && container.dataset.testid !== 'stVerticalBlock') {
+            container = container.parentElement;
+          }
+          if (!container) return;
+          container.querySelectorAll('[data-testid="stBaseButton-secondary"]').forEach(function(btn) {
+            btn.setAttribute('data-nav-btn', pair[1]);
+          });
+        });
+      });
+    }
+    markNavBtns(p.document);
+    if (!p._ssNavObserver) {
+      p._ssNavObserver = new p.MutationObserver(function() { markNavBtns(p.document); });
+      p._ssNavObserver.observe(p.document.body, { childList: true, subtree: true });
+    }
   } catch(e) { console.warn('Theme init:', e); }
 })();
 </script>"""
