@@ -548,6 +548,119 @@ hr { border-color:var(--border) !important; }
 }
 audio { border-radius:10px !important; filter:var(--audio-filter) !important; }
 
+/* ── Site nav & footer shared visual styles ── */
+.ss-brand { display:flex; align-items:center; gap:12px; padding:14px 0; }
+.ss-eq    { display:flex; align-items:flex-end; gap:3px; height:24px; }
+.ss-brand-name, .ss-ft-brand-name {
+  font-family:'Chakra Petch',monospace !important; font-size:1.05rem; font-weight:700 !important;
+  color:var(--accent); letter-spacing:.14em;
+}
+.ss-brand-sub, .ss-ft-brand-sub {
+  font-family:'Chakra Petch',monospace !important; font-size:.5rem; font-weight:500 !important;
+  color:var(--dim); letter-spacing:.22em; text-transform:uppercase; margin-top:2px;
+}
+.ss-ft-brand-name { font-size:.88rem; }
+.ss-tagline  { font-family:'Figtree',sans-serif; font-size:.72rem; color:var(--muted); line-height:1.55; margin-top:10px; max-width:200px; }
+.ss-badges   { display:flex; flex-direction:column; gap:4px; margin-top:14px; }
+.ss-badge    { font-family:'JetBrains Mono',monospace !important; font-size:.52rem; color:var(--dim); letter-spacing:.1em; text-transform:uppercase; }
+.ss-col-title { font-family:'Chakra Petch',monospace !important; font-size:.6rem; font-weight:700 !important; letter-spacing:.18em; text-transform:uppercase; color:var(--dim); margin-bottom:14px; }
+.ss-lnk      { display:block; font-family:'Figtree',sans-serif !important; font-size:.76rem; font-weight:500 !important; color:var(--muted); margin-bottom:9px; transition:color .15s; text-decoration:none; }
+.ss-lnk:hover { color:var(--accent); }
+.ss-lnk-ext::after { content:' ↗'; font-size:.65rem; opacity:.6; }
+.ss-bottom { display:flex; align-items:center; justify-content:space-between; margin-top:24px; padding-top:20px; border-top:1px solid var(--border); flex-wrap:wrap; gap:8px; }
+.ss-copy   { font-family:'JetBrains Mono',monospace !important; font-size:.58rem; color:var(--dim); letter-spacing:.04em; }
+.ss-trust  { display:flex; gap:16px; font-family:'JetBrains Mono',monospace !important; font-size:.55rem; color:var(--dim); letter-spacing:.1em; text-transform:uppercase; }
+
+/* ── Nav & footer button-links ──────────────────────────────────────────────
+   JS in app.py stamps data-nav-btn="nav" / "footer" onto secondary button
+   elements inside the nav/footer containers. data-* attributes survive React
+   reconciliation. "html body button" (specificity 0,1,3) beats Streamlit's
+   emotion single-class selectors (0,1,0).
+*/
+
+/* Brand link — no underline, inherit layout */
+a.ss-brand-link {
+  text-decoration: none !important;
+  display: block !important;
+}
+
+/* Nav link buttons — plain text, no button chrome */
+html body button[data-nav-btn="nav"] {
+  all: unset !important;
+  box-sizing: border-box !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  padding: 0.5rem 0.6rem !important;
+  cursor: pointer !important;
+  font-family: 'Figtree', sans-serif !important;
+  font-size: 1.25rem !important;
+  font-weight: 500 !important;
+  color: var(--muted) !important;
+  white-space: nowrap !important;
+  background: transparent !important;
+  border-bottom: 2px solid transparent !important;
+  transition: color 0.15s, border-color 0.15s !important;
+}
+html body button[data-nav-btn="nav"]:hover {
+  color: var(--text) !important;
+  background: transparent !important;
+  background-color: transparent !important;
+}
+/* Disabled = current page — accent color + underline indicator */
+html body button[data-nav-btn="nav"][disabled] {
+  color: var(--accent) !important;
+  border-bottom: 2px solid var(--accent) !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  cursor: default !important;
+  opacity: 1 !important;
+}
+html body button[data-nav-btn="nav"] p,
+html body button[data-nav-btn="nav"] [data-testid="stMarkdownContainer"] {
+  margin: 0 !important; padding: 0 !important; display: block !important;
+  text-align: center !important; width: 100% !important;
+}
+html body button[data-nav-btn="nav"]:focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 3px !important;
+  border-radius: 4px !important;
+}
+/* Kill Streamlit's hover backgrounds on nav button wrappers */
+html body div[data-testid="stButton"]:has(button[data-nav-btn="nav"]),
+html body div[data-testid="stButton"]:has(button[data-nav-btn="nav"]):hover {
+  background: transparent !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* Footer link buttons — block-level plain text */
+html body button[data-nav-btn="footer"] {
+  all: unset !important;
+  box-sizing: border-box !important;
+  display: block !important;
+  cursor: pointer !important;
+  margin-bottom: 9px !important;
+  font-family: 'Figtree', sans-serif !important;
+  font-size: .76rem !important;
+  font-weight: 500 !important;
+  color: var(--muted) !important;
+  transition: color .15s !important;
+}
+html body button[data-nav-btn="footer"]:hover { color: var(--accent) !important; }
+html body button[data-nav-btn="footer"] p,
+html body button[data-nav-btn="footer"] [data-testid="stMarkdownContainer"] {
+  all: unset !important;
+  display: contents !important;
+}
+html body button[data-nav-btn="footer"]:focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px !important;
+  border-radius: 3px !important;
+}
+
 /* ── Suppress gap from 0-height theme-injection iframe ── */
 [data-testid="stCustomComponentV1"]:has(iframe[height="0"]) {
   height: 0 !important;

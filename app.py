@@ -86,6 +86,31 @@ _THEME_JS = """<script>
       p._ssTooltipObserver = new p.MutationObserver(function() { enhanceTips(p.document); });
       p._ssTooltipObserver.observe(p.document.body, { childList: true, subtree: true });
     }
+
+    // Nav/footer button styling.
+    // React re-renders overwrite className, so we stamp data-nav-btn="nav" / "footer"
+    // directly onto button elements — data-* attributes survive reconciliation.
+    // CSS in styles.py targets these to make buttons look like plain text links.
+    function markNavBtns(root) {
+      [['ss-nav-marker', 'nav'], ['ss-footer-marker', 'footer']].forEach(function(pair) {
+        root.querySelectorAll('.' + pair[0]).forEach(function(marker) {
+          var wrapper = marker.closest('[data-testid="stVerticalBlock"]');
+          var container = wrapper ? wrapper.parentElement : null;
+          while (container && container.dataset.testid !== 'stVerticalBlock') {
+            container = container.parentElement;
+          }
+          if (!container) return;
+          container.querySelectorAll('[data-testid="stBaseButton-secondary"]').forEach(function(btn) {
+            btn.setAttribute('data-nav-btn', pair[1]);
+          });
+        });
+      });
+    }
+    markNavBtns(p.document);
+    if (!p._ssNavObserver) {
+      p._ssNavObserver = new p.MutationObserver(function() { markNavBtns(p.document); });
+      p._ssNavObserver.observe(p.document.body, { childList: true, subtree: true });
+    }
   } catch(e) { console.warn('Theme init:', e); }
 })();
 </script>"""
@@ -117,7 +142,7 @@ components.html(_THEME_JS, height=0, scrolling=False)
 # ── Session state defaults ────────────────────────────────────────────────────
 # audio:    AudioBuffer | None — ingested on landing page submit
 # analysis: AnalysisResult | None — computed on first report page render
-# page:     "landing" | "report"
+# page:     "landing" | "loading" | "report" | "how_it_works" | "legal"
 # start_time, player_key — Audio State Manager (clickable timestamps)
 
 for key, default in [
@@ -131,7 +156,32 @@ for key, default in [
     if key not in st.session_state:
         st.session_state[key] = default
 
+# ── URL-based routing (site nav uses ?p= query params) ───────────────────────
+# The nav bar runs in a components.html() iframe and navigates via
+# window.parent.location.href — a full page reload that Streamlit picks up
+# here as a query param. This overrides session state so the correct
+# page renders immediately on load without an extra rerun.
+
+_nav_page = st.query_params.get("p", "")
+if _nav_page in ("how_it_works", "legal", "portal"):
+    st.session_state.page = _nav_page
+
 # ── Routing ───────────────────────────────────────────────────────────────────
+
+if st.session_state.page == "portal":
+    from ui.pages.portal import render_portal
+    render_portal()
+    st.stop()
+
+if st.session_state.page == "how_it_works":
+    from ui.pages.how_it_works import render_how_it_works
+    render_how_it_works()
+    st.stop()
+
+if st.session_state.page == "legal":
+    from ui.pages.legal import render_legal
+    render_legal()
+    st.stop()
 
 if st.session_state.page == "landing":
     from ui.pages.landing import render_landing
