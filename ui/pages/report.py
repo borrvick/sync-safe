@@ -6,6 +6,7 @@ All functions accept typed domain models from core.models; no raw dict access.
 """
 from __future__ import annotations
 
+import html as html_mod
 from collections import Counter, OrderedDict
 from typing import Optional
 
@@ -48,7 +49,7 @@ def render_report(
     with st.expander("Track Overview", expanded=True):
         c_left, c_right = st.columns([1, 1], gap="large")
         with c_left:
-            _render_metadata_card(result.structure)
+            _render_metadata_card(result.structure, result.audio.metadata)
         with c_right:
             _render_structure_card(result.structure)
 
@@ -100,7 +101,7 @@ def _render_nav(source_label: str) -> None:
 
     src_html = (
         f'<div style="font-family:var(--mono,monospace);font-size:.7rem;color:var(--dim);'
-        f'margin-top:6px;letter-spacing:.04em;">{source_label}</div>'
+        f'margin-top:6px;letter-spacing:.04em;">{html_mod.escape(source_label)}</div>'
         if source_label else ""
     )
     st.markdown(f"""
@@ -132,10 +133,16 @@ def _render_audio_player(audio: AudioBuffer) -> None:
 # Track Overview: metadata + structure
 # ---------------------------------------------------------------------------
 
-def _render_metadata_card(sr: Optional[StructureResult]) -> None:
+def _render_metadata_card(sr: Optional[StructureResult], ingestion_meta: dict | None = None) -> None:
+    ingestion_meta = ingestion_meta or {}
     meta       = sr.metadata if sr else {}
-    title_str  = meta.get("title", "")  or ""
-    artist_str = meta.get("artist", "") or ""
+    title_str  = html_mod.escape(meta.get("title", "")  or ingestion_meta.get("title", ""))
+    artist_str = html_mod.escape(meta.get("artist", "") or ingestion_meta.get("artist", ""))
+
+    duration    = ingestion_meta.get("duration", "")
+    sample_rate = ingestion_meta.get("sample_rate", "")
+    bit_depth   = ingestion_meta.get("bit_depth", "")
+    channels    = ingestion_meta.get("channels", "")
 
     title_html = (
         f"<div style='font-family:\"JetBrains Mono\",monospace;font-size:1.4rem;"
@@ -149,11 +156,32 @@ def _render_metadata_card(sr: Optional[StructureResult]) -> None:
         if artist_str else ""
     )
 
+    # Build tech spec pills — only include fields that are populated
+    specs = [
+        ("Duration",    duration),
+        ("Sample Rate", sample_rate),
+        ("Bit Depth",   bit_depth),
+        ("Channels",    channels),
+    ]
+    spec_items = "".join(
+        f"<div style='display:flex;flex-direction:column;gap:3px;'>"
+        f"  <div style='font-family:\"Chakra Petch\",monospace;font-size:.5rem;font-weight:600;"
+        f"letter-spacing:.12em;text-transform:uppercase;color:var(--dim);'>{label}</div>"
+        f"  <div style='font-family:\"JetBrains Mono\",monospace;font-size:.8rem;color:var(--text);'>{value}</div>"
+        f"</div>"
+        for label, value in specs if value
+    )
+    specs_html = (
+        f"<div style='display:flex;gap:24px;margin-top:12px;flex-wrap:wrap;'>{spec_items}</div>"
+        if spec_items else ""
+    )
+
     st.markdown(f"""
     <div class="sig" style="margin-bottom:14px;">
       <div class="sig-head">Track Metadata</div>
       {title_html}
       {artist_html}
+      {specs_html}
     </div>
     """, unsafe_allow_html=True)
 
@@ -428,15 +456,17 @@ def _render_legal_and_discovery(result: AnalysisResult) -> None:
     if result.similar_tracks:
         rows = ""
         for t in result.similar_tracks:
+            safe_title  = html_mod.escape(t.title)
+            safe_artist = html_mod.escape(t.artist)
             btn = (
-                f'<a href="{t.youtube_url}" target="_blank" rel="noopener noreferrer"'
-                f' class="t-btn" aria-label="Preview {t.title} by {t.artist} on YouTube">▶ Preview</a>'
+                f'<a href="{html_mod.escape(t.youtube_url)}" target="_blank" rel="noopener noreferrer"'
+                f' class="t-btn" aria-label="Preview {safe_title} by {safe_artist} on YouTube">▶ Preview</a>'
                 if t.youtube_url
                 else '<button disabled class="t-btn" style="opacity:.3;cursor:not-allowed;">No link</button>'
             )
             rows += f"""
             <div class="t-row">
-              <div><div class="t-art">{t.artist}</div><div class="t-nm">{t.title}</div></div>
+              <div><div class="t-art">{safe_artist}</div><div class="t-nm">{safe_title}</div></div>
               {btn}
             </div>"""
         st.markdown(f"<div class='sig' style='padding:18px;'>{rows}</div>", unsafe_allow_html=True)
@@ -457,268 +487,279 @@ def _render_lyric_section(result: AnalysisResult) -> None:
     authorship = result.authorship
     sections   = result.structure.sections if result.structure else []
 
-    flags    = compliance.flags    if compliance else []
-    grade    = compliance.grade    if compliance else "N/A"
+    flags    = compliance.flags if compliance else []
+    grade    = compliance.grade if compliance else "N/A"
 
-    flagged_ts  = {f.timestamp_s for f in flags}
+    flagged_ts: set[int] = {f.timestamp_s for f in flags}
     flags_by_ts: dict[int, list[ComplianceFlag]] = {}
     for f in flags:
         flags_by_ts.setdefault(f.timestamp_s, []).append(f)
 
-    # Lyric authorship banner
-    if authorship:
-        av       = authorship.verdict
-        av_color = authorship_color(av)
-        a_notes  = authorship.feature_notes
-        a_rob    = authorship.roberta_score
-        rob_str  = f"Classifier: {a_rob:.0%} AI probability · " if a_rob is not None else ""
-        n_sig    = authorship.signal_count
-        sig_str  = f"{n_sig} AI signal{'s' if n_sig != 1 else ''} detected"
-
-        def _note_html(note: str) -> str:
-            arrow      = "✓" if "✓" in note else "▲"
-            note_color = "var(--muted)" if "✓" in note else "var(--text)"
-            return (
-                f"<div style='display:flex;align-items:center;gap:6px;padding:3px 0;'>"
-                f"<span style='color:{av_color};font-size:.7rem;flex-shrink:0;'>{arrow}</span>"
-                f"<span style='font-family:\"Figtree\",sans-serif;font-size:.76rem;"
-                f"color:{note_color};'>{note}</span>"
-                f"</div>"
-            )
-        notes_html = "".join(_note_html(n) for n in a_notes)
-
-        st.markdown(f"""
-        <div style="border:1px solid {av_color}22;border-radius:10px;background:{av_color}08;
-                    padding:14px 18px;margin-bottom:18px;">
-          <div style="display:flex;align-items:center;gap:14px;margin-bottom:{'10px' if a_notes else '0'};">
-            <div style="font-family:'JetBrains Mono',monospace;font-size:1.1rem;font-weight:700;
-                        color:{av_color};flex-shrink:0;">{av}</div>
-            <div>
-              <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
-                          color:{av_color};letter-spacing:.1em;text-transform:uppercase;">
-                Lyric Authorship — {sig_str}
-              </div>
-              <div style="font-family:'Figtree',sans-serif;font-size:.74rem;color:var(--muted);margin-top:2px;">
-                {rob_str}Note: short creative text is harder to classify than prose.</div>
-            </div>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 18px;">
-            {notes_html}
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
+    _render_authorship_banner(authorship)
 
     col_lyr, col_audit = st.columns([55, 45], gap="large")
-
-    # Left: lyrics by section
     with col_lyr:
-        st.markdown("""
-        <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
-                    letter-spacing:.16em;text-transform:uppercase;color:var(--dim);
-                    margin-bottom:10px;">Formatted Lyrics — Click timestamp to jump</div>
-        """, unsafe_allow_html=True)
-
-        if not segments:
-            st.markdown(
-                "<div style='color:var(--dim);font-size:.84rem;padding:20px 0;'>"
-                "No lyrics detected — track may be instrumental.</div>",
-                unsafe_allow_html=True,
-            )
-        else:
-            grouped = _assign_sections(segments, sections)
-            for sec_label, segs in grouped:
-                st.markdown(
-                    f"<div style='font-family:\"Chakra Petch\",monospace;font-size:.6rem;"
-                    f"font-weight:700;color:#F5640A;letter-spacing:.14em;text-transform:uppercase;"
-                    f"margin:16px 0 6px;padding-top:14px;"
-                    f"border-top:1px solid var(--border-hr);'>"
-                    f"[ {sec_label} ]</div>",
-                    unsafe_allow_html=True,
-                )
-                for seg in segs:
-                    ts_s       = int(seg.start)
-                    text       = seg.text.strip()
-                    is_flagged = ts_s in flagged_ts
-                    if not text:
-                        continue
-
-                    c_btn, c_line = st.columns([1, 6])
-                    with c_btn:
-                        btn_type = "primary" if is_flagged else "secondary"
-                        if st.button(fmt_ts(ts_s), key=f"lyr_{id(seg)}_{ts_s}",
-                                     help=f"Jump to {fmt_ts(ts_s)} in the audio player",
-                                     use_container_width=True, type=btn_type):
-                            st.session_state.start_time = ts_s
-                            st.session_state.player_key = st.session_state.get("player_key", 0) + 1
-                            st.rerun()
-                    with c_line:
-                        if is_flagged:
-                            ts_flags   = flags_by_ts.get(ts_s, [])
-                            confirmed  = any(f.confidence == "confirmed" for f in ts_flags)
-                            line_color = "var(--text)" if confirmed else "var(--muted)"
-                            pills_html = " ".join(issue_pill(f) for f in ts_flags)
-                            st.markdown(
-                                f"<div style='padding:7px 0;font-family:\"Figtree\",sans-serif;"
-                                f"font-size:.88rem;color:{line_color};line-height:1.4;'>"
-                                f"{text}&nbsp;&nbsp;{pills_html}</div>",
-                                unsafe_allow_html=True,
-                            )
-                        else:
-                            st.markdown(
-                                f"<div style='padding:7px 0;font-family:\"Figtree\",sans-serif;"
-                                f"font-size:.88rem;color:var(--muted);line-height:1.4;'>{text}</div>",
-                                unsafe_allow_html=True,
-                            )
-
-    # Right: compliance grade + issue breakdown
+        _render_lyric_column(segments, sections, flagged_ts, flags_by_ts)
     with col_audit:
-        conf_flags = [f for f in flags if f.confidence == "confirmed"]
-        pot_flags  = [f for f in flags if f.confidence == "potential"]
-        n_conf, n_pot = len(conf_flags), len(pot_flags)
+        _render_audit_column(flags, grade)
 
-        if n_conf and n_pot:
-            issue_count_label = f"{n_conf} confirmed · {n_pot} potential"
-        elif n_conf:
-            issue_count_label = f"{n_conf} confirmed issue{'s' if n_conf != 1 else ''}"
-        elif n_pot:
-            issue_count_label = f"{n_pot} potential flag{'s' if n_pot != 1 else ''} — review needed"
-        else:
-            issue_count_label = "All clear"
 
-        grade_color  = _grade_color(grade)
-        grade_reason = _grade_reason(conf_flags, grade)
+# ---------------------------------------------------------------------------
+# Lyric section sub-renderers (extracted to keep each function under 40 lines)
+# ---------------------------------------------------------------------------
 
-        def _deduped_pills(flag_list: list[ComplianceFlag], size: str = "lg") -> str:
-            counts: dict = {}
-            first:  dict = {}
-            for fl in flag_list:
-                t = fl.issue_type
-                counts[t] = counts.get(t, 0) + 1
-                if t not in first:
-                    first[t] = fl
-            parts = []
-            for t, fl in first.items():
-                pill = issue_pill(fl, size)
-                if counts[t] > 1:
-                    badge_color = "#C8E86A" if fl.confidence == "potential" else "var(--muted)"
-                    pill += (
-                        f"<span style='font-family:\"JetBrains Mono\",monospace;font-size:.52rem;"
-                        f"font-weight:600;padding:1px 5px;border-radius:3px;"
-                        f"background:var(--badge-bg);color:{badge_color};"
-                        f"margin-left:3px;'>×{counts[t]}</span>"
-                    )
-                parts.append(pill)
-            return "".join(parts)
+def _render_authorship_banner(authorship) -> None:  # type: ignore[no-untyped-def]
+    if not authorship:
+        return
+    av       = authorship.verdict
+    av_color = authorship_color(av)
+    a_notes  = authorship.feature_notes
+    a_rob    = authorship.roberta_score
+    rob_str  = f"Classifier: {a_rob:.0%} AI probability · " if a_rob is not None else ""
+    n_sig    = authorship.signal_count
+    sig_str  = f"{n_sig} AI signal{'s' if n_sig != 1 else ''} detected"
 
-        _all_clear_html = "<span style='font-family:\"Figtree\",sans-serif;font-size:.8rem;color:#0DF5A0;'>✓ All clear</span>"
-        grade_pills_html = (_deduped_pills(conf_flags) + _deduped_pills(pot_flags)) if flags else _all_clear_html
+    def _note_html(note: str) -> str:
+        arrow      = "✓" if "✓" in note else "▲"
+        note_color = "var(--muted)" if "✓" in note else "var(--text)"
+        return (
+            f"<div style='display:flex;align-items:center;gap:6px;padding:3px 0;'>"
+            f"<span style='color:{av_color};font-size:.7rem;flex-shrink:0;'>{arrow}</span>"
+            f"<span style='font-family:\"Figtree\",sans-serif;font-size:.76rem;"
+            f"color:{note_color};'>{note}</span></div>"
+        )
 
-        st.markdown(f"""
-        <div class="sig" style="margin-bottom:16px;">
-          <div class="sig-head">Sync Compliance Grade
-            <span class="tip-wrap" style="margin-left:6px;"><span class="tip-icon">?</span>
-              <span class="tip-box">Sync readiness scoring for sync licensing.<br><br>
-              <strong>A</strong> — No issues. Clear for submission.<br>
-              <strong>B</strong> — Minor or potential flags only. Confirm clearances.<br>
-              <strong>C</strong> — Explicit/violent content or multiple brand mentions.<br>
-              <strong>D</strong> — Multiple explicit or violence flags. Clean edit required.<br>
-              <strong>F</strong> — Drug references or fade ending. Likely disqualifies broadcast.<br><br>
-              Grades are based on <strong>confirmed</strong> flags only.</span>
-            </span>
-          </div>
-          <div style="display:flex;align-items:center;gap:16px;margin-bottom:14px;">
-            <div style="font-family:'JetBrains Mono',monospace;font-size:4.8rem;font-weight:700;
-                        color:{grade_color};line-height:1;flex-shrink:0;">{grade}</div>
-            <div>
-              <div style="font-family:'Chakra Petch',monospace;font-size:.58rem;font-weight:600;
-                          color:{grade_color};letter-spacing:.1em;text-transform:uppercase;
-                          margin-bottom:5px;">{issue_count_label}</div>
-              <div style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);
-                          line-height:1.55;">{grade_reason}</div>
-            </div>
-          </div>
-          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;">
-            {grade_pills_html}
-          </div>
+    notes_html = "".join(_note_html(n) for n in a_notes)
+    st.markdown(f"""
+    <div style="border:1px solid {av_color}22;border-radius:10px;background:{av_color}08;
+                padding:14px 18px;margin-bottom:18px;">
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:{'10px' if a_notes else '0'};">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:1.1rem;font-weight:700;
+                    color:{av_color};flex-shrink:0;">{av}</div>
+        <div>
+          <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
+                      color:{av_color};letter-spacing:.1em;text-transform:uppercase;">
+            Lyric Authorship — {sig_str}</div>
+          <div style="font-family:'Figtree',sans-serif;font-size:.74rem;color:var(--muted);margin-top:2px;">
+            {rob_str}Note: short creative text is harder to classify than prose.</div>
         </div>
-        """, unsafe_allow_html=True)
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 18px;">{notes_html}</div>
+    </div>
+    """, unsafe_allow_html=True)
 
-        if flags:
-            def _render_flag_rows(flag_list: list[ComplianceFlag], prefix: str) -> None:
-                grouped_rows: OrderedDict = OrderedDict()
-                for fl in flag_list:
-                    key = (fl.text.strip().lower(), fl.timestamp_s)
-                    if key not in grouped_rows:
-                        grouped_rows[key] = {"flag": fl, "extra": []}
-                    else:
-                        grouped_rows[key]["extra"].append(fl)
 
-                for i, ((_, ts_s), row) in enumerate(grouped_rows.items()):
-                    flag          = row["flag"]
-                    all_flags_row = [flag] + row["extra"]
-                    is_potential  = flag.confidence == "potential"
-                    text_color    = "var(--muted)" if is_potential else "var(--text)"
-                    text_preview  = flag.text[:52] + ("…" if len(flag.text) > 52 else "")
-                    review_badge  = (
-                        "<span style='font-family:\"Chakra Petch\",monospace;font-size:.5rem;"
-                        "font-weight:600;padding:1px 5px;border-radius:3px;"
-                        "background:#C8E86A18;color:#C8E86A;border:1px solid #C8E86A33;"
-                        "margin-left:6px;'>NEEDS REVIEW</span>"
-                        if is_potential else ""
-                    )
-                    type_pills = " ".join(issue_pill(fl) for fl in all_flags_row)
+def _render_lyric_column(
+    segments: list[TranscriptSegment],
+    sections: list[Section],
+    flagged_ts: set[int],
+    flags_by_ts: dict[int, list[ComplianceFlag]],
+) -> None:
+    st.markdown("""
+    <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
+                letter-spacing:.16em;text-transform:uppercase;color:var(--dim);
+                margin-bottom:10px;">Formatted Lyrics — Click timestamp to jump</div>
+    """, unsafe_allow_html=True)
 
-                    c_ts, c_detail = st.columns([1, 3])
-                    with c_ts:
-                        if st.button(fmt_ts(ts_s),
-                                     key=f"{prefix}_{i}_{ts_s}_{flag.issue_type}",
-                                     help=f"Jump to {fmt_ts(ts_s)} — {flag.issue_type} flag",
-                                     use_container_width=True):
-                            st.session_state.start_time = ts_s
-                            st.session_state.player_key = st.session_state.get("player_key", 0) + 1
-                            st.rerun()
-                    with c_detail:
-                        st.markdown(
-                            f"<div style='padding:4px 0 2px;display:flex;align-items:center;gap:5px;'>"
-                            f"{type_pills}{review_badge}</div>"
-                            f"<div style='font-family:\"JetBrains Mono\",monospace;font-size:.74rem;"
-                            f"color:{text_color};margin-bottom:2px;'>{text_preview}</div>"
-                            f"<div style='font-family:\"Figtree\",sans-serif;font-size:.75rem;"
-                            f"color:var(--dim);line-height:1.4;margin-bottom:6px;'>"
-                            f"{flag.recommendation}</div>",
-                            unsafe_allow_html=True,
-                        )
+    if not segments:
+        st.markdown(
+            "<div style='color:var(--dim);font-size:.84rem;padding:20px 0;'>"
+            "No lyrics detected — track may be instrumental.</div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    for sec_label, segs in _assign_sections(segments, sections):
+        st.markdown(
+            f"<div style='font-family:\"Chakra Petch\",monospace;font-size:.6rem;"
+            f"font-weight:700;color:#F5640A;letter-spacing:.14em;text-transform:uppercase;"
+            f"margin:16px 0 6px;padding-top:14px;border-top:1px solid var(--border-hr);'>"
+            f"[ {sec_label} ]</div>",
+            unsafe_allow_html=True,
+        )
+        for seg in segs:
+            ts_s       = int(seg.start)
+            text       = seg.text.strip()
+            is_flagged = ts_s in flagged_ts
+            if not text:
+                continue
+            safe_text = html_mod.escape(text)
+            c_btn, c_line = st.columns([1, 6])
+            with c_btn:
+                btn_type = "primary" if is_flagged else "secondary"
+                if st.button(fmt_ts(ts_s), key=f"lyr_{id(seg)}_{ts_s}",
+                             help=f"Jump to {fmt_ts(ts_s)} in the audio player",
+                             use_container_width=True, type=btn_type):
+                    st.session_state.start_time = ts_s
+                    st.session_state.player_key = st.session_state.get("player_key", 0) + 1
+                    st.rerun()
+            with c_line:
+                if is_flagged:
+                    ts_flags   = flags_by_ts.get(ts_s, [])
+                    confirmed  = any(f.confidence == "confirmed" for f in ts_flags)
+                    line_color = "var(--text)" if confirmed else "var(--muted)"
+                    pills_html = " ".join(issue_pill(f) for f in ts_flags)
                     st.markdown(
-                        "<hr style='border:none;border-top:1px solid var(--border-hr);margin:2px 0 6px;'>",
+                        f"<div style='padding:7px 0;font-family:\"Figtree\",sans-serif;"
+                        f"font-size:.88rem;color:{line_color};line-height:1.4;'>"
+                        f"{safe_text}&nbsp;&nbsp;{pills_html}</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(
+                        f"<div style='padding:7px 0;font-family:\"Figtree\",sans-serif;"
+                        f"font-size:.88rem;color:var(--muted);line-height:1.4;'>{safe_text}</div>",
                         unsafe_allow_html=True,
                     )
 
-            if conf_flags:
-                st.markdown("""
-                <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
-                            letter-spacing:.16em;text-transform:uppercase;color:var(--dim);
-                            margin-bottom:10px;">Confirmed Issues — Click to Jump</div>
-                """, unsafe_allow_html=True)
-                _render_flag_rows(conf_flags, "conf")
 
-            if pot_flags:
-                st.markdown(
-                    "<div style='font-family:\"Chakra Petch\",monospace;font-size:.56rem;font-weight:600;"
-                    "letter-spacing:.16em;text-transform:uppercase;color:#C8E86A;"
-                    "margin-top:14px;margin-bottom:10px;opacity:.7;'>"
-                    "Potential — Supervisor Review</div>",
-                    unsafe_allow_html=True,
-                )
-                _render_flag_rows(pot_flags, "pot")
-        else:
+def _render_audit_column(flags: list[ComplianceFlag], grade: str) -> None:
+    conf_flags = [f for f in flags if f.confidence == "confirmed"]
+    pot_flags  = [f for f in flags if f.confidence == "potential"]
+    n_conf, n_pot = len(conf_flags), len(pot_flags)
+
+    if n_conf and n_pot:
+        issue_count_label = f"{n_conf} confirmed · {n_pot} potential"
+    elif n_conf:
+        issue_count_label = f"{n_conf} confirmed issue{'s' if n_conf != 1 else ''}"
+    elif n_pot:
+        issue_count_label = f"{n_pot} potential flag{'s' if n_pot != 1 else ''} — review needed"
+    else:
+        issue_count_label = "All clear"
+
+    grade_color      = _grade_color(grade)
+    grade_reason_str = _grade_reason(conf_flags, grade)
+    all_clear_html   = "<span style='font-family:\"Figtree\",sans-serif;font-size:.8rem;color:#0DF5A0;'>✓ All clear</span>"
+    grade_pills_html = (_deduped_pills(conf_flags) + _deduped_pills(pot_flags)) if flags else all_clear_html
+
+    st.markdown(f"""
+    <div class="sig" style="margin-bottom:16px;">
+      <div class="sig-head">Sync Compliance Grade
+        <span class="tip-wrap" style="margin-left:6px;"><span class="tip-icon">?</span>
+          <span class="tip-box">Sync readiness scoring for sync licensing.<br><br>
+          <strong>A</strong> — No issues. Clear for submission.<br>
+          <strong>B</strong> — Minor or potential flags only. Confirm clearances.<br>
+          <strong>C</strong> — Explicit/violent content or multiple brand mentions.<br>
+          <strong>D</strong> — Multiple explicit or violence flags. Clean edit required.<br>
+          <strong>F</strong> — Drug references or fade ending. Likely disqualifies broadcast.<br><br>
+          Grades are based on <strong>confirmed</strong> flags only.</span>
+        </span>
+      </div>
+      <div style="display:flex;align-items:center;gap:16px;margin-bottom:14px;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:4.8rem;font-weight:700;
+                    color:{grade_color};line-height:1;flex-shrink:0;">{grade}</div>
+        <div>
+          <div style="font-family:'Chakra Petch',monospace;font-size:.58rem;font-weight:600;
+                      color:{grade_color};letter-spacing:.1em;text-transform:uppercase;
+                      margin-bottom:5px;">{issue_count_label}</div>
+          <div style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);
+                      line-height:1.55;">{grade_reason_str}</div>
+        </div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;">{grade_pills_html}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if flags:
+        if conf_flags:
             st.markdown("""
-            <div style="padding:20px;text-align:center;border:1px solid rgba(13,245,160,.15);
-                        border-radius:10px;background:rgba(13,245,160,.04);margin-top:8px;">
-              <div style="font-family:'JetBrains Mono',monospace;font-size:.8rem;color:#0DF5A0;">
-                ✓ No compliance issues detected
-              </div>
-            </div>
+            <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
+                        letter-spacing:.16em;text-transform:uppercase;color:var(--dim);
+                        margin-bottom:10px;">Confirmed Issues — Click to Jump</div>
             """, unsafe_allow_html=True)
+            _render_flag_rows(conf_flags, "conf")
+        if pot_flags:
+            st.markdown(
+                "<div style='font-family:\"Chakra Petch\",monospace;font-size:.56rem;font-weight:600;"
+                "letter-spacing:.16em;text-transform:uppercase;color:var(--needs-review);"
+                "margin-top:14px;margin-bottom:10px;opacity:.7;'>"
+                "Potential — Supervisor Review</div>",
+                unsafe_allow_html=True,
+            )
+            _render_flag_rows(pot_flags, "pot")
+    else:
+        st.markdown("""
+        <div style="padding:20px;text-align:center;border:1px solid rgba(13,245,160,.15);
+                    border-radius:10px;background:rgba(13,245,160,.04);margin-top:8px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:.8rem;color:#0DF5A0;">
+            ✓ No compliance issues detected
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+
+def _deduped_pills(flag_list: list[ComplianceFlag], size: str = "lg") -> str:
+    """Build grade-summary pills, one per issue type with a ×N count badge."""
+    counts: dict[str, int] = {}
+    first:  dict[str, ComplianceFlag] = {}
+    for fl in flag_list:
+        t = fl.issue_type
+        counts[t] = counts.get(t, 0) + 1
+        if t not in first:
+            first[t] = fl
+    parts = []
+    for t, fl in first.items():
+        pill = issue_pill(fl, size)
+        if counts[t] > 1:
+            badge_color = "var(--needs-review)" if fl.confidence == "potential" else "var(--muted)"
+            pill += (
+                f"<span style='font-family:\"JetBrains Mono\",monospace;font-size:.52rem;"
+                f"font-weight:600;padding:1px 5px;border-radius:3px;"
+                f"background:var(--badge-bg);color:{badge_color};"
+                f"margin-left:3px;'>×{counts[t]}</span>"
+            )
+        parts.append(pill)
+    return "".join(parts)
+
+
+def _render_flag_rows(flag_list: list[ComplianceFlag], prefix: str) -> None:
+    """Render a clickable timestamp + detail row for each flag."""
+    grouped_rows: OrderedDict = OrderedDict()
+    for fl in flag_list:
+        key = (fl.text.strip().lower(), fl.timestamp_s)
+        if key not in grouped_rows:
+            grouped_rows[key] = {"flag": fl, "extra": []}
+        else:
+            grouped_rows[key]["extra"].append(fl)
+
+    for i, ((_, ts_s), row) in enumerate(grouped_rows.items()):
+        flag          = row["flag"]
+        all_flags_row = [flag] + row["extra"]
+        is_potential  = flag.confidence == "potential"
+        text_color    = "var(--muted)" if is_potential else "var(--text)"
+        text_preview  = html_mod.escape(flag.text[:52] + ("…" if len(flag.text) > 52 else ""))
+        review_badge  = (
+            "<span style='font-family:\"Chakra Petch\",monospace;font-size:.5rem;"
+            "font-weight:600;padding:1px 5px;border-radius:3px;"
+            "background:rgba(200,232,106,.09);color:var(--needs-review);"
+            "border:1px solid rgba(200,232,106,.2);margin-left:6px;'>NEEDS REVIEW</span>"
+            if is_potential else ""
+        )
+        type_pills = " ".join(issue_pill(fl) for fl in all_flags_row)
+        c_ts, c_detail = st.columns([1, 3])
+        with c_ts:
+            if st.button(fmt_ts(ts_s),
+                         key=f"{prefix}_{i}_{ts_s}_{flag.issue_type}",
+                         help=f"Jump to {fmt_ts(ts_s)} — {flag.issue_type} flag",
+                         use_container_width=True):
+                st.session_state.start_time = ts_s
+                st.session_state.player_key = st.session_state.get("player_key", 0) + 1
+                st.rerun()
+        with c_detail:
+            st.markdown(
+                f"<div style='padding:4px 0 2px;display:flex;align-items:center;gap:5px;'>"
+                f"{type_pills}{review_badge}</div>"
+                f"<div style='font-family:\"JetBrains Mono\",monospace;font-size:.74rem;"
+                f"color:{text_color};margin-bottom:2px;'>{text_preview}</div>"
+                f"<div style='font-family:\"Figtree\",sans-serif;font-size:.75rem;"
+                f"color:var(--dim);line-height:1.4;margin-bottom:6px;'>"
+                f"{flag.recommendation}</div>",
+                unsafe_allow_html=True,
+            )
+        st.markdown(
+            "<hr style='border:none;border-top:1px solid var(--border-hr);margin:2px 0 6px;'>",
+            unsafe_allow_html=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -785,9 +826,9 @@ def _synthid_confidence(bins: int) -> str:
 def _grade_color(grade: str) -> str:
     return {
         "A": "var(--ok)",
-        "B": "#6ECC8A",
-        "C": "#F5A623",
-        "D": "#F57A35",
+        "B": "var(--grade-b)",
+        "C": "var(--grade-c)",
+        "D": "var(--grade-d)",
         "F": "var(--danger)",
     }.get(grade, "var(--dim)")
 

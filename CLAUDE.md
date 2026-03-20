@@ -33,6 +33,9 @@
 | `services/compliance.py` | `@spaces.GPU` — Gallo-Method compliance checks (sting, 4-8 bar, intro timer, lyric audit) |
 | `services/discovery.py` | Last.fm `track.getSimilar` → yt-dlp `ytsearch1:` URL lookup |
 | `services/legal.py` | ASCAP/BMI/SESAC sync licensing link generator |
+| `data/brand_keywords.py` | Curated brand/trademark keyword list for lyric compliance scanning |
+| `data/drug_keywords.py` | Drug and substance reference keywords (used with Detoxify score gate) |
+| `data/profanity_supplement.py` | Custom profanity words beyond better-profanity + LDNOOBW |
 
 ---
 

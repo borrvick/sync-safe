@@ -17,6 +17,8 @@ allin1>=1.0.0
 openai-whisper>=20231117
 
 # Compliance — Gallo-Method (free, open-source)
+detoxify>=0.5.2
+better-profanity>=0.7.0
 transformers>=4.40.0
 torch>=2.1.0
 spacy>=3.7.0

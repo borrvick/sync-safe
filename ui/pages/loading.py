@@ -30,12 +30,12 @@ _STEPS: list[tuple[str, str, int, str]] = [
     ("ingestion",     "Fetching Audio",      8,
      "Downloads audio from YouTube via yt-dlp, or reads your uploaded file. "
      "Audio is held as a BytesIO buffer in memory — nothing is written to disk."),
-    ("transcription", "Transcribing Lyrics", 50,
-     "Runs OpenAI Whisper to convert vocals into timestamped text segments. "
-     "Each segment gets a start/end time so you can click any lyric line in the report to seek the player."),
     ("structure",     "Analysing Structure", 20,
      "Uses allin1 to detect BPM, musical key, and section labels (intro, verse, chorus, outro). "
      "Also reads embedded ID3 / VorbisComment metadata tags from the file."),
+    ("transcription", "Transcribing Lyrics", 50,
+     "Queries LRCLib for synced lyrics using the track title and artist, then falls back to "
+     "OpenAI Whisper on the full audio mix if no synced lyrics are found."),
     ("forensics",     "Forensic Scan",       20,
      "Runs six AI-origin signals: C2PA manifest check, IBI beat-timing variance, groove profile, "
      "4-bar loop cross-correlation, spectral slop above 16 kHz, and SynthID HF phase-coherence scan."),
@@ -109,6 +109,33 @@ def _fmt(secs: float) -> str:
     return f"{s // 60}:{s % 60:02d}"
 
 
+# Tooltip + progress bar CSS injected once per _draw() call.
+# Defined at module level so it is not reconstructed on every UI tick.
+_TIP_CSS = (
+    '<style>'
+    '.sp-tip{position:relative;display:inline-flex;align-items:center;cursor:default}'
+    '.sp-ti{display:inline-flex;align-items:center;justify-content:center;'
+    'width:13px;height:13px;border-radius:50%;background:rgba(245,100,10,.12);'
+    'color:#F5640A;font-size:.5rem;font-weight:700;font-family:monospace;'
+    'border:1px solid rgba(245,100,10,.28);margin-left:7px;flex-shrink:0;'
+    'line-height:1;cursor:pointer;transition:background .15s}'
+    '.sp-tip:hover .sp-ti,.sp-tip:focus-within .sp-ti{background:rgba(245,100,10,.28)}'
+    '.sp-tb{display:none;position:absolute;'
+    'top:calc(100% + 5px);left:-8px;'
+    'background:var(--tip-bg);border:1px solid rgba(245,100,10,.22);color:var(--text);'
+    'font-size:.71rem;font-family:Figtree,sans-serif;font-weight:400;line-height:1.52;'
+    'padding:10px 13px;border-radius:8px;width:230px;z-index:9999;'
+    'box-shadow:var(--shadow-sm);pointer-events:none;white-space:normal}'
+    '.sp-tip:hover .sp-tb,.sp-tip:focus-within .sp-tb{display:block}'
+    '@keyframes pb-run{from{width:0%}to{width:99%}}'
+    '.pb-run{animation:pb-run linear forwards}'
+    '@keyframes run-pulse{0%,100%{opacity:.45}50%{opacity:1}}'
+    '.run-txt{animation:run-pulse 1.4s ease-in-out infinite}'
+    '.sp-ti:focus-visible{outline:2px solid #F5640A;outline-offset:1px;border-radius:50%}'
+    '</style>'
+)
+
+
 # ---------------------------------------------------------------------------
 # Static brand header — rendered once, stays visible the whole run
 # ---------------------------------------------------------------------------
@@ -137,23 +164,10 @@ def _render_brand() -> None:
 # UI renderer — called after every step change
 # ---------------------------------------------------------------------------
 
-def _draw(
-    header_ph: Any,
-    bar_ph: Any,
-    steps_ph: Any,
-    completed: int,
-    current_label: str,   # empty string when all steps done
-    step_durations: list[float],
-) -> None:
-    """Redraw headline, progress bar, and step checklist."""
-    n = len(_STEPS)
-
-    # Headline
+def _headline_html(completed: int, current_label: str, n: int) -> str:
+    """Return the headline HTML string for the current pipeline state."""
     if current_label:
-        headline = (
-            f"{current_label}"
-            f"<span style='color:var(--dim);margin-left:6px;font-size:1.1rem'>…</span>"
-        )
+        headline       = f"{current_label}<span style='color:var(--dim);margin-left:6px;font-size:1.1rem'>…</span>"
         headline_color = "var(--text)"
         sub = (
             f"<div style='font-family:\"JetBrains Mono\",monospace;font-size:.62rem;"
@@ -161,58 +175,30 @@ def _draw(
             f"Step {completed + 1} of {n}</div>"
         )
     else:
-        headline = "<span style='color:var(--ok)'>Analysis Complete</span>"
+        headline       = "<span style='color:var(--ok)'>Analysis Complete</span>"
         headline_color = "var(--ok)"
         sub = (
             "<div style='font-family:\"JetBrains Mono\",monospace;font-size:.62rem;"
             "color:var(--ok);letter-spacing:.06em;margin-top:8px;opacity:.7;'>"
             "Preparing report…</div>"
         )
-
-    header_ph.html(
+    return (
         f'<div style="text-align:center;padding:0 0 22px;">'
         f'<div style="font-family:\'Chakra Petch\',monospace;font-size:.5rem;font-weight:600;'
         f'letter-spacing:.28em;color:var(--dim);margin-bottom:12px;text-transform:uppercase;">'
         f'◈ INITIALIZING SCAN</div>'
         f'<div style="font-family:\'Chakra Petch\',monospace;font-size:1.55rem;font-weight:700;'
-        f'color:{headline_color};letter-spacing:-.02em;line-height:1.1;">'
-        f'{headline}</div>'
-        f'{sub}'
-        f'</div>'
+        f'color:{headline_color};letter-spacing:-.02em;line-height:1.1;">{headline}</div>'
+        f'{sub}</div>'
     )
 
-    bar_ph.progress(completed / n)
 
-    # CSS for step tooltips + progress bar animation.
-    # st.html() injects via innerHTML; browsers do not execute <script> tags that way.
-    _TIP_CSS = (
-        '<style>'
-        '.sp-tip{position:relative;display:inline-flex;align-items:center;cursor:default}'
-        '.sp-ti{display:inline-flex;align-items:center;justify-content:center;'
-        'width:13px;height:13px;border-radius:50%;background:rgba(245,100,10,.12);'
-        'color:#F5640A;font-size:.5rem;font-weight:700;font-family:monospace;'
-        'border:1px solid rgba(245,100,10,.28);margin-left:7px;flex-shrink:0;'
-        'line-height:1;cursor:pointer;transition:background .15s}'
-        '.sp-tip:hover .sp-ti,.sp-tip:focus-within .sp-ti{background:rgba(245,100,10,.28)}'
-        '.sp-tb{display:none;position:absolute;'
-        'top:calc(100% + 5px);left:-8px;'
-        'background:var(--tip-bg);border:1px solid rgba(245,100,10,.22);color:var(--text);'
-        'font-size:.71rem;font-family:Figtree,sans-serif;font-weight:400;line-height:1.52;'
-        'padding:10px 13px;border-radius:8px;width:230px;z-index:9999;'
-        'box-shadow:var(--shadow-sm);pointer-events:none;white-space:normal}'
-        '.sp-tip:hover .sp-tb,.sp-tip:focus-within .sp-tb{display:block}'
-        '@keyframes pb-run{from{width:0%}to{width:99%}}'
-        '.pb-run{animation:pb-run linear forwards}'
-        '@keyframes run-pulse{0%,100%{opacity:.45}50%{opacity:1}}'
-        '.run-txt{animation:run-pulse 1.4s ease-in-out infinite}'
-        '.sp-ti:focus-visible{outline:2px solid #F5640A;outline-offset:1px;border-radius:50%}'
-        '</style>'
-    )
-
+def _step_rows_html(completed: int, current_label: str, step_durations: list[float]) -> str:
+    """Return the pipeline checklist HTML for all steps."""
+    n    = len(_STEPS)
     rows = ""
     for i, (_, label, est, desc) in enumerate(_STEPS):
-        is_last = (i == len(_STEPS) - 1)
-        row_border = '' if is_last else 'border-bottom:1px solid var(--border-hr);'
+        row_border = '' if i == n - 1 else 'border-bottom:1px solid var(--border-hr);'
 
         if i < completed:
             icon, icon_color    = "✓", "#10B981"
@@ -256,27 +242,36 @@ def _draw(
             f'<span class="sp-tip">'
             f'<span class="sp-ti" tabindex="0" role="button" aria-label="More information about {label}">?</span>'
             f'<span class="sp-tb" role="tooltip">{desc}</span>'
-            f'</span>'
-            f'</div>'
-            f'{right}'
-            f'</div>'
+            f'</span></div>'
+            f'{right}</div>'
             f'<div style="height:2px;background:var(--border);border-radius:1px;margin-bottom:6px;">'
-            f'{pb_inner}'
-            f'</div>'
-            f'</div>'
+            f'{pb_inner}</div></div>'
         )
 
-    steps_ph.html(
-        _TIP_CSS
-        + f'<div style="border:1px solid var(--border);border-radius:12px;'
+    return (
+        f'<div style="border:1px solid var(--border);border-radius:12px;'
         f'margin:6px 0 18px;background:var(--s1);">'
         f'<div style="padding:9px 18px;border-bottom:1px solid var(--border-hr);">'
         f'<span style="font-family:\'Chakra Petch\',monospace;font-size:.5rem;font-weight:600;'
         f'letter-spacing:.18em;text-transform:uppercase;color:var(--dim);">'
         f'Pipeline · {completed} / {n} steps complete</span></div>'
-        + rows
-        + '</div>'
+        + rows + '</div>'
     )
+
+
+def _draw(
+    header_ph: Any,
+    bar_ph: Any,
+    steps_ph: Any,
+    completed: int,
+    current_label: str,
+    step_durations: list[float],
+) -> None:
+    """Redraw headline, progress bar, and step checklist."""
+    n = len(_STEPS)
+    header_ph.html(_headline_html(completed, current_label, n))
+    bar_ph.progress(completed / n)
+    steps_ph.html(_TIP_CSS + _step_rows_html(completed, current_label, step_durations))
 
 
 # ---------------------------------------------------------------------------
@@ -380,20 +375,7 @@ def render_loading(source: Any) -> None:
         return
     _advance("ingestion", t0)
 
-    # ── Step 2: Transcription ─────────────────────────────────────────────
-    _tick("Transcribing Lyrics")
-    t0 = time.time()
-    transcript = []
-    log.step_start("transcription")
-    try:
-        from services.transcription import Transcription
-        transcript = Transcription().transcribe(audio)
-    except Exception as exc:
-        _advance("transcription", t0, error=str(exc))
-    else:
-        _advance("transcription", t0)
-
-    # ── Step 3: Structure analysis ────────────────────────────────────────
+    # ── Step 2: Structure analysis (title/artist needed for lyrics lookup) ──
     _tick("Analysing Structure")
     t0 = time.time()
     structure = None
@@ -405,6 +387,24 @@ def render_loading(source: Any) -> None:
         _advance("structure", t0, error=str(exc))
     else:
         _advance("structure", t0)
+
+    # Derive title/artist: prefer embedded tags from structure analysis,
+    # fall back to yt-dlp metadata stored on AudioBuffer at ingestion time.
+    title  = (structure.metadata.get("title", "") if structure else "") or audio.metadata.get("title", "")
+    artist = (structure.metadata.get("artist", "") if structure else "") or audio.metadata.get("artist", "")
+
+    # ── Step 3: Transcription (LRCLib first, then Demucs+Whisper fallback) ─
+    _tick("Transcribing Lyrics")
+    t0 = time.time()
+    transcript = []
+    log.step_start("transcription")
+    try:
+        from services.transcription import LyricsOrchestrator
+        transcript = LyricsOrchestrator().transcribe(audio, title=title, artist=artist)
+    except Exception as exc:
+        _advance("transcription", t0, error=str(exc))
+    else:
+        _advance("transcription", t0)
 
     # ── Step 4: Forensics ─────────────────────────────────────────────────
     _tick("Forensic Scan")
@@ -452,8 +452,6 @@ def render_loading(source: Any) -> None:
     t0 = time.time()
     similar = []
     log.step_start("discovery")
-    title  = structure.metadata.get("title", "")  if structure else ""
-    artist = structure.metadata.get("artist", "") if structure else ""
     try:
         from services.discovery import Discovery
         similar = Discovery().find_similar(title, artist) or []
