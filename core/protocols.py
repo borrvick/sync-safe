@@ -25,10 +25,11 @@ Swap guide:
 """
 from __future__ import annotations
 
-from typing import Union, runtime_checkable
+from typing import TYPE_CHECKING, Union, runtime_checkable
 from typing import Protocol
 
-import streamlit as st  # type: ignore[import]  — UploadedFile is UI-layer only here
+if TYPE_CHECKING:
+    import streamlit as st  # UploadedFile type hint only — no runtime dependency
 
 from core.models import (
     AnalysisResult,
@@ -209,7 +210,7 @@ class ComplianceChecker(Protocol):
         self,
         audio: AudioBuffer,
         transcript: list[TranscriptSegment],
-        sections: list,         # list[Section] — forward ref avoids circular import
+        sections: "list[Section]",  # forward ref avoids circular import
         beats: list[float],
     ) -> ComplianceReport:
         """

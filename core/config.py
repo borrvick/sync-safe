@@ -84,6 +84,15 @@ class SystemConstants:
     # Window (seconds from end) used for fade slope regression
     FADE_WINDOW_SECONDS: float = 10.0
 
+    # Sting check: librosa RMS hop/frame sizes (samples)
+    STING_HOP_LENGTH: int = 512
+    STING_FRAME_LENGTH: int = 1024
+
+    # Fade detection: normalised slope below this → declining energy
+    FADE_SLOPE_THRESHOLD: float = -0.0005
+    # Fade detection: tail-to-mean energy ratio below this → low tail energy
+    FADE_RATIO_MAX: float = 0.25
+
     # ---- Compliance: 4-8 Bar Energy Rule --------------------------------------
     # Minimum normalised spectral-contrast delta across a 4-bar window
     ENERGY_DELTA_MIN: float = 0.10

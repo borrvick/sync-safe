@@ -209,9 +209,9 @@ class ComplianceReport(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     flags: list[ComplianceFlag]         = Field(default_factory=list)
-    sting: StingResult                  = Field(default_factory=StingResult.model_construct)
-    evolution: EnergyEvolutionResult    = Field(default_factory=EnergyEvolutionResult.model_construct)
-    intro: IntroResult                  = Field(default_factory=IntroResult.model_construct)
+    sting: StingResult                  = Field(default_factory=lambda: StingResult(ending_type="cut", sync_ready=False, final_energy_ratio=0.0))
+    evolution: EnergyEvolutionResult    = Field(default_factory=EnergyEvolutionResult)
+    intro: IntroResult                  = Field(default_factory=IntroResult)
     grade: str                          = "N/A"     # A–F or "N/A"
 
     @property

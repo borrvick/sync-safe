@@ -24,20 +24,29 @@ Design rules:
 - Each step is timed and logged via PipelineLogger. A failing step logs the
   error and leaves the corresponding field as None/empty — a transcript failure
   does not block forensics, for example.
-- No Streamlit imports — this module must be importable outside a UI context.
+- No runtime Streamlit imports — this module is importable outside a UI context.
+  Streamlit is only imported under TYPE_CHECKING for the UploadedFile type hint.
 """
 from __future__ import annotations
 
 import time
 import traceback
-from typing import Union
-
-import streamlit as st  # UploadedFile type hint only — no UI calls here
+from typing import TYPE_CHECKING, Any, Callable, Optional, Union
 
 from core.config import get_settings
 from core.exceptions import SyncSafeError
 from core.logging import PipelineLogger
 from core.models import AnalysisResult, AudioBuffer
+from core.protocols import (
+    AudioProvider,
+    AuthorshipAnalyzer,
+    ComplianceChecker,
+    ForensicsAnalyzer,
+    LegalLinksProvider,
+    StructureAnalyzer,
+    TrackDiscovery,
+    TranscriptionProvider,
+)
 from services.analysis import Analysis
 from services.authorship import Authorship
 from services.compliance import Compliance
@@ -46,6 +55,9 @@ from services.forensics import Forensics
 from services.ingestion import Ingestion
 from services.legal import Legal
 from services.transcription import LyricsOrchestrator, Transcription
+
+if TYPE_CHECKING:
+    import streamlit as st  # UploadedFile type hint only — no runtime dependency
 
 
 class Pipeline:
@@ -64,15 +76,15 @@ class Pipeline:
 
     def __init__(
         self,
-        ingestion:     Ingestion              | None = None,
-        transcription: LyricsOrchestrator     | None = None,
-        structure:     Analysis               | None = None,
-        forensics:     Forensics              | None = None,
-        compliance:    Compliance             | None = None,
-        authorship:    Authorship             | None = None,
-        discovery:     Discovery              | None = None,
-        legal:         Legal                  | None = None,
-        log:           PipelineLogger         | None = None,
+        ingestion:     AudioProvider           | None = None,
+        transcription: TranscriptionProvider   | None = None,
+        structure:     StructureAnalyzer       | None = None,
+        forensics:     ForensicsAnalyzer       | None = None,
+        compliance:    ComplianceChecker       | None = None,
+        authorship:    AuthorshipAnalyzer      | None = None,
+        discovery:     TrackDiscovery          | None = None,
+        legal:         LegalLinksProvider      | None = None,
+        log:           PipelineLogger          | None = None,
     ) -> None:
         self._ingestion     = ingestion     or Ingestion()
         self._transcription = transcription or LyricsOrchestrator()
@@ -187,7 +199,7 @@ class Pipeline:
     # Private: fault-isolated step runner
     # ------------------------------------------------------------------
 
-    def _run_step(self, name: str, fn):
+    def _run_step(self, name: str, fn: Callable[[], Any]) -> Any:
         """
         Execute fn(), timing the call and logging start/end/error.
 
