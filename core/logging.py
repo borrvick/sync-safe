@@ -10,9 +10,11 @@ Two classes, two responsibilities:
 
   PipelineLogger — writes newline-delimited JSON entries to today's log
                    file (logs/sync-safe-YYYY-MM-DD.log). Thread-safe via
-                   a per-instance lock. Never raises: I/O errors are
-                   printed to stderr and silently swallowed so a logging
-                   failure never interrupts the pipeline.
+                   a per-instance lock. Keeps the file handle open for
+                   the lifetime of the instance to avoid repeated open/close
+                   overhead. Never raises: I/O errors are printed to stderr
+                   and silently swallowed so a logging failure never
+                   interrupts the pipeline.
 
 Usage:
     from core.logging import LogCleaner, PipelineLogger
@@ -33,9 +35,15 @@ from __future__ import annotations
 import json
 import sys
 import threading
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
+
+# Absolute path to the project root (parent of core/).
+_PROJECT_ROOT = Path(__file__).parent.parent
+
+# Default log directory — absolute so it resolves correctly regardless of cwd.
+DEFAULT_LOG_DIR = _PROJECT_ROOT / "logs"
 
 
 # ---------------------------------------------------------------------------
@@ -55,7 +63,7 @@ class LogCleaner:
 
     _PATTERN = "sync-safe-*.log"
 
-    def __init__(self, log_dir: str) -> None:
+    def __init__(self, log_dir: str | Path = DEFAULT_LOG_DIR) -> None:
         self._dir = Path(log_dir)
 
     def clean(self) -> None:
@@ -89,17 +97,22 @@ class PipelineLogger:
     Format:    one JSON object per line (newline-delimited JSON / NDJSON)
 
     Each entry always contains:
-        ts    — ISO-8601 UTC timestamp
+        ts    — ISO-8601 UTC timestamp (timezone-aware)
         event — snake_case event name
 
     Additional fields are passed as keyword arguments and merged in.
 
-    Constructor injection: pass log_dir to override the default from Settings.
+    The file handle is opened once on first write and kept open for the
+    lifetime of the instance — avoiding repeated open/close cycles across
+    the ~16 log calls per pipeline run.
+
+    Constructor injection: pass log_dir to override the default.
     """
 
-    def __init__(self, log_dir: str) -> None:
+    def __init__(self, log_dir: str | Path = DEFAULT_LOG_DIR) -> None:
         self._dir = Path(log_dir)
         self._lock = threading.Lock()
+        self._fh: IO[str] | None = None
         self._dir.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
@@ -143,14 +156,22 @@ class PipelineLogger:
     def _log_path(self) -> Path:
         return self._dir / f"sync-safe-{date.today().isoformat()}.log"
 
+    def _get_handle(self) -> IO[str]:
+        """Return the open file handle, opening it if necessary."""
+        if self._fh is None or self._fh.closed:
+            self._fh = self._log_path().open("a", encoding="utf-8")
+        return self._fh
+
     def _write(self, **fields: Any) -> None:
         """Serialise fields to JSON and append to today's log file."""
-        entry = {"ts": datetime.utcnow().isoformat(timespec="seconds") + "Z", **fields}
+        ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        entry = {"ts": ts, **fields}
         line = json.dumps(entry, ensure_ascii=False)
         try:
             with self._lock:
-                with self._log_path().open("a", encoding="utf-8") as fh:
-                    fh.write(line + "\n")
+                fh = self._get_handle()
+                fh.write(line + "\n")
+                fh.flush()
         except Exception as exc:  # noqa: BLE001
             print(f"[PipelineLogger] Write failed: {exc}", file=sys.stderr)
 

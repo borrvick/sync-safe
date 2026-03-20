@@ -274,8 +274,12 @@ class Settings(BaseSettings):
 
     # ---- Logging --------------------------------------------------------------
     log_dir: str = Field(
-        default="logs",
-        description="Directory for daily pipeline log files, relative to the project root.",
+        default="",
+        description=(
+            "Directory for daily pipeline log files. "
+            "Empty string (default) resolves to <project_root>/logs/ via core/logging.py. "
+            "Set to an absolute path to override."
+        ),
     )
 
 
