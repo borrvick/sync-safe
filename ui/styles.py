@@ -36,6 +36,14 @@ STYLES = """
   --grade-c:      #F5A623;
   --grade-d:      #F57A35;
   --needs-review: #C8E86A;
+  /* ── Issue type colours ── */
+  --issue-brand:    #F5A623;
+  --issue-explicit: #FF3060;
+  --issue-violence: #FF6B35;
+  --issue-location: #4FC3F7;
+  /* ── Sync status colours ── */
+  --sync-pass:      #0DF5A0;
+  --sync-fail:      #FF6B35;
   --ui:           'Chakra Petch', monospace;
   --body:         'Figtree', sans-serif;
   --mono:         'JetBrains Mono', monospace;
@@ -64,6 +72,14 @@ STYLES = """
   --grade-c:      #F5A623;
   --grade-d:      #F57A35;
   --needs-review: #C8E86A;
+  /* ── Issue type colours ── */
+  --issue-brand:    #F5A623;
+  --issue-explicit: #FF3060;
+  --issue-violence: #FF6B35;
+  --issue-location: #4FC3F7;
+  /* ── Sync status colours ── */
+  --sync-pass:      #0DF5A0;
+  --sync-fail:      #FF6B35;
 }
 
 /* NOTE: !important here overrides ALL font families including icon fonts (e.g. Material Symbols).

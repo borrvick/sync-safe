@@ -14,32 +14,19 @@ from __future__ import annotations
 
 import streamlit as st
 
+from ui.components import eq_bars
+
 
 def _go(page: str) -> None:
     """on_click callback — sets page before Streamlit's automatic rerun fires."""
     st.session_state.page = page
 
 
-def _eq_html(n: int, h: int) -> str:
-    """Return n animated EQ bar divs using the CSS --accent variable."""
-    anims = ["eq-a", "eq-b", "eq-c"]
-    out = []
-    for i in range(n):
-        dur = f"{1.1 + (i % 3) * 0.22:.2f}s"
-        dly = f"{i * 0.07:.2f}s"
-        out.append(
-            f'<div style="width:3px;height:{h}px;background:var(--accent);border-radius:2px;'
-            f'transform-origin:bottom;animation:{anims[i%3]} {dur} ease-in-out {dly} infinite;'
-            f'flex-shrink:0;"></div>'
-        )
-    return "".join(out)
-
-
 # ── Navigation bar ─────────────────────────────────────────────────────────────
 
 def render_site_nav(current_page: str) -> None:
     """Render the full-width site navigation bar."""
-    eq = _eq_html(6, 24)
+    eq = eq_bars(6, color="var(--accent)", h=24)
 
     with st.container():
         st.markdown('<div class="ss-nav-marker"></div>', unsafe_allow_html=True)
@@ -92,7 +79,7 @@ def render_site_nav(current_page: str) -> None:
 
 def render_site_footer() -> None:
     """Render the full-width site footer."""
-    eq = _eq_html(5, 16)
+    eq = eq_bars(5, color="var(--accent)", h=16)
 
     st.markdown(
         '<hr style="margin:28px 0 0;border:none;border-top:1px solid var(--border);">',

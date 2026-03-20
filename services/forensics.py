@@ -251,13 +251,7 @@ class Forensics:
             if not (CONSTANTS.LOOP_BPM_MIN <= bpm <= CONSTANTS.LOOP_BPM_MAX):
                 return 0.0
 
-            segment_len = int(
-                (60.0 / bpm) * CONSTANTS.BEATS_PER_WINDOW // CONSTANTS.BEATS_PER_WINDOW
-                * CONSTANTS.BEATS_PER_WINDOW
-                * (sr / CONSTANTS.SAMPLE_RATE)
-            )
-            # simpler: 4 bars × 4 beats/bar × seconds/beat × samples/second
-            segment_len = int((60.0 / bpm) * 4 * 4 * sr)
+            segment_len = int((60.0 / bpm) * CONSTANTS.BEATS_PER_WINDOW * sr)
 
             if segment_len > len(audio):
                 return 0.0

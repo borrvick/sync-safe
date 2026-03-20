@@ -10,4 +10,4 @@ runtime-fetched LDNOOBW list is comprehensive and should handle most cases.
 
 # Words added beyond better-profanity built-in + LDNOOBW English list.
 # Use lowercase. better-profanity handles common leetspeak variants automatically.
-PROFANITY_SUPPLEMENT: list[str] = []
+PROFANITY_SUPPLEMENT: tuple[str, ...] = ()
