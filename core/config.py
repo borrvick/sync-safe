@@ -174,8 +174,8 @@ class Settings(BaseSettings):
 
     # ---- Model selection ------------------------------------------------------
     whisper_model: str = Field(
-        default="base",
-        description="Whisper model size. Options: tiny | base | small | medium | large. "
+        default="large-v3",
+        description="Whisper model size. Options: tiny | base | small | medium | large-v3. "
                     "Larger models are more accurate but require more VRAM/RAM.",
     )
 
@@ -235,8 +235,17 @@ class ModelParams(BaseModel):
 
     # ---- Whisper (transcription) ----------------------------------------------
     whisper_model: str = Field(
-        default="base",
-        description="Model size passed to whisper.load_model().",
+        default="large-v3",
+        description="Model size passed to whisper.load_model(). large-v3 is the strongest free local option.",
+    )
+    whisper_initial_prompt: str = Field(
+        default="",
+        description=(
+            "Prepended to Whisper's context window. Intentionally left empty: "
+            "when the first window is silence (instrumental intro), Whisper "
+            "'completes' a non-empty prompt with hallucinated meta-text instead "
+            "of transcribing audio. Leave empty for music use cases."
+        ),
     )
     whisper_temperature: float = Field(
         default=0.0,
@@ -248,6 +257,48 @@ class ModelParams(BaseModel):
         default=False,
         description="Use FP16 inference. Set False for CPU/MPS safety.",
     )
+    whisper_condition_on_previous_text: bool = Field(
+        default=False,
+        description=(
+            "Whether Whisper conditions each window on the previous output. "
+            "False prevents hallucination loops (repeating phrases) that are "
+            "common when transcribing music. Should remain False for audio tracks."
+        ),
+    )
+    whisper_no_speech_threshold: float = Field(
+        default=0.6,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Segments with a no-speech probability above this threshold are "
+            "discarded. 0.6 filters instrumental sections without cutting vocals."
+        ),
+    )
+    whisper_compression_ratio_threshold: float = Field(
+        default=2.4,
+        ge=1.0,
+        description=(
+            "Segments whose gzip compression ratio exceeds this value are "
+            "treated as hallucinations and dropped. 2.4 is the Whisper default; "
+            "lower to be more aggressive about dropping repetitive output."
+        ),
+    )
+    whisper_logprob_threshold: float = Field(
+        default=-1.0,
+        description=(
+            "Segments with an average log-probability below this threshold are "
+            "dropped as low-confidence. -1.0 is the Whisper default."
+        ),
+    )
+    whisper_language: str = Field(
+        default="en",
+        description=(
+            "BCP-47 language code passed to Whisper. Forcing 'en' prevents "
+            "Whisper from auto-detecting the language from the first 30 seconds "
+            "of audio — which on isolated vocal stems with processing artifacts "
+            "often misidentifies as non-English and produces garbled output."
+        ),
+    )
 
     # ---- RoBERTa (AI lyric authorship) ----------------------------------------
     roberta_model: str = Field(
@@ -258,17 +309,6 @@ class ModelParams(BaseModel):
         default=400,
         gt=0,
         description="Max words per chunk fed to RoBERTa (token-window safety).",
-    )
-
-    # ---- NLI compliance classifier --------------------------------------------
-    nli_model: str = Field(
-        default="cross-encoder/nli-deberta-v3-small",
-        description="Zero-shot NLI model for lyric compliance classification.",
-    )
-    nli_batch_size: int = Field(
-        default=8,
-        gt=0,
-        description="Inference batch size. Reduce if OOM on CPU.",
     )
 
     # ---- allin1 (structure analysis) ------------------------------------------

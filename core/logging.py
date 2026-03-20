@@ -132,6 +132,10 @@ class PipelineLogger:
         """Log a non-fatal step failure (step degraded to None)."""
         self._write(event="step_error", step=step, error=error)
 
+    def info(self, event: str, **fields: Any) -> None:
+        """Log a custom informational event with arbitrary structured fields."""
+        self._write(event=event, **fields)
+
     # ------------------------------------------------------------------
     # Private
     # ------------------------------------------------------------------

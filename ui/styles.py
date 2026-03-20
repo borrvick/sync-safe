@@ -31,6 +31,11 @@ STYLES = """
   --pulse-drop:   0 4px 24px rgba(13,27,42,0.12);
   --bg-dot:       rgba(13,27,42,0.04);
   --audio-filter: none;
+  /* ── Compliance grade colours ── */
+  --grade-b:      #6ECC8A;
+  --grade-c:      #F5A623;
+  --grade-d:      #F57A35;
+  --needs-review: #C8E86A;
   --ui:           'Chakra Petch', monospace;
   --body:         'Figtree', sans-serif;
   --mono:         'JetBrains Mono', monospace;
@@ -54,6 +59,11 @@ STYLES = """
   --pulse-drop:   0 24px 80px rgba(0,0,0,0.65);
   --bg-dot:       rgba(245,100,10,0.05);
   --audio-filter: invert(1) hue-rotate(180deg);
+  /* ── Compliance grade colours ── */
+  --grade-b:      #6ECC8A;
+  --grade-c:      #F5A623;
+  --grade-d:      #F57A35;
+  --needs-review: #C8E86A;
 }
 
 /* NOTE: !important here overrides ALL font families including icon fonts (e.g. Material Symbols).

@@ -44,13 +44,19 @@ class AudioBuffer(BaseModel):
     `raw` holds the WAV/MP3 bytes as ingested — no resampling is done here.
     Each service is responsible for resampling to its required rate via
     librosa.load(buffer.to_bytesio(), sr=CONSTANTS.SAMPLE_RATE).
+
+    `metadata` carries title/artist extracted at ingestion time (e.g. from
+    yt-dlp's --dump-json for YouTube sources). This is the primary source
+    for the LRCLib lyrics lookup since embedded audio tags are stripped
+    during the yt-dlp → ffmpeg transcode.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    raw: bytes = Field(repr=False)          # excluded from repr; can be 50 MB
+    raw: bytes = Field(repr=False)                          # excluded from repr; can be 50 MB
     sample_rate: int = Field(default=22_050)
-    label: str = Field(default="")          # display name shown in the UI
+    label: str = Field(default="")                          # display name shown in the UI
+    metadata: dict[str, str] = Field(default_factory=dict)  # title, artist from ingestion
 
     def to_bytesio(self) -> io.BytesIO:
         """Return a fresh BytesIO cursor at position 0."""
