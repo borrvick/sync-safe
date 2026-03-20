@@ -58,7 +58,7 @@ class SystemConstants:
     # Inter-beat interval variance below this → "Perfect Quantization" (AI signal)
     IBI_VARIANCE_THRESHOLD: float = 0.001
 
-    # Cross-correlation score above this → likely stock loop (Gallo-Method)
+    # Cross-correlation score above this → likely stock loop (sync readiness)
     LOOP_SCORE_CEILING: float = 0.98
 
     # Frequency above which spectral energy is checked for AI artefacts ("slop")
@@ -83,6 +83,15 @@ class SystemConstants:
 
     # Window (seconds from end) used for fade slope regression
     FADE_WINDOW_SECONDS: float = 10.0
+
+    # Sting check: librosa RMS hop/frame sizes (samples)
+    STING_HOP_LENGTH: int = 512
+    STING_FRAME_LENGTH: int = 1024
+
+    # Fade detection: normalised slope below this → declining energy
+    FADE_SLOPE_THRESHOLD: float = -0.0005
+    # Fade detection: tail-to-mean energy ratio below this → low tail energy
+    FADE_RATIO_MAX: float = 0.25
 
     # ---- Compliance: 4-8 Bar Energy Rule --------------------------------------
     # Minimum normalised spectral-contrast delta across a 4-bar window
@@ -110,6 +119,80 @@ class SystemConstants:
     # BPM range outside this → skip loop detection (unreliable tempo)
     LOOP_BPM_MIN: float = 40.0
     LOOP_BPM_MAX: float = 300.0
+
+    # ---- Forensics: Autocorrelation loop detection ----------------------------
+    # Minimum peak count in normalised autocorrelation to flag as regularly looping
+    LOOP_PEAK_COUNT_THRESHOLD: int = 5
+    # Mean spacing between autocorrelation peaks above this (frames) → not a tight loop
+    LOOP_PEAK_SPACING_MAX: int = 100
+    # Autocorrelation loop score at or above this → "Sample-Heavy / Loop-Based" verdict path
+    LOOP_AUTOCORR_VERDICT_THRESHOLD: float = 0.70
+    # Autocorrelation score above this + organic groove + high IBI → "Human (Sample/Loop)" verdict
+    LOOP_AUTOCORR_SAMPLE_VERDICT_THRESHOLD: float = 0.85
+    # UI display threshold — scores above this shown as "Moderate" repetition (below = "Low")
+    LOOP_AUTOCORR_DISPLAY_MODERATE_MIN: float = 0.40
+
+    # ---- Forensics: Spectral centroid instability ----------------------------
+    # Silence threshold (dB below peak) for librosa.effects.split — splits track
+    # into non-silent intervals where centroid is evaluated
+    CENTROID_TOP_DB: float = 30.0
+    # Ignore intervals shorter than this (seconds) — too brief for reliable centroid CV
+    CENTROID_MIN_INTERVAL_S: float = 0.5
+    # Mean within-interval centroid CV above this → erratic formant drift (AI signal)
+    # AI vocoders shift upper partials mid-note; human vibrato modulates all partials
+    # together so centroid stays more stable.
+    # Calibrated against 8 tracks:
+    #   Human (Espresso=0.196, Springsteen=0.205, G Thang=0.242, My Body=0.319, Levitating=0.299)
+    #   AI    (Careless Whisper AI=0.364, Breaking Rust AI=0.378, Velvet Sundown=0.322)
+    # Threshold at 0.32 splits cleanly: highest non-AI human=0.299, lowest AI=0.322.
+    CENTROID_INSTABILITY_AI_MIN: float = 0.32
+    # Centroid CV above this → extreme formant replacement (vocoder/talkbox/heavy processing)
+    # NOT an additional AI signal; a separate flag that contextualises very high centroid values.
+    # Empirically: AI tracks top out at ~0.38; Imogen Heap vocoder = 0.677.
+    # Anything above 0.50 is beyond any AI generator observed — indicates analog/digital processing.
+    CENTROID_INSTABILITY_VOCODER_MIN: float = 0.50
+
+    # ---- Forensics: Harmonic-to-noise ratio (HNR) ---------------------------
+    # AI generators produce unnaturally clean harmonic content — no breath, reed
+    # noise, or physical resonance. HPSS separates harmonic/percussive components;
+    # harmonic_energy / total_energy within sustained intervals gives HNR.
+    # Calibrated against 5 tracks (3 with live HNR values):
+    #   Human: Springsteen=0.485, Levitating=0.503
+    #   AI:    Breaking Rust=0.664
+    # Threshold at 0.59: highest human=0.503, lowest AI=0.664.
+    # Margin: 0.087 on human side, 0.074 on AI side.
+    HARMONIC_RATIO_AI_MIN: float = 0.59
+
+    # ---- Forensics: Probability weights for verdict scoring ------------------
+    # Each weight is the contribution to ai_probability [0.0, 1.0] when the
+    # corresponding signal fires. Weights are additive; score is clamped to 1.0.
+    # Calibrated so Espresso (human + Splice) ≈ 0.00 and
+    # Careless Whisper AI cover ≈ 0.55.
+    PROB_WEIGHT_CENTROID: float = 0.40          # within-note formant drift
+    PROB_WEIGHT_IBI_QUANTIZED: float = 0.25     # machine-grid beat timing
+    PROB_WEIGHT_LOOP_CROSS_CORR: float = 0.15   # near-identical 4-bar fingerprints
+    PROB_WEIGHT_AUTOCORR_CENTROID: float = 0.15 # autocorr + centroid together
+    PROB_WEIGHT_HARMONIC_RATIO: float = 0.20    # unnaturally clean harmonics
+    PROB_WEIGHT_SYNTHID_MEDIUM: float = 0.10    # medium-confidence watermark
+    PROB_WEIGHT_SYNTHID_LOW: float = 0.05       # low-confidence watermark
+    PROB_WEIGHT_SPECTRAL_SLOP: float = 0.10     # HF energy anomaly
+
+    # Probability thresholds for final verdict assignment
+    PROB_VERDICT_AI: float = 0.70               # ≥ this → "AI"
+    PROB_VERDICT_HYBRID: float = 0.45           # ≥ this → "Possible Hybrid AI Cover"
+    PROB_VERDICT_UNCERTAIN: float = 0.25        # ≥ this → "Uncertain"
+                                                # < this → "Human" or override
+
+    # Organic production damping: if autocorr is below this threshold (highly
+    # non-repetitive structure) AND centroid is below vocoder territory, the
+    # elevated centroid+HNR are more likely from pitch processing / vocal stacking
+    # than AI generation. Halve the probability contribution of those two signals.
+    # AI generators always produce structured repetitive content (autocorr > 0.83
+    # across all tracks tested); experimental human production (Bon Iver, avant-garde)
+    # can have autocorr near zero while using heavy pitch processing.
+    # Calibrated: Bon Iver 22 (OVER S∞∞N) autocorr=0.000 → correctly damped.
+    PROB_AUTOCORR_ORGANIC_THRESHOLD: float = 0.30   # below → genuinely non-repetitive
+    PROB_ORGANIC_DAMPING_FACTOR: float = 0.50        # multiply score by this when damped
 
     # ---- Forensics: Spectral slop --------------------------------------------
     # HF-to-total energy ratio above this → spectral slop flag
@@ -174,8 +257,8 @@ class Settings(BaseSettings):
 
     # ---- Model selection ------------------------------------------------------
     whisper_model: str = Field(
-        default="base",
-        description="Whisper model size. Options: tiny | base | small | medium | large. "
+        default="large-v3",
+        description="Whisper model size. Options: tiny | base | small | medium | large-v3. "
                     "Larger models are more accurate but require more VRAM/RAM.",
     )
 
@@ -196,6 +279,16 @@ class Settings(BaseSettings):
         description="Maximum permitted file upload size in megabytes.",
         ge=1,
         le=500,
+    )
+
+    # ---- Logging --------------------------------------------------------------
+    log_dir: str = Field(
+        default="",
+        description=(
+            "Directory for daily pipeline log files. "
+            "Empty string (default) resolves to <project_root>/logs/ via core/logging.py. "
+            "Set to an absolute path to override."
+        ),
     )
 
 
@@ -229,8 +322,17 @@ class ModelParams(BaseModel):
 
     # ---- Whisper (transcription) ----------------------------------------------
     whisper_model: str = Field(
-        default="base",
-        description="Model size passed to whisper.load_model().",
+        default="large-v3",
+        description="Model size passed to whisper.load_model(). large-v3 is the strongest free local option.",
+    )
+    whisper_initial_prompt: str = Field(
+        default="",
+        description=(
+            "Prepended to Whisper's context window. Intentionally left empty: "
+            "when the first window is silence (instrumental intro), Whisper "
+            "'completes' a non-empty prompt with hallucinated meta-text instead "
+            "of transcribing audio. Leave empty for music use cases."
+        ),
     )
     whisper_temperature: float = Field(
         default=0.0,
@@ -241,6 +343,48 @@ class ModelParams(BaseModel):
     whisper_fp16: bool = Field(
         default=False,
         description="Use FP16 inference. Set False for CPU/MPS safety.",
+    )
+    whisper_condition_on_previous_text: bool = Field(
+        default=False,
+        description=(
+            "Whether Whisper conditions each window on the previous output. "
+            "False prevents hallucination loops (repeating phrases) that are "
+            "common when transcribing music. Should remain False for audio tracks."
+        ),
+    )
+    whisper_no_speech_threshold: float = Field(
+        default=0.6,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Segments with a no-speech probability above this threshold are "
+            "discarded. 0.6 filters instrumental sections without cutting vocals."
+        ),
+    )
+    whisper_compression_ratio_threshold: float = Field(
+        default=2.4,
+        ge=1.0,
+        description=(
+            "Segments whose gzip compression ratio exceeds this value are "
+            "treated as hallucinations and dropped. 2.4 is the Whisper default; "
+            "lower to be more aggressive about dropping repetitive output."
+        ),
+    )
+    whisper_logprob_threshold: float = Field(
+        default=-1.0,
+        description=(
+            "Segments with an average log-probability below this threshold are "
+            "dropped as low-confidence. -1.0 is the Whisper default."
+        ),
+    )
+    whisper_language: str = Field(
+        default="en",
+        description=(
+            "BCP-47 language code passed to Whisper. Forcing 'en' prevents "
+            "Whisper from auto-detecting the language from the first 30 seconds "
+            "of audio — which on isolated vocal stems with processing artifacts "
+            "often misidentifies as non-English and produces garbled output."
+        ),
     )
 
     # ---- RoBERTa (AI lyric authorship) ----------------------------------------
@@ -254,15 +398,15 @@ class ModelParams(BaseModel):
         description="Max words per chunk fed to RoBERTa (token-window safety).",
     )
 
-    # ---- NLI compliance classifier --------------------------------------------
-    nli_model: str = Field(
-        default="cross-encoder/nli-deberta-v3-small",
-        description="Zero-shot NLI model for lyric compliance classification.",
-    )
-    nli_batch_size: int = Field(
-        default=8,
-        gt=0,
-        description="Inference batch size. Reduce if OOM on CPU.",
+    # ---- allin1 (structure analysis) ------------------------------------------
+    allin1_model: str = Field(
+        default="harmonix-fold0",
+        description=(
+            "allin1 model name passed to allin1.analyze(). "
+            "'harmonix-all' is an 8-model ensemble (more accurate but 8× slower). "
+            "'harmonix-fold0' … 'harmonix-fold7' are single-fold models — "
+            "fold0 is the default: fast, one HF download, good accuracy for sync use."
+        ),
     )
 
     # ---- Demucs (source separation — called by allin1) ------------------------

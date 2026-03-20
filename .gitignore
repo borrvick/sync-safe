@@ -1,3 +1,6 @@
+# Dev test fixtures (written by app during runs, loaded by scripts/test_forensics.py)
+tmp/
+
 # Secrets / credentials
 cookies.txt
 .env
@@ -30,3 +33,6 @@ spec/
 
 # Generated / exported artifacts
 *.html
+
+# Daily pipeline logs (local only — rotated automatically at startup)
+logs/

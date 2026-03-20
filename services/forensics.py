@@ -68,7 +68,7 @@ class Forensics:
 
     def analyze(self, audio: AudioBuffer) -> ForensicsResult:
         """
-        Run all four forensic checks and aggregate into a ForensicsResult.
+        Run all forensic checks and aggregate into a ForensicsResult.
 
         Args:
             audio: In-memory audio buffer from Ingestion.
@@ -86,28 +86,52 @@ class Forensics:
         c2pa_flag, c2pa_label              = self._check_c2pa(raw)
         ibi_variance, spectral_slop        = self._analyse_groove(raw)
         loop_score                          = self._detect_loops(raw)
+        loop_autocorr_score                 = self._detect_loops_autocorr(raw)
+        centroid_instability_score          = self._analyse_centroid_instability(raw)
+        harmonic_ratio_score                = self._analyse_harmonic_ratio(raw)
         synthid_bins                        = self._check_synthid(raw)
 
+        ai_probability = _compute_ai_probability(
+            c2pa_flag=c2pa_flag,
+            ibi_variance=ibi_variance,
+            loop_score=loop_score,
+            loop_autocorr_score=loop_autocorr_score,
+            centroid_instability_score=centroid_instability_score,
+            harmonic_ratio_score=harmonic_ratio_score,
+            synthid_bins=synthid_bins,
+            spectral_slop=spectral_slop,
+        )
         flags = _build_flags(
             c2pa_label=c2pa_label,
             ibi_variance=ibi_variance,
             spectral_slop=spectral_slop,
             loop_score=loop_score,
+            loop_autocorr_score=loop_autocorr_score,
+            centroid_instability_score=centroid_instability_score,
+            harmonic_ratio_score=harmonic_ratio_score,
             synthid_bins=synthid_bins,
         )
         verdict = _compute_verdict(
             c2pa_flag=c2pa_flag,
             ibi_variance=ibi_variance,
             loop_score=loop_score,
+            loop_autocorr_score=loop_autocorr_score,
+            centroid_instability_score=centroid_instability_score,
+            harmonic_ratio_score=harmonic_ratio_score,
             synthid_bins=synthid_bins,
+            spectral_slop=spectral_slop,
         )
 
         return ForensicsResult(
             c2pa_flag=c2pa_flag,
             ibi_variance=ibi_variance,
             loop_score=loop_score,
+            loop_autocorr_score=loop_autocorr_score,
             spectral_slop=spectral_slop,
             synthid_score=float(synthid_bins),
+            centroid_instability_score=centroid_instability_score,
+            harmonic_ratio_score=harmonic_ratio_score,
+            ai_probability=ai_probability,
             flags=flags,
             verdict=verdict,
         )
@@ -227,13 +251,7 @@ class Forensics:
             if not (CONSTANTS.LOOP_BPM_MIN <= bpm <= CONSTANTS.LOOP_BPM_MAX):
                 return 0.0
 
-            segment_len = int(
-                (60.0 / bpm) * CONSTANTS.BEATS_PER_WINDOW // CONSTANTS.BEATS_PER_WINDOW
-                * CONSTANTS.BEATS_PER_WINDOW
-                * (sr / CONSTANTS.SAMPLE_RATE)
-            )
-            # simpler: 4 bars × 4 beats/bar × seconds/beat × samples/second
-            segment_len = int((60.0 / bpm) * 4 * 4 * sr)
+            segment_len = int((60.0 / bpm) * CONSTANTS.BEATS_PER_WINDOW * sr)
 
             if segment_len > len(audio):
                 return 0.0
@@ -261,6 +279,121 @@ class Forensics:
                 "Loop detection failed.",
                 context={"original_error": str(exc)},
             ) from exc
+
+    # ------------------------------------------------------------------
+    # Private: Autocorrelation loop detection  (GPU)
+    # ------------------------------------------------------------------
+
+    @spaces.GPU
+    def _detect_loops_autocorr(self, raw: bytes) -> float:
+        """
+        Detect regular loop repetition via onset-envelope autocorrelation.
+
+        Returns:
+            Loop autocorrelation score (0.0–1.0); 1.0 = strong regular repetition.
+            Delegates all computation to the module-level pure function.
+
+        Raises:
+            ModelInferenceError: on librosa load or autocorrelation failure.
+        """
+        try:
+            import librosa
+
+            audio, sr = librosa.load(
+                io.BytesIO(raw), sr=CONSTANTS.SAMPLE_RATE, mono=True
+            )
+        except Exception as exc:
+            raise ModelInferenceError(
+                "Loop autocorrelation: audio load failed.",
+                context={"original_error": str(exc)},
+            ) from exc
+
+        return compute_loop_autocorrelation_score(
+            audio,
+            sr,
+            CONSTANTS.LOOP_PEAK_COUNT_THRESHOLD,
+            CONSTANTS.LOOP_PEAK_SPACING_MAX,
+        )
+
+    # ------------------------------------------------------------------
+    # Private: Spectral centroid instability  (GPU)
+    # ------------------------------------------------------------------
+
+    @spaces.GPU
+    def _analyse_centroid_instability(self, raw: bytes) -> float:
+        """
+        Detect formant drift within sustained notes via spectral centroid CV.
+
+        AI vocoders shift upper partials mid-note (the "glassy/hollow" artifact).
+        This shows up as high coefficient-of-variation of the spectral centroid
+        within each non-silent interval. Human vibrato modulates all partials
+        together so the centroid stays relatively stable.
+
+        Returns:
+            Mean within-interval centroid CV across all sustained intervals.
+            -1.0 when no qualifying intervals are found.
+            Delegates all computation to compute_centroid_instability_score().
+
+        Raises:
+            ModelInferenceError: on librosa load failure.
+        """
+        try:
+            import librosa
+
+            audio, sr = librosa.load(
+                io.BytesIO(raw), sr=CONSTANTS.SAMPLE_RATE, mono=True
+            )
+        except Exception as exc:
+            raise ModelInferenceError(
+                "Centroid instability: audio load failed.",
+                context={"original_error": str(exc)},
+            ) from exc
+
+        return compute_centroid_instability_score(
+            audio,
+            sr,
+            CONSTANTS.CENTROID_TOP_DB,
+            CONSTANTS.CENTROID_MIN_INTERVAL_S,
+        )
+
+    # ------------------------------------------------------------------
+    # Private: Harmonic-to-noise ratio within sustained intervals  (GPU)
+    # ------------------------------------------------------------------
+
+    @spaces.GPU
+    def _analyse_harmonic_ratio(self, raw: bytes) -> float:
+        """
+        Measure harmonic purity within sustained intervals via HPSS.
+
+        AI generators produce unnaturally clean harmonic content — no breath,
+        reed noise, or physical resonance artifacts. High harmonic_energy /
+        total_energy within sustained notes is an AI signal.
+
+        Returns:
+            Mean HNR across qualifying intervals in [0.0, 1.0].
+            -1.0 when no qualifying intervals are found.
+
+        Raises:
+            ModelInferenceError: on librosa load failure.
+        """
+        try:
+            import librosa
+
+            audio, sr = librosa.load(
+                io.BytesIO(raw), sr=CONSTANTS.SAMPLE_RATE, mono=True
+            )
+        except Exception as exc:
+            raise ModelInferenceError(
+                "Harmonic ratio: audio load failed.",
+                context={"original_error": str(exc)},
+            ) from exc
+
+        return compute_harmonic_ratio_score(
+            audio,
+            sr,
+            CONSTANTS.CENTROID_TOP_DB,
+            CONSTANTS.CENTROID_MIN_INTERVAL_S,
+        )
 
     # ------------------------------------------------------------------
     # Private: SynthID-style phase coherence scan  (GPU)
@@ -372,6 +505,309 @@ def _cross_correlate(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a[:n], b[:n]))
 
 
+def compute_loop_autocorrelation_score(
+    audio: np.ndarray,
+    sr: int,
+    peak_count_threshold: int,
+    peak_spacing_max: int,
+) -> float:
+    """
+    Detect regular loop repetition via onset-envelope autocorrelation.
+
+    Algorithm:
+      1. Compute onset envelope from the waveform.
+      2. Autocorrelate (lag 1 onward — lag 0 is always the global max).
+      3. Normalise to [0, 1] and pick peaks.
+      4. If peak count ≥ peak_count_threshold AND mean spacing ≤ peak_spacing_max,
+         return a score combining peak density and spacing tightness; else 0.0.
+
+    Args:
+        audio:               Mono waveform array.
+        sr:                  Sample rate (Hz).
+        peak_count_threshold: Minimum peaks required to flag repetition.
+        peak_spacing_max:    Mean peak spacing above this (frames) → not a tight loop.
+
+    Returns:
+        float in [0.0, 1.0]; 1.0 = strong regular repetition detected.
+
+    Pure function — no I/O, no side effects, deterministic.
+
+    Raises:
+        ModelInferenceError: if librosa raises unexpectedly.
+    """
+    try:
+        import librosa
+
+        onset_env = librosa.onset.onset_strength(y=audio, sr=sr)
+        # Autocorrelate up to half the signal length; skip lag-0 (always 1.0 after norm)
+        autocorr = librosa.autocorrelate(onset_env, max_size=len(onset_env) // 2)
+        autocorr_tail = autocorr[1:]
+        peak_val = np.max(autocorr_tail)
+        if peak_val < 1e-9:
+            return 0.0
+        autocorr_norm = autocorr_tail / peak_val
+
+        peaks = librosa.util.peak_pick(
+            autocorr_norm,
+            pre_max=10,
+            post_max=10,
+            pre_avg=10,
+            post_avg=10,
+            delta=0.05,
+            wait=5,
+        )
+
+        if len(peaks) < peak_count_threshold:
+            return 0.0
+
+        spacings = np.diff(peaks)
+        if len(spacings) == 0:
+            return 0.0
+
+        mean_spacing = float(np.mean(spacings))
+        if mean_spacing > peak_spacing_max:
+            return 0.0
+
+        # Score: blend peak density and spacing tightness, each capped at 1.0
+        count_score = min(float(len(peaks)) / float(peak_count_threshold * 3), 1.0)
+        spacing_score = 1.0 - min(mean_spacing / float(peak_spacing_max), 1.0)
+        return float((count_score + spacing_score) / 2.0)
+
+    except Exception as exc:
+        raise ModelInferenceError(
+            "Loop autocorrelation detection failed.",
+            context={"original_error": str(exc)},
+        ) from exc
+
+
+def compute_centroid_instability_score(
+    audio: np.ndarray,
+    sr: int,
+    top_db: float,
+    min_interval_s: float,
+) -> float:
+    """
+    Detect formant drift within sustained notes via spectral centroid CV.
+
+    Algorithm:
+      1. Split the waveform into non-silent intervals using librosa.effects.split.
+      2. Discard intervals shorter than min_interval_s (too brief for reliable CV).
+      3. For each qualifying interval, compute the spectral centroid frame-by-frame
+         and calculate the coefficient of variation (std / mean) of those centroids.
+      4. Return the mean CV across all qualifying intervals.
+
+    Why this works:
+      AI vocoders synthesise each note independently and can introduce erratic
+      phase shifts in upper partials mid-note — the "glassy/hollow/formant-shifting"
+      artifact that audio engineers hear. This causes the spectral centroid (centre
+      of mass of the spectrum) to drift within what should be a sustained tone.
+      Human vibrato, by contrast, modulates all partials proportionally so the
+      centroid moves far less relative to its mean.
+
+    Score interpretation:
+      Near 0.0 → stable centroid within each note (human or clean synthesis).
+      High (> CENTROID_INSTABILITY_AI_MIN) → erratic formant drift (AI signal).
+      -1.0    → no qualifying intervals found (e.g. full-instrumental, very quiet).
+
+    Args:
+        audio:           Mono waveform array.
+        sr:              Sample rate (Hz).
+        top_db:          Silence threshold for librosa.effects.split.
+        min_interval_s:  Minimum interval duration in seconds to analyse.
+
+    Returns:
+        float in [0.0, 1.0], or -1.0 when no intervals qualify.
+
+    Pure function — no I/O, no side effects, deterministic.
+
+    Raises:
+        ModelInferenceError: if librosa raises unexpectedly.
+    """
+    try:
+        import librosa
+
+        min_interval_samples = int(min_interval_s * sr)
+        intervals = librosa.effects.split(audio, top_db=top_db)
+
+        cvs: list[float] = []
+        for start, end in intervals:
+            if (end - start) < min_interval_samples:
+                continue
+            segment  = audio[start:end]
+            centroid = librosa.feature.spectral_centroid(y=segment, sr=sr)[0]
+            mean_c   = float(np.mean(centroid))
+            if mean_c < 1e-9:
+                continue
+            cv = float(np.std(centroid) / mean_c)
+            cvs.append(cv)
+
+        if not cvs:
+            return -1.0
+
+        return float(np.clip(np.mean(cvs), 0.0, 1.0))
+
+    except Exception as exc:
+        raise ModelInferenceError(
+            "Centroid instability computation failed.",
+            context={"original_error": str(exc)},
+        ) from exc
+
+
+
+def compute_harmonic_ratio_score(
+    audio: np.ndarray,
+    sr: int,
+    top_db: float,
+    min_interval_s: float,
+) -> float:
+    """
+    Measure harmonic purity within sustained intervals via HPSS.
+
+    Algorithm:
+      1. Split the waveform into non-silent intervals (librosa.effects.split).
+      2. Discard intervals shorter than min_interval_s.
+      3. For each qualifying interval, run HPSS and compute
+         harmonic_energy / total_energy (HNR for that interval).
+      4. Return the mean HNR across all qualifying intervals.
+
+    Why this works:
+      Real acoustic instruments — saxophone, guitar, voice — have physical noise
+      components: breath, reed vibration, bow pressure, room reflections. AI audio
+      generators synthesise each note from a learned latent space that lacks these
+      noise components, producing unnaturally high harmonic purity.
+      HNR within sustained notes targets this difference without being confused
+      by percussive sections (excluded by librosa.effects.split).
+
+    Score interpretation:
+      Near 1.0 → almost entirely harmonic content (AI signal if above threshold).
+      Near 0.5 → mixed harmonic/noise (typical real acoustic recording).
+      -1.0     → no qualifying intervals found.
+
+    Pure function — no I/O, no side effects, deterministic.
+
+    Raises:
+        ModelInferenceError: if librosa raises unexpectedly.
+    """
+    try:
+        import librosa
+
+        min_interval_samples = int(min_interval_s * sr)
+        intervals = librosa.effects.split(audio, top_db=top_db)
+
+        ratios: list[float] = []
+        for start, end in intervals:
+            if (end - start) < min_interval_samples:
+                continue
+            segment = audio[start:end]
+            total_energy = float(np.mean(segment ** 2))
+            if total_energy < 1e-9:
+                continue
+            y_harmonic, _ = librosa.effects.hpss(segment)
+            harmonic_energy = float(np.mean(y_harmonic ** 2))
+            ratios.append(harmonic_energy / total_energy)
+
+        if not ratios:
+            return -1.0
+
+        return float(np.clip(np.mean(ratios), 0.0, 1.0))
+
+    except Exception as exc:
+        raise ModelInferenceError(
+            "Harmonic ratio computation failed.",
+            context={"original_error": str(exc)},
+        ) from exc
+
+
+def _compute_ai_probability(
+    c2pa_flag: bool,
+    ibi_variance: float,
+    loop_score: float,
+    loop_autocorr_score: float,
+    centroid_instability_score: float,
+    harmonic_ratio_score: float,
+    synthid_bins: int,
+    spectral_slop: float,
+) -> float:
+    """
+    Compute a weighted AI probability score in [0.0, 1.0].
+
+    Each signal contributes an additive weight when it fires; the sum is
+    clamped to 1.0. Hard-evidence overrides (C2PA, high SynthID) are NOT
+    included here — they bypass probability in _compute_verdict().
+
+    Organic production damping: if autocorr is below
+    PROB_AUTOCORR_ORGANIC_THRESHOLD and centroid is below vocoder range,
+    the probability is halved. Experimental human production (e.g. Bon Iver)
+    uses pitch stacking that elevates centroid and HNR but has near-zero loop
+    repetition — a pattern incompatible with AI generators, which always
+    produce structured repetitive content (autocorr > 0.83 empirically).
+
+    Calibrated against 10 tracks:
+      Human cluster (0–15%):
+        Espresso — Sabrina Carpenter:  centroid=0.196, HNR=0.227 → 0.00
+        Born in the USA — Springsteen: centroid=0.205, HNR=0.485 → 0.00
+        Nuthin' But a G Thang — Dre:  centroid=0.242, HNR=0.563 → 0.00
+        My Body — Young the Giant:     centroid=0.319, HNR=0.368 → 0.00
+        Levitating — Dua Lipa:         centroid=0.299, HNR=0.503 → 0.15
+      Adversarial / edge cases:
+        22 (OVER S∞∞N) — Bon Iver:    centroid=0.408, HNR=0.791, autocorr=0.000 → 0.30 (damped)
+        Hide and Seek — Imogen Heap:   centroid=0.677, HNR=0.789, autocorr=0.562 → 0.60 (vocoder)
+      AI cluster (55–75%):
+        Careless Whisper AI cover:     centroid=0.364, HNR=0.619 → 0.75
+        Walk My Walk — Breaking Rust:  centroid=0.378, HNR=0.664 → 0.75
+        Dust on the Wind — Velvet Sundown: centroid=0.322, HNR=0.718 → 0.75
+
+    Pure function — no I/O, no side effects, deterministic.
+    """
+    score = 0.0
+
+    centroid_flagged = (
+        centroid_instability_score >= CONSTANTS.CENTROID_INSTABILITY_AI_MIN
+        and centroid_instability_score >= 0.0
+    )
+
+    if centroid_flagged:
+        score += CONSTANTS.PROB_WEIGHT_CENTROID
+
+    if 0.0 <= ibi_variance < CONSTANTS.IBI_PERFECT_QUANTIZATION_MAX:
+        score += CONSTANTS.PROB_WEIGHT_IBI_QUANTIZED
+
+    if loop_score > CONSTANTS.LOOP_SCORE_POSSIBLE:
+        score += CONSTANTS.PROB_WEIGHT_LOOP_CROSS_CORR
+
+    # Centroid + autocorr together are stronger evidence of AI loop structure
+    if centroid_flagged and loop_autocorr_score >= CONSTANTS.LOOP_AUTOCORR_VERDICT_THRESHOLD:
+        score += CONSTANTS.PROB_WEIGHT_AUTOCORR_CENTROID
+
+    # Harmonic ratio — contributes only when computed (≥ 0 means real value)
+    if harmonic_ratio_score >= CONSTANTS.HARMONIC_RATIO_AI_MIN:
+        score += CONSTANTS.PROB_WEIGHT_HARMONIC_RATIO
+
+    synthid_conf = _synthid_confidence(synthid_bins)
+    if synthid_conf == "medium":
+        score += CONSTANTS.PROB_WEIGHT_SYNTHID_MEDIUM
+    elif synthid_conf == "low":
+        score += CONSTANTS.PROB_WEIGHT_SYNTHID_LOW
+
+    if spectral_slop > CONSTANTS.SPECTRAL_SLOP_RATIO:
+        score += CONSTANTS.PROB_WEIGHT_SPECTRAL_SLOP
+
+    # Organic production damping — fires when the track has near-zero loop
+    # repetition (autocorr < threshold) and centroid is below vocoder range.
+    # In this regime, elevated centroid + HNR are better explained by pitch
+    # processing / vocal stacking (e.g. Bon Iver) than AI generation, which
+    # always produces structured repetitive content (autocorr > 0.83 empirically).
+    # Does NOT fire for vocoder tracks (centroid ≥ VOCODER_MIN) — those should
+    # remain flagged because a sync supervisor needs to review heavy processing.
+    if (
+        loop_autocorr_score < CONSTANTS.PROB_AUTOCORR_ORGANIC_THRESHOLD
+        and centroid_instability_score < CONSTANTS.CENTROID_INSTABILITY_VOCODER_MIN
+    ):
+        score *= CONSTANTS.PROB_ORGANIC_DAMPING_FACTOR
+
+    return float(min(score, 1.0))
+
+
 def _synthid_confidence(coherent_bins: int) -> str:
     """Map a coherent-bin count to a confidence label string."""
     if coherent_bins == 0:
@@ -388,6 +824,9 @@ def _build_flags(
     ibi_variance: float,
     spectral_slop: float,
     loop_score: float,
+    loop_autocorr_score: float,
+    centroid_instability_score: float,
+    harmonic_ratio_score: float,
     synthid_bins: int,
 ) -> list[str]:
     """
@@ -406,7 +845,8 @@ def _build_flags(
     elif ibi_variance < CONSTANTS.IBI_PERFECT_QUANTIZATION_MAX:
         flags.append("Perfect Quantization (AI signal)")
     elif ibi_variance > CONSTANTS.IBI_ERRATIC_MIN:
-        flags.append("Erratic Humanization (AI signal)")
+        # High variance = human timing imperfection — organic signal, not AI
+        flags.append("Human-Feel Timing (Organic)")
 
     if spectral_slop > CONSTANTS.SPECTRAL_SLOP_RATIO:
         flags.append(f"Spectral Slop detected ({spectral_slop:.1%} HF energy)")
@@ -415,6 +855,38 @@ def _build_flags(
         flags.append(f"Likely Stock Loop/Sample (score {loop_score:.3f})")
     elif isinstance(loop_score, float) and loop_score > CONSTANTS.LOOP_SCORE_POSSIBLE:
         flags.append(f"Possible Repetition (score {loop_score:.3f})")
+
+    if loop_autocorr_score >= CONSTANTS.LOOP_AUTOCORR_VERDICT_THRESHOLD:
+        flags.append(
+            f"Sample-Heavy / Loop-Based (Organic Production) "
+            f"(autocorr score {loop_autocorr_score:.3f})"
+        )
+
+    if centroid_instability_score >= CONSTANTS.CENTROID_INSTABILITY_VOCODER_MIN:
+        flags.append(
+            f"Extreme Spectral Processing Detected (centroid CV {centroid_instability_score:.3f}) — "
+            f"total formant replacement; consistent with vocoder, talkbox, or heavy DSP. "
+            f"Not typical of AI voice generators (AI range: 0.32–0.38)"
+        )
+    elif centroid_instability_score >= CONSTANTS.CENTROID_INSTABILITY_AI_MIN:
+        if loop_autocorr_score < CONSTANTS.PROB_AUTOCORR_ORGANIC_THRESHOLD:
+            flags.append(
+                f"Spectral Processing Detected (centroid CV {centroid_instability_score:.3f}) — "
+                f"elevated formant drift, but non-repetitive song structure (autocorr "
+                f"{loop_autocorr_score:.3f}) suggests pitch correction / vocal stacking "
+                f"rather than AI generation. Probability weight reduced."
+            )
+        else:
+            flags.append(
+                f"Formant Drift Detected (centroid CV {centroid_instability_score:.3f}) — "
+                f"erratic within-note spectral shift (AI signal)"
+            )
+
+    if harmonic_ratio_score >= CONSTANTS.HARMONIC_RATIO_AI_MIN:
+        flags.append(
+            f"Unnaturally Clean Harmonics (HNR {harmonic_ratio_score:.3f}) — "
+            f"no breath/noise artifacts detected within sustained notes (AI signal)"
+        )
 
     conf = _synthid_confidence(synthid_bins)
     if conf == "high":
@@ -431,37 +903,71 @@ def _compute_verdict(
     c2pa_flag: bool,
     ibi_variance: float,
     loop_score: float,
+    loop_autocorr_score: float,
+    centroid_instability_score: float,
     synthid_bins: int,
+    spectral_slop: float,
+    harmonic_ratio_score: float = -1.0,
 ) -> ForensicVerdict:
     """
-    Aggregate numeric forensic scores into a final verdict.
+    Aggregate numeric forensic scores into a final verdict using a
+    probability-weighted score rather than a binary signal counter.
 
     Rules (ordered by certainty):
-      - Certified C2PA AI assertion → AI (hard evidence)
-      - High-confidence SynthID     → AI (hard evidence)
-      - Two or more soft signals    → AI
-      - One soft signal             → Uncertain
-      - No signals                  → Human
+      1. Hard evidence overrides — C2PA certified AI, high SynthID → "AI"
+      2. Loop-heavy + human-feel + no AI signals → "Human (Sample/Loop)"
+      3. Probability-weighted score (from _compute_ai_probability):
+           ≥ PROB_VERDICT_AI      → "AI"
+           ≥ PROB_VERDICT_HYBRID  → "Possible Hybrid AI Cover"
+           ≥ PROB_VERDICT_UNCERTAIN → "Uncertain"
+           < PROB_VERDICT_UNCERTAIN → "Human"
+
+    harmonic_ratio_score defaults to -1.0 for backward compatibility with
+    fixtures that pre-date the HNR signal.
 
     Pure function — compares numbers against CONSTANTS, no string matching.
     """
+    # ── Hard-evidence overrides (bypass probability) ──────────────────────────
     if c2pa_flag:
         return "AI"
     if _synthid_confidence(synthid_bins) == "high":
         return "AI"
 
-    ai_signals = 0
-    if 0.0 <= ibi_variance < CONSTANTS.IBI_PERFECT_QUANTIZATION_MAX:
-        ai_signals += 1
-    if ibi_variance > CONSTANTS.IBI_ERRATIC_MIN:
-        ai_signals += 1
-    if loop_score > CONSTANTS.LOOP_SCORE_CEILING:
-        ai_signals += 1
-    if _synthid_confidence(synthid_bins) in ("medium", "low"):
-        ai_signals += 1
+    centroid_flagged = (
+        centroid_instability_score >= CONSTANTS.CENTROID_INSTABILITY_AI_MIN
+        and centroid_instability_score >= 0.0
+    )
 
-    if ai_signals >= 2:
+    # ── Human (Sample/Loop) override ──────────────────────────────────────────
+    # Strong autocorr + human-feel timing + no centroid/HNR AI signals
+    # → Splice/sample-loop-heavy production by a human artist.
+    hnr_flagged = harmonic_ratio_score >= CONSTANTS.HARMONIC_RATIO_AI_MIN
+    if (
+        loop_autocorr_score >= CONSTANTS.LOOP_AUTOCORR_SAMPLE_VERDICT_THRESHOLD
+        and ibi_variance > CONSTANTS.IBI_ERRATIC_MIN
+        and synthid_bins == 0
+        and spectral_slop <= CONSTANTS.SPECTRAL_SLOP_RATIO
+        and not centroid_flagged
+        and not hnr_flagged
+    ):
+        return "Human (Sample/Loop)"
+
+    # ── Probability-weighted verdict ──────────────────────────────────────────
+    prob = _compute_ai_probability(
+        c2pa_flag=c2pa_flag,
+        ibi_variance=ibi_variance,
+        loop_score=loop_score,
+        loop_autocorr_score=loop_autocorr_score,
+        centroid_instability_score=centroid_instability_score,
+        harmonic_ratio_score=harmonic_ratio_score,
+        synthid_bins=synthid_bins,
+        spectral_slop=spectral_slop,
+    )
+
+    if prob >= CONSTANTS.PROB_VERDICT_AI:
         return "AI"
-    if ai_signals == 1:
+    if prob >= CONSTANTS.PROB_VERDICT_HYBRID:
+        return "Possible Hybrid AI Cover"
+    if prob >= CONSTANTS.PROB_VERDICT_UNCERTAIN:
         return "Uncertain"
     return "Human"

@@ -10,6 +10,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from ui.components import eq_bars
+from ui.nav import render_site_nav, render_site_footer
 
 # ── Bento card data ───────────────────────────────────────────────────────────
 
@@ -18,7 +19,7 @@ _CARDS = [
     {"cls": "bc-groove", "theme": "ta", "icon": "🥁", "cat": "IBI VARIANCE",       "label": "Groove Analysis",         "desc": "Measures inter-beat timing deviations in microseconds. Humans rush and drag <strong>(&gt;8ms²)</strong>. AI generators lock to a perfect grid <strong>(&lt;0.5ms²)</strong>."},
     {"cls": "bc-loop",   "theme": "ta", "icon": "🔁", "cat": "SPECTRAL MATCHING",  "label": "Loop Detection",          "desc": "Splits audio into 4-bar segments and cross-correlates spectral fingerprints. Scores above <strong>0.98</strong> flag stock loops or AI repetition artifacts."},
     {"cls": "bc-struct", "theme": "ta", "icon": "🎼", "cat": "AI ENSEMBLE",        "label": "Structure & Key",         "desc": "Predicts BPM, musical key, and functional section boundaries — intro, verse, chorus, bridge, outro — to help you match scene pacing precisely."},
-    {"cls": "bc-sting",  "theme": "ta", "icon": "🔔", "cat": "GALLO-METHOD",       "label": "Sting & Intro Check",     "desc": "Analyses the final 2s RMS energy ratio to detect sting endings that disrupt scene audio. Also flags intro sections exceeding <strong>15s</strong> — the Gallo-Method limit for sync pitches."},
+    {"cls": "bc-sting",  "theme": "ta", "icon": "🔔", "cat": "SYNC READINESS",     "label": "Sting & Intro Check",     "desc": "Analyses the final 2s RMS energy ratio to detect sting endings that disrupt scene audio. Also flags intro sections exceeding <strong>15s</strong> — the sync readiness limit for sync pitches."},
     {"cls": "bc-lyrics", "theme": "tc", "icon": "🎤", "cat": "WHISPER AI",         "label": "Lyric Transcription",     "desc": "Converts vocals to timestamped text via OpenAI Whisper. Essential for flagging explicit content, trademarked phrases, or co-writer obligations before broadcast clearance."},
     {"cls": "bc-auth",   "theme": "tc", "icon": "✍️", "cat": "AUTHORSHIP DETECT", "label": "AI Lyric Detection",      "desc": "Scores lyrics across four linguistic signals — burstiness, vocabulary diversity, rhyme density, repetition — plus a RoBERTa classifier. Returns <strong>Likely Human / Uncertain / Likely AI</strong>."},
     {"cls": "bc-sim",    "theme": "ta", "icon": "🔍", "cat": "DISCOVERY ENGINE",   "label": "Similar Tracks",          "desc": "Uses Last.fm's similarity graph to surface comparable tracks — fully stateless, no database. Each result is resolved to a YouTube preview URL live via yt-dlp."},
@@ -28,25 +29,35 @@ _CARDS = [
 _BENTO = f"""<!DOCTYPE html><html><head><style>
 @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 *{{box-sizing:border-box;margin:0;padding:0}}
-body{{background:transparent;padding:2px 0 8px}}
-:root{{--bg:#050911;--s1:#0B1320;--s2:#0F1A28;--border:rgba(255,255,255,.06);--accent:#F5640A;--text:#D8E6F2;--muted:#7A95AA;--dim:#364C5C}}
+body{{background:transparent;padding:22px 6px 8px}}
+/* ── Dark theme (default) ── */
+:root{{--s1:#0C1825;--s2:#111F30;--border:rgba(255,255,255,.07);--accent:#F5640A;--text:#DCE8F4;--muted:#6E8EA8;--dim:#354F64;--ov-bg:rgba(6,12,21,.96)}}
+/* ── Light theme overrides ── */
+body.light{{--s1:#FAFCFF;--s2:#E4EAF2;--border:rgba(13,27,42,.09);--text:#0D1B2A;--muted:#4B6478;--dim:#8AA4B8;--ov-bg:rgba(255,255,255,.97)}}
+body.light .ta{{background:#F4F8FC}}
+body.light .tb{{background:linear-gradient(140deg,#EAF0F7 0%,#F4F8FC 100%)}}
+body.light .tc{{background:linear-gradient(140deg,#FFF3EE 0%,#FFF8F5 100%)}}
+body.light .card:hover,body.light .card:focus{{box-shadow:0 0 0 1px rgba(245,100,10,.2),0 16px 48px rgba(13,27,42,.10),0 0 28px rgba(245,100,10,.08)}}
+body.light .ttl-a{{color:rgba(175,65,0,.92)}}
 @keyframes eq-a{{0%,100%{{transform:scaleY(.14)}}25%{{transform:scaleY(.88)}}50%{{transform:scaleY(.38)}}75%{{transform:scaleY(.62)}}}}
 @keyframes eq-b{{0%,100%{{transform:scaleY(.52)}}25%{{transform:scaleY(.18)}}50%{{transform:scaleY(.92)}}75%{{transform:scaleY(.28)}}}}
 @keyframes eq-c{{0%,100%{{transform:scaleY(.72)}}25%{{transform:scaleY(.42)}}50%{{transform:scaleY(.08)}}75%{{transform:scaleY(.82)}}}}
-.grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:11px}}
+.grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;overflow:visible;padding:2px}}
 .bc-c2pa{{grid-column:1/3}}.bc-groove{{grid-column:3}}.bc-loop{{grid-column:4}}
 .bc-struct{{grid-column:1}}.bc-sting{{grid-column:2}}.bc-lyrics{{grid-column:3/5}}
 .bc-auth{{grid-column:1/3}}.bc-sim{{grid-column:3}}.bc-pro{{grid-column:4}}
 .bc-ph{{display:none}}
-.card{{position:relative;border-radius:13px;border:1px solid var(--border);min-height:165px;
-       cursor:default;overflow:hidden;
-       transition:border-color .25s,box-shadow .25s,transform .3s cubic-bezier(.34,1.56,.64,1)}}
-.card:hover{{border-color:rgba(245,100,10,.38);
-             box-shadow:0 0 0 1px rgba(245,100,10,.1),0 20px 50px rgba(0,0,0,.6),0 0 28px rgba(245,100,10,.07);
-             transform:translateY(-5px)}}
+.card{{position:relative;border-radius:13px;border:1px solid var(--border);
+       min-height:clamp(180px,22vw,220px);
+       cursor:pointer;overflow:visible;
+       transition:border-color .25s,box-shadow .3s,transform .32s cubic-bezier(.34,1.56,.64,1)}}
+.card:hover,.card:focus{{border-color:rgba(245,100,10,.45);
+             box-shadow:0 0 0 1px rgba(245,100,10,.18),0 28px 70px rgba(0,0,0,.75),0 0 48px rgba(245,100,10,.18),0 0 12px rgba(245,100,10,.08);
+             transform:translateY(-14px);outline:none;z-index:10}}
+.card:focus-visible{{outline:2px solid rgba(245,100,10,.8);outline-offset:3px}}
 .ta{{background:var(--s1)}}.tb{{background:linear-gradient(140deg,#0D1620 0%,#111E2C 100%)}}
 .tc{{background:linear-gradient(140deg,#1E0B00 0%,#2A1200 100%);border-color:rgba(245,100,10,.2)}}
-.inner{{position:relative;z-index:1;padding:18px 18px 16px;display:flex;flex-direction:column;justify-content:space-between;height:100%;min-height:165px}}
+.inner{{position:relative;z-index:1;padding:18px 18px 16px;display:flex;flex-direction:column;justify-content:space-between;height:100%;min-height:clamp(180px,22vw,220px)}}
 .cat{{font-family:'Chakra Petch',monospace;font-size:.54rem;font-weight:600;letter-spacing:.15em;text-transform:uppercase;
       padding:3px 9px;border-radius:4px;display:inline-block;align-self:flex-start}}
 .cat-d{{color:var(--accent);background:rgba(245,100,10,.1);border:1px solid rgba(245,100,10,.2)}}
@@ -58,17 +69,24 @@ body{{background:transparent;padding:2px 0 8px}}
 .icon{{font-size:1.5rem;line-height:1;margin-bottom:3px}}
 .ttl{{font-family:'Chakra Petch',monospace;font-size:.84rem;font-weight:600;letter-spacing:.01em;color:var(--text)}}
 .ttl-a{{color:rgba(245,180,120,.92)}}
-.ov{{position:absolute;inset:0;border-radius:inherit;background:rgba(3,7,14,.96);
-     backdrop-filter:blur(10px);padding:18px;display:flex;flex-direction:column;gap:7px;
-     opacity:0;transform:translateY(7px);transition:opacity .2s,transform .2s;z-index:2;pointer-events:none}}
-.card:hover .ov{{opacity:1;transform:translateY(0)}}
-.ov-cat{{font-family:'Chakra Petch',monospace;font-size:.54rem;font-weight:600;letter-spacing:.15em;text-transform:uppercase;color:var(--accent)}}
-.ov-ttl{{font-family:'Chakra Petch',monospace;font-size:.86rem;font-weight:600;color:var(--text);margin-bottom:1px}}
-.ov-desc{{font-family:'Figtree',sans-serif;font-size:.74rem;color:var(--muted);line-height:1.57}}
+.ov{{position:absolute;inset:0;border-radius:13px;background:var(--ov-bg);
+     backdrop-filter:blur(10px);padding:16px 18px;display:flex;flex-direction:column;gap:6px;
+     opacity:0;transform:translateY(6px) scale(.97);
+     transition:opacity .2s,transform .2s;z-index:3;pointer-events:none;overflow:auto}}
+.card:hover .ov,.card:focus .ov,.card:focus-within .ov{{opacity:1;transform:translateY(0) scale(1)}}
+.ov-cat{{font-family:'Chakra Petch',monospace;font-size:.52rem;font-weight:600;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);flex-shrink:0}}
+.ov-ttl{{font-family:'Chakra Petch',monospace;font-size:.84rem;font-weight:600;color:var(--text);margin-bottom:2px;flex-shrink:0}}
+.ov-desc{{font-family:'Figtree',sans-serif;font-size:.72rem;color:var(--muted);line-height:1.55;
+          display:-webkit-box;-webkit-line-clamp:8;-webkit-box-orient:vertical;overflow:hidden}}
 .ov-desc strong{{color:rgba(245,160,80,.95);font-weight:600}}
-.ov-desc code{{font-family:'JetBrains Mono',monospace;font-size:.68rem;background:rgba(245,100,10,.12);color:var(--accent);padding:1px 5px;border-radius:3px}}
-.ph{{border-radius:13px;border:1px dashed rgba(245,100,10,.12);min-height:165px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px}}
+.ov-desc code{{font-family:'JetBrains Mono',monospace;font-size:.66rem;background:rgba(245,100,10,.12);color:var(--accent);padding:1px 5px;border-radius:3px}}
+.ph{{border-radius:13px;border:1px dashed rgba(245,100,10,.12);min-height:clamp(180px,22vw,220px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px}}
 .ph-t{{font-family:'Chakra Petch',monospace;font-size:.6rem;font-weight:500;color:var(--dim);letter-spacing:.14em;text-transform:uppercase}}
+@media(max-width:500px){{
+  .grid{{grid-template-columns:repeat(2,1fr)}}
+  .bc-c2pa,.bc-lyrics,.bc-auth{{grid-column:1/3}}
+  .bc-groove,.bc-loop,.bc-struct,.bc-sting,.bc-sim,.bc-pro{{grid-column:auto}}
+}}
 </style></head><body>
 <div class="grid" id="g"></div>
 <script>
@@ -79,6 +97,9 @@ const g=document.getElementById('g');
 C.forEach(c=>{{
   const el=document.createElement('div');
   el.className=`card ${{c.cls}} ${{c.theme}}`;
+  el.setAttribute('role','article');
+  el.setAttribute('tabindex','0');
+  el.setAttribute('aria-label',c.label+': '+c.cat);
   const isA=c.theme==='tc';
   el.innerHTML=`
     <div class="inner">
@@ -100,32 +121,32 @@ const ph=document.createElement('div');
 ph.className='ph bc-ph';
 ph.innerHTML='<div style="font-size:1.1rem;opacity:.2">⊕</div><div class="ph-t">More Features Coming</div>';
 g.appendChild(ph);
+/* ── Theme sync ── */
+function syncTheme(){{
+  try{{
+    const isDark=window.parent.document.documentElement.getAttribute('data-theme')==='dark';
+    document.body.classList.toggle('light',!isDark);
+  }}catch(_){{}}
+}}
+syncTheme();
+try{{
+  new MutationObserver(syncTheme).observe(
+    window.parent.document.documentElement,
+    {{attributes:true,attributeFilter:['data-theme']}}
+  );
+}}catch(_){{}}
 </script></body></html>"""
 
 
-def render_landing(logo_b64: str) -> None:
+def render_landing() -> None:
     """Render the landing page and handle source submission."""
+    st.markdown(
+        '<a href="#main-content" class="skip-link">Skip to main content</a>',
+        unsafe_allow_html=True,
+    )
+    render_site_nav("landing")
     _, col, _ = st.columns([1, 2.2, 1])
     with col:
-        # Header bar
-        st.markdown(f"""
-        <div style="display:flex;align-items:center;justify-content:space-between;
-                    padding:28px 0 44px;animation:fade-up .5s ease both;">
-          <div style="display:flex;align-items:center;gap:12px;">
-            <img src="data:image/png;base64,{logo_b64}"
-                 style="height:32px;width:auto;display:block;">
-            <div>
-              <div style="font-family:'Chakra Petch',monospace;font-size:.9rem;
-                          font-weight:700;color:#F5640A;letter-spacing:.14em;">SYNC-SAFE</div>
-              <div style="font-family:'Chakra Petch',monospace;font-size:.5rem;
-                          font-weight:500;color:#364C5C;letter-spacing:.22em;
-                          text-transform:uppercase;margin-top:1px;">Forensic Portal</div>
-            </div>
-          </div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:.6rem;
-                      color:#364C5C;letter-spacing:.05em;">ZeroGPU · Stateless · v2</div>
-        </div>
-        """, unsafe_allow_html=True)
 
         # Hero
         st.markdown(f"""
@@ -135,109 +156,67 @@ def render_landing(logo_b64: str) -> None:
             {eq_bars(28, "#F5640A", 44)}
           </div>
           <div style="font-family:'Chakra Petch',monospace;font-size:.68rem;font-weight:500;
-                      color:#364C5C;letter-spacing:.32em;text-transform:uppercase;
+                      color:var(--dim);letter-spacing:.32em;text-transform:uppercase;
                       margin-bottom:18px;">Music Sync Clearance Intelligence</div>
           <div style="font-family:'Chakra Petch',monospace;
                       font-size:clamp(2.8rem,7vw,5rem);font-weight:700;
-                      color:#D8E6F2;line-height:.88;letter-spacing:-.03em;
+                      color:var(--text);line-height:.88;letter-spacing:-.03em;
                       margin-bottom:6px;">FORENSIC</div>
           <div style="font-family:'Chakra Petch',monospace;
                       font-size:clamp(2.8rem,7vw,5rem);font-weight:700;
-                      color:#F5640A;line-height:.88;letter-spacing:-.03em;
+                      color:var(--accent);line-height:.88;letter-spacing:-.03em;
                       margin-bottom:30px;">PORTAL</div>
           <div style="font-family:'Figtree',sans-serif;font-size:.96rem;font-weight:400;
-                      color:#7A95AA;line-height:1.65;max-width:480px;margin:0 auto;">
-            Verify AI origin · Decode structure · Clear rights<br>
-            <span style="font-family:'JetBrains Mono',monospace;font-size:.76rem;
-                         color:#364C5C;">→ Built for Music Supervisors who need certainty.</span>
+                      color:var(--muted);line-height:1.65;max-width:480px;margin:0 auto;">
+            Detect AI authorship · Audit sync compliance · Flag lyric risks<br>
+            <span style="font-family:'Figtree',sans-serif;font-size:.88rem;
+                         color:var(--muted);">before a track costs you a placement.</span>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:center;gap:20px;
+                      margin-top:22px;flex-wrap:wrap;">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:.58rem;font-weight:500;
+                         color:var(--dim);letter-spacing:.12em;text-transform:uppercase;">
+              Hugging Face ZeroGPU
+            </span>
+            <span style="color:var(--border-hr);font-size:.7rem;">|</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:.58rem;font-weight:500;
+                         color:var(--dim);letter-spacing:.12em;text-transform:uppercase;">
+              Stateless Architecture
+            </span>
+            <span style="color:var(--border-hr);font-size:.7rem;">|</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:.58rem;font-weight:500;
+                         color:var(--dim);letter-spacing:.12em;text-transform:uppercase;">
+              No Audio Stored
+            </span>
           </div>
         </div>
         """, unsafe_allow_html=True)
 
-        # Input card
-        with st.container(border=True):
-            st.markdown("""
-            <div style="margin-bottom:22px;animation:fade-up .7s ease .2s both;">
-              <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
-                          letter-spacing:.2em;text-transform:uppercase;color:#364C5C;
-                          display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-                <span>▶</span><span>Analyse a Track</span>
-                <div style="flex:1;height:1px;background:rgba(255,255,255,.055);"></div>
-              </div>
-              <div style="font-family:'Chakra Petch',monospace;font-size:1.5rem;font-weight:700;
-                          color:#D8E6F2;letter-spacing:-.02em;line-height:1.15;">
-                Run your forensic<br><span style="color:#F5640A;">audit.</span>
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
+        st.markdown('<span id="main-content" tabindex="-1"></span>', unsafe_allow_html=True)
 
-            mode = st.radio("mode", ["🔗  YouTube URL", "📁  Upload File"],
-                            horizontal=True, label_visibility="collapsed")
-
-            if mode == "🔗  YouTube URL":
-                url = st.text_input("url", placeholder="https://youtube.com/watch?v=...",
-                                    label_visibility="collapsed")
-                if st.button("Initiate Scan →", type="primary",
-                             use_container_width=True, key="run_url"):
-                    if url:
-                        _submit_source(url)
-                    else:
-                        st.warning("Paste a YouTube URL first.")
-            else:
-                uploaded = st.file_uploader("file", type=["mp3", "wav", "flac", "m4a", "ogg"],
-                                            label_visibility="collapsed")
-                if st.button("Initiate Scan →", type="primary",
-                             use_container_width=True, key="run_upload",
-                             disabled=uploaded is None):
-                    if uploaded:
-                        _submit_source(uploaded)
-
-        st.markdown("""
-        <p style="text-align:center;font-family:'Chakra Petch',monospace;font-size:.56rem;
-                  color:#364C5C;font-weight:500;letter-spacing:.14em;text-transform:uppercase;
-                  margin-top:10px;">No audio stored · API keys via HF Secrets</p>
-        <br>
-        """, unsafe_allow_html=True)
+        # CTA
+        st.markdown("<div style='margin-bottom:8px;animation:fade-up .7s ease .2s both;'>",
+                    unsafe_allow_html=True)
+        if st.button("Launch Portal →", type="primary",
+                     use_container_width=True, key="cta_portal"):
+            st.session_state.page = "portal"
+            st.rerun()
+        st.markdown("</div><br>", unsafe_allow_html=True)
 
         # Feature grid label
         st.markdown("""
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;
                     animation:fade-up .75s ease .3s both;">
           <div style="font-family:'Chakra Petch',monospace;font-size:.58rem;font-weight:600;
-                      letter-spacing:.2em;text-transform:uppercase;color:#364C5C;white-space:nowrap;">
+                      letter-spacing:.2em;text-transform:uppercase;color:var(--dim);white-space:nowrap;">
             ◈ Feature Matrix
           </div>
-          <div style="flex:1;height:1px;background:rgba(255,255,255,.055);"></div>
-          <div style="font-family:'Chakra Petch',monospace;font-size:.54rem;color:#364C5C;
-                      letter-spacing:.1em;white-space:nowrap;">Hover to inspect</div>
+          <div style="flex:1;height:1px;background:var(--border-hr);"></div>
+          <div style="font-family:'Chakra Petch',monospace;font-size:.54rem;color:var(--dim);
+                      letter-spacing:.1em;white-space:nowrap;">Hover or focus to inspect</div>
         </div>
         """, unsafe_allow_html=True)
 
-        components.html(_BENTO, height=570, scrolling=False)
+        components.html(_BENTO, height=740, scrolling=False)
 
-        st.markdown("""
-        <div style="text-align:center;margin-top:36px;padding-bottom:20px;">
-          <span style="font-family:'Chakra Petch',monospace;font-size:.54rem;color:#364C5C;
-                       font-weight:500;letter-spacing:.18em;text-transform:uppercase;">
-            Hugging Face ZeroGPU · Stateless Architecture · No Audio Stored
-          </span>
-        </div>
-        """, unsafe_allow_html=True)
-
-
-def _submit_source(source) -> None:
-    """Ingest the audio source and transition to the report page."""
-    from services.ingestion import Ingestion
-    from core.exceptions import SyncSafeError
-
-    try:
-        with st.spinner("Fetching audio…"):
-            audio = Ingestion().load(source)
-        st.session_state.audio          = audio
-        st.session_state.analysis       = None
-        st.session_state.page           = "report"
-        st.rerun()
-    except SyncSafeError as exc:
-        st.error(f"Could not load audio: {exc}")
-    except Exception as exc:
-        st.error(f"Unexpected error: {exc}")
+    render_site_footer()
