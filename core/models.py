@@ -30,7 +30,7 @@ IssueType    = Literal["EXPLICIT", "BRAND", "LOCATION", "VIOLENCE", "DRUGS"]
 Confidence   = Literal["confirmed", "potential"]
 EndingType   = Literal["sting", "fade", "cut"]
 AIVerdict    = Literal["Likely Human", "Uncertain", "Likely AI", "Insufficient data"]
-ForensicVerdict = Literal["Human", "Uncertain", "AI"]
+ForensicVerdict = Literal["Human", "Human (Sample/Loop)", "Possible Hybrid AI Cover", "Uncertain", "AI"]
 
 
 # ---------------------------------------------------------------------------
@@ -129,8 +129,12 @@ class ForensicsResult(BaseModel):
     c2pa_flag: bool         = False     # True → born-AI assertion found in manifest
     ibi_variance: float     = 1.0       # inter-beat interval variance
     loop_score: float       = 0.0       # highest cross-correlation across 4-bar windows
+    loop_autocorr_score: float = 0.0    # onset autocorrelation loop repetition score
     spectral_slop: float    = 0.0       # anomalous energy above SPECTRAL_SLOP_HZ
     synthid_score: float    = 0.0       # phase coherence in 18–22 kHz band
+    centroid_instability_score: float = -1.0  # mean within-interval centroid CV; -1 = not computed
+    harmonic_ratio_score: float = -1.0        # mean HNR within sustained intervals; -1 = not computed
+    ai_probability: float = 0.0               # weighted probability score [0.0–1.0] used for verdict
 
     flags: list[str]        = Field(default_factory=list)  # human-readable flag labels
     verdict: ForensicVerdict = "Human"
@@ -286,13 +290,13 @@ class AnalysisResult(BaseModel):
     """
 
     audio: AudioBuffer
-    structure: Optional[StructureResult]        = None
-    forensics: Optional[ForensicsResult]        = None
-    transcript: list[TranscriptSegment]         = Field(default_factory=list)
-    compliance: Optional[ComplianceReport]      = None
-    authorship: Optional[AuthorshipResult]      = None
-    similar_tracks: list[TrackCandidate]        = Field(default_factory=list)
-    legal: Optional[LegalLinks]                 = None
+    structure: Optional[StructureResult]                    = None
+    forensics: Optional[ForensicsResult]                    = None
+    transcript: list[TranscriptSegment]                     = Field(default_factory=list)
+    compliance: Optional[ComplianceReport]                  = None
+    authorship: Optional[AuthorshipResult]                  = None
+    similar_tracks: list[TrackCandidate]                    = Field(default_factory=list)
+    legal: Optional[LegalLinks]                             = None
 
     def to_dict(self) -> dict[str, Any]:
         """

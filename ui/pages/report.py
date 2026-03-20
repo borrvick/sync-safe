@@ -238,7 +238,12 @@ def _render_forensics_card(fr: Optional[ForensicsResult]) -> None:
         return
 
     verdict   = fr.verdict
-    v_cls     = {"Human": "v-h", "AI": "v-a"}.get(verdict, "v-u")
+    v_cls     = {
+        "Human": "v-h",
+        "Human (Sample/Loop)": "v-h",
+        "Possible Hybrid AI Cover": "v-u",
+        "AI": "v-a",
+    }.get(verdict, "v-u")
 
     # C2PA
     c2pa_fmt  = (
@@ -251,7 +256,7 @@ def _render_forensics_card(fr: Optional[ForensicsResult]) -> None:
     ibi_fmt   = f"{ibi:.3f}" if isinstance(ibi, float) and ibi >= 0 else "—"
     groove_flag = _groove_label(ibi)
 
-    # Loop
+    # Loop (cross-correlation)
     loop      = fr.loop_score
     loop_num  = f"{loop:.3f}" if isinstance(loop, float) else "—"
     loop_label = (
@@ -261,9 +266,32 @@ def _render_forensics_card(fr: Optional[ForensicsResult]) -> None:
     )
     loop_fmt  = f"{loop_num} ({loop_label})"
 
+    # Loop autocorrelation
+    autocorr       = fr.loop_autocorr_score
+    autocorr_num   = f"{autocorr:.3f}" if isinstance(autocorr, float) else "—"
+    autocorr_label = (
+        "Strong Repetition Detected (Possible Sample/Loop Usage)" if autocorr >= CONSTANTS.LOOP_AUTOCORR_SAMPLE_VERDICT_THRESHOLD
+        else "Repetition Detected (Possible Sample/Loop Usage)" if autocorr >= CONSTANTS.LOOP_AUTOCORR_VERDICT_THRESHOLD
+        else "Moderate" if autocorr >= CONSTANTS.LOOP_AUTOCORR_DISPLAY_MODERATE_MIN
+        else "Low"
+    )
+    autocorr_fmt = f"{autocorr_num} ({autocorr_label})"
+
     # Spectral slop
     slop_val  = fr.spectral_slop
     slop_fmt  = "✓ Clean" if slop_val <= CONSTANTS.SPECTRAL_SLOP_RATIO else f"⚠ {slop_val:.1%} HF energy"
+
+    # Centroid instability
+    centroid     = fr.centroid_instability_score
+    centroid_fmt: str
+    if centroid < 0.0:
+        centroid_fmt = "— (no sustained intervals)"
+    else:
+        centroid_num = f"{centroid:.3f}"
+        if centroid >= CONSTANTS.CENTROID_INSTABILITY_AI_MIN:
+            centroid_fmt = f"⚠ {centroid_num} — Formant Drift Detected"
+        else:
+            centroid_fmt = f"✓ {centroid_num} — Stable"
 
     # SynthID
     synthid_bins = int(fr.synthid_score)
@@ -284,9 +312,9 @@ def _render_forensics_card(fr: Optional[ForensicsResult]) -> None:
         </div>
         <div style="text-align:right;">
           <div style="font-family:'JetBrains Mono',monospace;font-size:.62rem;color:var(--dim);
-                      margin-bottom:3px;">6 signals analysed</div>
+                      margin-bottom:3px;">8 signals analysed</div>
           <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;color:var(--dim);
-                      letter-spacing:.1em;text-transform:uppercase;">C2PA · IBI · Groove · Loop · Spectral · SynthID</div>
+                      letter-spacing:.1em;text-transform:uppercase;">C2PA · IBI · Groove · Loop · Autocorr · Centroid · Spectral · SynthID</div>
         </div>
       </div>
       <div class="sig-row">
@@ -300,7 +328,7 @@ def _render_forensics_card(fr: Optional[ForensicsResult]) -> None:
       <div class="sig-row">
         <span class="sk">IBI Variance (ms²)
           <span class="tip-wrap"><span class="tip-icon">?</span>
-            <span class="tip-box">Inter-Beat Interval variance — measures millisecond-level timing drift between beats. Human drummers naturally range 8–90 ms². Near-zero (&lt;0.5 ms²) = machine-quantized. Extremely high (&gt;90 ms²) = over-humanized AI timing.</span>
+            <span class="tip-box">Inter-Beat Interval variance — measures millisecond-level timing drift between beats. Near-zero (&lt;0.5 ms²) = machine-quantized grid (AI/loop signal). High variance (&gt;90 ms²) = natural human feel and micro-timing variation — an organic signal, not AI.</span>
           </span>
         </span>
         <span class="sv">{ibi_fmt}</span>
@@ -308,7 +336,7 @@ def _render_forensics_card(fr: Optional[ForensicsResult]) -> None:
       <div class="sig-row">
         <span class="sk">Groove Profile
           <span class="tip-wrap"><span class="tip-icon">?</span>
-            <span class="tip-box">Derived from IBI variance. "Perfect Quantization" = machine-grid locked (&lt;0.5 ms²). "Human Micro-timing" = natural drift (0.5–90 ms²). "Erratic Humanization" = over-humanized AI pattern (&gt;90 ms²).</span>
+            <span class="tip-box">Derived from IBI variance. "Perfect Quantization" = machine-grid locked (&lt;0.5 ms²) — AI/loop signal. "Human Micro-timing" = natural drift (0.5–90 ms²). "Human-Feel Timing" = high micro-variation (&gt;90 ms²) — organic signal indicating human performance or humanized production.</span>
           </span>
         </span>
         <span class="sv">{groove_flag}</span>
@@ -320,6 +348,22 @@ def _render_forensics_card(fr: Optional[ForensicsResult]) -> None:
           </span>
         </span>
         <span class="sv">{loop_fmt}</span>
+      </div>
+      <div class="sig-row">
+        <span class="sk">Loop Autocorr
+          <span class="tip-wrap"><span class="tip-icon">?</span>
+            <span class="tip-box">Onset-envelope autocorrelation — detects regular loop repetition independent of BPM. High score = Splice-style loop structure. Loop-based production is common in modern pop (2018–present) and does not alone indicate AI generation. However, strong repetition combined with low timbre variance (see Timbre Consistency) can indicate an AI generator tuned for human feel — a pattern common in 2025+ AI covers. No watermark detected does not rule out AI.</span>
+          </span>
+        </span>
+        <span class="sv">{autocorr_fmt}</span>
+      </div>
+      <div class="sig-row">
+        <span class="sk">Centroid Instability
+          <span class="tip-wrap"><span class="tip-icon">?</span>
+            <span class="tip-box">Measures spectral centroid coefficient-of-variation within each sustained note. AI vocoders shift upper partials erratically mid-note — the source of the "glassy/hollow/formant-shifting" artifact heard in AI covers. Human vibrato modulates all partials together, keeping the centroid relatively stable. A score above 0.08 flags suspected formant drift. Scores of –1 mean no sustained intervals were found (e.g. full-instrumental or very quiet sections).</span>
+          </span>
+        </span>
+        <span class="sv">{centroid_fmt}</span>
       </div>
       <div class="sig-row">
         <span class="sk">Spectral Slop
@@ -339,6 +383,22 @@ def _render_forensics_card(fr: Optional[ForensicsResult]) -> None:
       </div>
     </div>
     """, unsafe_allow_html=True)
+
+    if fr.flags:
+        flags_html = "".join(
+            f"<div style='font-family:\"Figtree\",sans-serif;font-size:.78rem;"
+            f"color:var(--dim);padding:5px 0;border-bottom:1px solid var(--border);'>"
+            f"◈ {html_mod.escape(flag)}</div>"
+            for flag in fr.flags
+        )
+        st.markdown(
+            f"<div style='margin-top:12px;'>"
+            f"<div style='font-family:\"Chakra Petch\",monospace;font-size:.56rem;font-weight:600;"
+            f"letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:8px;'>"
+            f"Signal Notes</div>"
+            f"{flags_html}</div>",
+            unsafe_allow_html=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -809,7 +869,7 @@ def _groove_label(ibi: float) -> str:
     if ibi < CONSTANTS.IBI_PERFECT_QUANTIZATION_MAX:
         return "Perfect Quantization (AI signal)"
     if ibi > CONSTANTS.IBI_ERRATIC_MIN:
-        return "Erratic Humanization (AI signal)"
+        return "Human-Feel Timing (Organic)"
     return "Human Micro-timing"
 
 
