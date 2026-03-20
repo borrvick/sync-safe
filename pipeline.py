@@ -64,15 +64,15 @@ class Pipeline:
 
     def __init__(
         self,
-        ingestion:     Ingestion           | None = None,
-        transcription: LyricsOrchestrator  | None = None,
-        structure:     Analysis            | None = None,
-        forensics:     Forensics           | None = None,
-        compliance:    Compliance          | None = None,
-        authorship:    Authorship          | None = None,
-        discovery:     Discovery           | None = None,
-        legal:         Legal               | None = None,
-        log:           PipelineLogger      | None = None,
+        ingestion:     Ingestion              | None = None,
+        transcription: LyricsOrchestrator     | None = None,
+        structure:     Analysis               | None = None,
+        forensics:     Forensics              | None = None,
+        compliance:    Compliance             | None = None,
+        authorship:    Authorship             | None = None,
+        discovery:     Discovery              | None = None,
+        legal:         Legal                  | None = None,
+        log:           PipelineLogger         | None = None,
     ) -> None:
         self._ingestion     = ingestion     or Ingestion()
         self._transcription = transcription or LyricsOrchestrator()
