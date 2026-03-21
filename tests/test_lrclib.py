@@ -10,12 +10,6 @@ The LRCLib tests hit the live API; skip them with --offline flag.
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-# Ensure project root is importable without installing the package
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from services.lyrics_provider import LRCLibClient, _best_result, _parse_lrc
 
 # ---------------------------------------------------------------------------

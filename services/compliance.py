@@ -201,8 +201,8 @@ class Compliance:
                 flag=False,
             )
 
-        hop = 512
-        rms          = librosa.feature.rms(y=audio, frame_length=1024, hop_length=hop)[0]
+        hop = CONSTANTS.STING_HOP_LENGTH
+        rms          = librosa.feature.rms(y=audio, frame_length=CONSTANTS.STING_FRAME_LENGTH, hop_length=hop)[0]
         overall_mean = float(np.mean(rms)) + 1e-9
 
         # Fade: declining RMS slope over last 10s AND low tail energy
@@ -212,7 +212,7 @@ class Compliance:
         final_ratio = tail_mean / overall_mean
         x           = np.arange(len(tail_rms), dtype=float)
         norm_slope  = float(np.polyfit(x, tail_rms, 1)[0]) / overall_mean
-        is_fade     = (norm_slope < -0.0005) and (final_ratio < 0.25)
+        is_fade     = (norm_slope < CONSTANTS.FADE_SLOPE_THRESHOLD) and (final_ratio < CONSTANTS.FADE_RATIO_MAX)
 
         # Sting: onset spike ≥ STING_SPIKE_FACTOR × local mean AND
         #        ≥ STING_RMS_DROP_RATIO energy collapse within 1s after peak

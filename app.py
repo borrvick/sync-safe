@@ -14,14 +14,11 @@ from core.logging import DEFAULT_LOG_DIR, LogCleaner
 from ui.styles import STYLES
 
 # ── Logging setup (runs once per process) ────────────────────────────────────
-# Module-level flag ensures LogCleaner runs exactly once per process, not once
-# per browser session. session_state would run it once per tab, which causes
-# concurrent unlink() races when multiple users open the app simultaneously.
-_log_cleaner_ran = False
-if not _log_cleaner_ran:
-    _log_dir = get_settings().log_dir or DEFAULT_LOG_DIR
-    LogCleaner(_log_dir).clean()
-    _log_cleaner_ran = True
+# Module-level execution ensures LogCleaner runs exactly once per process, not
+# once per browser session. session_state would run it once per tab, which
+# causes concurrent unlink() races when multiple users open the app.
+_log_dir = get_settings().log_dir or DEFAULT_LOG_DIR
+LogCleaner(_log_dir).clean()
 
 # ── Theme FAB HTML + JS ───────────────────────────────────────────────────────
 # The FAB is injected via st.markdown (position:fixed, always on screen).

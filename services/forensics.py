@@ -122,7 +122,7 @@ class Forensics:
             spectral_slop=spectral_slop,
         )
 
-        return ForensicsResult(
+        result = ForensicsResult(
             c2pa_flag=c2pa_flag,
             ibi_variance=ibi_variance,
             loop_score=loop_score,
@@ -135,6 +135,8 @@ class Forensics:
             flags=flags,
             verdict=verdict,
         )
+
+        return result
 
     # ------------------------------------------------------------------
     # Private: C2PA manifest check  (CPU — no librosa)
@@ -251,13 +253,7 @@ class Forensics:
             if not (CONSTANTS.LOOP_BPM_MIN <= bpm <= CONSTANTS.LOOP_BPM_MAX):
                 return 0.0
 
-            segment_len = int(
-                (60.0 / bpm) * CONSTANTS.BEATS_PER_WINDOW // CONSTANTS.BEATS_PER_WINDOW
-                * CONSTANTS.BEATS_PER_WINDOW
-                * (sr / CONSTANTS.SAMPLE_RATE)
-            )
-            # simpler: 4 bars × 4 beats/bar × seconds/beat × samples/second
-            segment_len = int((60.0 / bpm) * 4 * 4 * sr)
+            segment_len = int((60.0 / bpm) * CONSTANTS.BEATS_PER_WINDOW * sr)
 
             if segment_len > len(audio):
                 return 0.0
@@ -468,6 +464,7 @@ class Forensics:
                 "SynthID scan: STFT analysis failed.",
                 context={"original_error": str(exc)},
             ) from exc
+
 
 
 # ---------------------------------------------------------------------------
@@ -921,9 +918,10 @@ def _compute_verdict(
 
     Rules (ordered by certainty):
       1. Hard evidence overrides — C2PA certified AI, high SynthID → "AI"
+         "AI" is reserved exclusively for cryptographically proven cases.
       2. Loop-heavy + human-feel + no AI signals → "Human (Sample/Loop)"
       3. Probability-weighted score (from _compute_ai_probability):
-           ≥ PROB_VERDICT_AI      → "AI"
+           ≥ PROB_VERDICT_AI      → "Likely AI"  (strong signals, no metadata proof)
            ≥ PROB_VERDICT_HYBRID  → "Possible Hybrid AI Cover"
            ≥ PROB_VERDICT_UNCERTAIN → "Uncertain"
            < PROB_VERDICT_UNCERTAIN → "Human"
@@ -971,7 +969,7 @@ def _compute_verdict(
     )
 
     if prob >= CONSTANTS.PROB_VERDICT_AI:
-        return "AI"
+        return "Likely AI"
     if prob >= CONSTANTS.PROB_VERDICT_HYBRID:
         return "Possible Hybrid AI Cover"
     if prob >= CONSTANTS.PROB_VERDICT_UNCERTAIN:

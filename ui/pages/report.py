@@ -7,6 +7,7 @@ All functions accept typed domain models from core.models; no raw dict access.
 from __future__ import annotations
 
 import html as html_mod
+import re
 from collections import Counter, OrderedDict
 from typing import Optional
 
@@ -16,6 +17,7 @@ from core.config import CONSTANTS
 from core.models import (
     AnalysisResult,
     AudioBuffer,
+    AuthorshipResult,
     ComplianceFlag,
     ComplianceReport,
     EnergyEvolutionResult,
@@ -45,6 +47,7 @@ def render_report(
     _render_nav(audio.label)
     st.markdown('<span id="main-content" tabindex="-1"></span>', unsafe_allow_html=True)
     _render_audio_player(audio)
+    _render_label_picker(audio.label)
 
     with st.expander("Track Overview", expanded=True):
         c_left, c_right = st.columns([1, 1], gap="large")
@@ -73,7 +76,7 @@ def render_report(
 # ---------------------------------------------------------------------------
 
 def _render_nav(source_label: str) -> None:
-    _eq = eq_bars(6, color="#F5640A", h=22)
+    _eq = eq_bars(6, color="var(--accent)", h=22)
     c_logo, c_nav = st.columns([6, 1])
     with c_logo:
         st.markdown(f"""
@@ -81,7 +84,7 @@ def _render_nav(source_label: str) -> None:
           <div style="display:flex;align-items:flex-end;gap:2px;height:22px;">{_eq}</div>
           <div>
             <div style="font-family:'Chakra Petch',monospace;font-size:.88rem;font-weight:700;
-                        color:#F5640A;letter-spacing:.14em;">SYNC-SAFE</div>
+                        color:var(--accent);letter-spacing:.14em;">SYNC-SAFE</div>
             <div style="font-family:'Chakra Petch',monospace;font-size:.48rem;font-weight:500;
                         color:var(--dim);letter-spacing:.2em;text-transform:uppercase;">Forensic Portal</div>
           </div>
@@ -122,11 +125,42 @@ def _render_nav(source_label: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _render_audio_player(audio: AudioBuffer) -> None:
-    st.audio(
+    # st.audio doesn't support `key` in Streamlit < 1.56 — use st.empty() as
+    # the container instead. Replacing the slot forces a full widget re-init
+    # whenever player_key increments (same effect as keyed re-mount).
+    slot = st.empty()
+    slot.audio(
         audio.raw,
         start_time=st.session_state.get("start_time", 0),
     )
     st.markdown("<div style='margin-bottom:28px;'></div>", unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
+# Track label picker
+# ---------------------------------------------------------------------------
+
+_LABEL_OPTIONS = ["— unrated —", "100% AI", "AI Cover", "Heavily Sampled/Loops", "RAW"]
+
+
+def _render_label_picker(track_label: str) -> None:
+    """Render a category dropdown for manually labelling a track.
+
+    Selection is stored in st.session_state for the current session.
+    When the Django migration is complete this will persist to the database.
+    """
+    session_key = f"label_{re.sub(r'[^\\w]', '_', track_label)[:60]}"
+    current = st.session_state.get(session_key, "— unrated —")
+    idx = _LABEL_OPTIONS.index(current) if current in _LABEL_OPTIONS else 0
+
+    chosen = st.selectbox(
+        "Track category",
+        _LABEL_OPTIONS,
+        index=idx,
+        key=session_key,
+    )
+    if chosen != "— unrated —" and chosen != current:
+        st.session_state[session_key] = chosen
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +186,7 @@ def _render_metadata_card(sr: Optional[StructureResult], ingestion_meta: dict | 
     )
     artist_html = (
         f"<div style='font-family:\"Chakra Petch\",monospace;font-size:.6rem;"
-        f"font-weight:600;color:#F5640A;letter-spacing:.12em;text-transform:uppercase;'>{artist_str}</div>"
+        f"font-weight:600;color:var(--accent);letter-spacing:.12em;text-transform:uppercase;'>{artist_str}</div>"
         if artist_str else ""
     )
 
@@ -204,7 +238,7 @@ def _render_structure_card(sr: Optional[StructureResult]) -> None:
           <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
                       letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:8px;">Tempo</div>
           <div style="font-family:'JetBrains Mono',monospace;font-size:2.6rem;font-weight:700;
-                      color:#F5640A;line-height:1;">
+                      color:var(--accent);line-height:1;">
             {bpm_fmt}<span style="font-size:.8rem;font-weight:400;color:var(--dim);
                                    margin-left:5px;font-family:'Chakra Petch',monospace;
                                    letter-spacing:.1em;">BPM</span>
@@ -214,7 +248,7 @@ def _render_structure_card(sr: Optional[StructureResult]) -> None:
           <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
                       letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:8px;">Key</div>
           <div style="font-family:'JetBrains Mono',monospace;font-size:2.6rem;font-weight:700;
-                      color:#F5640A;line-height:1;">{key}</div>
+                      color:var(--accent);line-height:1;">{key}</div>
         </div>
       </div>
       <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
@@ -242,6 +276,7 @@ def _render_forensics_card(fr: Optional[ForensicsResult]) -> None:
         "Human": "v-h",
         "Human (Sample/Loop)": "v-h",
         "Possible Hybrid AI Cover": "v-u",
+        "Likely AI": "v-a",
         "AI": "v-a",
     }.get(verdict, "v-u")
 
@@ -470,7 +505,7 @@ def _render_sync_readiness(compliance: Optional[ComplianceReport]) -> None:
 
 def _sync_readiness_row(icon: str, label: str, value: str, ok: bool,
                         flag_text: Optional[str], tip: str) -> None:
-    status_color = "#0DF5A0" if ok else "#FF6B35"
+    status_color = "var(--sync-pass)" if ok else "var(--sync-fail)"
     status_icon  = "✓" if ok else "⚠"
     st.markdown(
         f"<div style='display:flex;align-items:flex-start;gap:10px;"
@@ -486,7 +521,7 @@ def _sync_readiness_row(icon: str, label: str, value: str, ok: bool,
         f"<div style='font-family:\"JetBrains Mono\",monospace;font-size:.74rem;"
         f"color:{status_color};'>{status_icon} {value}</div>"
         + (f"<div style='font-family:\"Figtree\",sans-serif;font-size:.73rem;"
-           f"color:#FF6B35;margin-top:3px;line-height:1.45;'>{flag_text}</div>"
+           f"color:var(--sync-fail);margin-top:3px;line-height:1.45;'>{flag_text}</div>"
            if flag_text else "")
         + "</div></div>",
         unsafe_allow_html=True,
@@ -568,7 +603,7 @@ def _render_lyric_section(result: AnalysisResult) -> None:
 # Lyric section sub-renderers (extracted to keep each function under 40 lines)
 # ---------------------------------------------------------------------------
 
-def _render_authorship_banner(authorship) -> None:  # type: ignore[no-untyped-def]
+def _render_authorship_banner(authorship: Optional["AuthorshipResult"]) -> None:
     if not authorship:
         return
     av       = authorship.verdict
@@ -632,7 +667,7 @@ def _render_lyric_column(
     for sec_label, segs in _assign_sections(segments, sections):
         st.markdown(
             f"<div style='font-family:\"Chakra Petch\",monospace;font-size:.6rem;"
-            f"font-weight:700;color:#F5640A;letter-spacing:.14em;text-transform:uppercase;"
+            f"font-weight:700;color:var(--accent);letter-spacing:.14em;text-transform:uppercase;"
             f"margin:16px 0 6px;padding-top:14px;border-top:1px solid var(--border-hr);'>"
             f"[ {sec_label} ]</div>",
             unsafe_allow_html=True,
@@ -689,7 +724,7 @@ def _render_audit_column(flags: list[ComplianceFlag], grade: str) -> None:
 
     grade_color      = _grade_color(grade)
     grade_reason_str = _grade_reason(conf_flags, grade)
-    all_clear_html   = "<span style='font-family:\"Figtree\",sans-serif;font-size:.8rem;color:#0DF5A0;'>✓ All clear</span>"
+    all_clear_html   = "<span style='font-family:\"Figtree\",sans-serif;font-size:.8rem;color:var(--sync-pass);'>✓ All clear</span>"
     grade_pills_html = (_deduped_pills(conf_flags) + _deduped_pills(pot_flags)) if flags else all_clear_html
 
     st.markdown(f"""
@@ -741,7 +776,7 @@ def _render_audit_column(flags: list[ComplianceFlag], grade: str) -> None:
         st.markdown("""
         <div style="padding:20px;text-align:center;border:1px solid rgba(13,245,160,.15);
                     border-radius:10px;background:rgba(13,245,160,.04);margin-top:8px;">
-          <div style="font-family:'JetBrains Mono',monospace;font-size:.8rem;color:#0DF5A0;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:.8rem;color:var(--sync-pass);">
             ✓ No compliance issues detected
           </div>
         </div>

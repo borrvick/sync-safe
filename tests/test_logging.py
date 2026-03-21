@@ -106,7 +106,7 @@ class TestPipelineLogger:
         assert entries[0]["event"] == "pipeline_start"
         assert entries[0]["source_type"] == "youtube"
 
-    def test_pipeline_start_classifies_upload(self, tmp_path: Path) -> None:
+    def test_pipeline_start_classifies_non_youtube_url(self, tmp_path: Path) -> None:
         PipelineLogger(tmp_path).pipeline_start(source=str(object()))
         entries = self._read_entries(tmp_path)
         assert entries[0]["source_type"] == "url"

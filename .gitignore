@@ -1,6 +1,10 @@
 # Dev test fixtures (written by app during runs, loaded by scripts/test_forensics.py)
 tmp/
 
+# Capture-mode outputs (CAPTURE_RESULTS=1 / CAPTURE_OUTPUTS=1 — local dev only)
+tests/fixtures/results/
+tests/fixtures/forensics/
+
 # Secrets / credentials
 cookies.txt
 .env

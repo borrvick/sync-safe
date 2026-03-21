@@ -15,12 +15,14 @@ Design rules:
 """
 from __future__ import annotations
 
+import os
 import time
 from typing import Any
 
 import streamlit as st
 
 from core.config import get_settings
+from core.exceptions import SyncSafeError
 from core.logging import DEFAULT_LOG_DIR, PipelineLogger
 from core.models import AudioBuffer
 from ui.components import eq_bars
@@ -351,13 +353,14 @@ def render_loading(source: Any) -> None:
     def _tick(label: str) -> None:
         _draw(header_ph, bar_ph, steps_ph, completed, label, step_durations)
 
-    def _advance(key: str, step_start: float, error: str | None = None) -> None:
+    def _advance(key: str, step_start: float, error: str | None = None,
+                 context: dict | None = None) -> None:
         nonlocal completed
         duration = time.time() - step_start
         step_durations.append(duration)
         completed += 1
         if error:
-            log.step_error(key, error=error)
+            log.step_error(key, error=error, context=context)
         else:
             log.step_end(key, duration_s=duration)
 
@@ -368,7 +371,12 @@ def render_loading(source: Any) -> None:
     try:
         from services.ingestion import Ingestion
         audio: AudioBuffer = Ingestion().load(source)
-    except Exception as exc:
+    except SyncSafeError as exc:
+        log.step_error("ingestion", error=str(exc))
+        log.pipeline_error(error=str(exc))
+        error_ph.error(f"Could not load audio: {exc}")
+        return
+    except Exception as exc:  # noqa: BLE001 — UI boundary; surface unexpected errors
         log.step_error("ingestion", error=str(exc))
         log.pipeline_error(error=str(exc))
         error_ph.error(f"Could not load audio: {exc}")
@@ -383,8 +391,11 @@ def render_loading(source: Any) -> None:
     try:
         from services.analysis import Analysis
         structure = Analysis().analyze(audio)
-    except Exception as exc:
-        _advance("structure", t0, error=str(exc))
+    except SyncSafeError as exc:
+        _advance("structure", t0, error=str(exc), context=getattr(exc, "context", None))
+    except Exception as exc:  # noqa: BLE001 — UI boundary; unexpected errors degrade gracefully
+        _advance("structure", t0, error=str(exc),
+                 context={"cause": str(exc.__cause__)} if exc.__cause__ else None)
     else:
         _advance("structure", t0)
 
@@ -401,7 +412,9 @@ def render_loading(source: Any) -> None:
     try:
         from services.transcription import LyricsOrchestrator
         transcript = LyricsOrchestrator().transcribe(audio, title=title, artist=artist)
-    except Exception as exc:
+    except SyncSafeError as exc:
+        _advance("transcription", t0, error=str(exc))
+    except Exception as exc:  # noqa: BLE001 — UI boundary
         _advance("transcription", t0, error=str(exc))
     else:
         _advance("transcription", t0)
@@ -414,7 +427,9 @@ def render_loading(source: Any) -> None:
     try:
         from services.forensics import Forensics
         forensics = Forensics().analyze(audio)
-    except Exception as exc:
+    except SyncSafeError as exc:
+        _advance("forensics", t0, error=str(exc))
+    except Exception as exc:  # noqa: BLE001 — UI boundary
         _advance("forensics", t0, error=str(exc))
     else:
         _advance("forensics", t0)
@@ -429,7 +444,9 @@ def render_loading(source: Any) -> None:
         sections = structure.sections if structure else []
         beats    = structure.beats    if structure else []
         compliance = Compliance().check(audio, transcript, sections, beats)
-    except Exception as exc:
+    except SyncSafeError as exc:
+        _advance("compliance", t0, error=str(exc))
+    except Exception as exc:  # noqa: BLE001 — UI boundary
         _advance("compliance", t0, error=str(exc))
     else:
         _advance("compliance", t0)
@@ -442,7 +459,9 @@ def render_loading(source: Any) -> None:
     try:
         from services.authorship import Authorship
         authorship = Authorship().analyze(transcript)
-    except Exception as exc:
+    except SyncSafeError as exc:
+        _advance("authorship", t0, error=str(exc))
+    except Exception as exc:  # noqa: BLE001 — UI boundary
         _advance("authorship", t0, error=str(exc))
     else:
         _advance("authorship", t0)
@@ -455,7 +474,9 @@ def render_loading(source: Any) -> None:
     try:
         from services.discovery import Discovery
         similar = Discovery().find_similar(title, artist) or []
-    except Exception as exc:
+    except SyncSafeError as exc:
+        _advance("discovery", t0, error=str(exc))
+    except Exception as exc:  # noqa: BLE001 — UI boundary
         _advance("discovery", t0, error=str(exc))
     else:
         _advance("discovery", t0)
@@ -468,7 +489,9 @@ def render_loading(source: Any) -> None:
     try:
         from services.legal import Legal
         legal = Legal().get_links(title, artist)
-    except Exception as exc:
+    except SyncSafeError as exc:
+        _advance("legal", t0, error=str(exc))
+    except Exception as exc:  # noqa: BLE001 — UI boundary
         _advance("legal", t0, error=str(exc))
     else:
         _advance("legal", t0)
@@ -478,8 +501,7 @@ def render_loading(source: Any) -> None:
     _draw(header_ph, bar_ph, steps_ph, completed, "", step_durations)
 
     from core.models import AnalysisResult
-    st.session_state.audio    = audio
-    st.session_state.analysis = AnalysisResult(
+    result = AnalysisResult(
         audio=audio,
         structure=structure,
         forensics=forensics,
@@ -489,5 +511,8 @@ def render_loading(source: Any) -> None:
         similar_tracks=similar,
         legal=legal,
     )
-    st.session_state.page = "report"
+
+    st.session_state.audio    = audio
+    st.session_state.analysis = result
+    st.session_state.page     = "report"
     st.rerun()
