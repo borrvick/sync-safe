@@ -7,6 +7,7 @@ All functions accept typed domain models from core.models; no raw dict access.
 from __future__ import annotations
 
 import html as html_mod
+import re
 from collections import Counter, OrderedDict
 from typing import Optional
 
@@ -46,6 +47,7 @@ def render_report(
     _render_nav(audio.label)
     st.markdown('<span id="main-content" tabindex="-1"></span>', unsafe_allow_html=True)
     _render_audio_player(audio)
+    _render_label_picker(audio.label)
 
     with st.expander("Track Overview", expanded=True):
         c_left, c_right = st.columns([1, 1], gap="large")
@@ -123,12 +125,42 @@ def _render_nav(source_label: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _render_audio_player(audio: AudioBuffer) -> None:
-    st.audio(
+    # st.audio doesn't support `key` in Streamlit < 1.56 — use st.empty() as
+    # the container instead. Replacing the slot forces a full widget re-init
+    # whenever player_key increments (same effect as keyed re-mount).
+    slot = st.empty()
+    slot.audio(
         audio.raw,
         start_time=st.session_state.get("start_time", 0),
-        key=f"player_{st.session_state.get('player_key', 0)}",
     )
     st.markdown("<div style='margin-bottom:28px;'></div>", unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
+# Track label picker
+# ---------------------------------------------------------------------------
+
+_LABEL_OPTIONS = ["— unrated —", "100% AI", "AI Cover", "Heavily Sampled/Loops", "RAW"]
+
+
+def _render_label_picker(track_label: str) -> None:
+    """Render a category dropdown for manually labelling a track.
+
+    Selection is stored in st.session_state for the current session.
+    When the Django migration is complete this will persist to the database.
+    """
+    session_key = f"label_{re.sub(r'[^\\w]', '_', track_label)[:60]}"
+    current = st.session_state.get(session_key, "— unrated —")
+    idx = _LABEL_OPTIONS.index(current) if current in _LABEL_OPTIONS else 0
+
+    chosen = st.selectbox(
+        "Track category",
+        _LABEL_OPTIONS,
+        index=idx,
+        key=session_key,
+    )
+    if chosen != "— unrated —" and chosen != current:
+        st.session_state[session_key] = chosen
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +276,7 @@ def _render_forensics_card(fr: Optional[ForensicsResult]) -> None:
         "Human": "v-h",
         "Human (Sample/Loop)": "v-h",
         "Possible Hybrid AI Cover": "v-u",
+        "Likely AI": "v-a",
         "AI": "v-a",
     }.get(verdict, "v-u")
 

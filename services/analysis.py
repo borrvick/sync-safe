@@ -171,6 +171,41 @@ class Analysis:
         except ModelInferenceError:
             raise
         except Exception as exc:
+            # MPS can leave dirty state between runs on Apple Silicon.
+            # If the chosen device was MPS, clear the cache and retry once on CPU
+            # before giving up — this fixes the intermittent allin1 failure pattern.
+            if device == "mps":
+                try:
+                    import torch
+                    torch.mps.empty_cache()
+                except Exception:
+                    pass
+                try:
+                    result = allin1.analyze(
+                        tmp_path,
+                        model=self._params.allin1_model,
+                        device="cpu",
+                        demix_dir=os.path.join(tmp_dir, "demix"),
+                        spec_dir=os.path.join(tmp_dir, "spec"),
+                        multiprocess=False,
+                    )
+                    bpm = (
+                        float(result.bpm)
+                        if hasattr(result, "bpm") and result.bpm is not None
+                        else "N/A"
+                    )
+                    sections = _parse_sections(result)
+                    beats = (
+                        [float(b) for b in result.beats]
+                        if hasattr(result, "beats") and result.beats
+                        else []
+                    )
+                    return bpm, sections, beats
+                except Exception as cpu_exc:
+                    raise ModelInferenceError(
+                        "allin1 analysis failed.",
+                        context={"original_error": str(exc), "cpu_retry_error": str(cpu_exc)},
+                    ) from cpu_exc
             raise ModelInferenceError(
                 "allin1 analysis failed.",
                 context={"original_error": str(exc)},

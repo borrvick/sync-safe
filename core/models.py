@@ -30,7 +30,7 @@ IssueType    = Literal["EXPLICIT", "BRAND", "LOCATION", "VIOLENCE", "DRUGS"]
 Confidence   = Literal["confirmed", "potential"]
 EndingType   = Literal["sting", "fade", "cut"]
 AIVerdict    = Literal["Likely Human", "Uncertain", "Likely AI", "Insufficient data"]
-ForensicVerdict = Literal["Human", "Human (Sample/Loop)", "Possible Hybrid AI Cover", "Uncertain", "AI"]
+ForensicVerdict = Literal["Human", "Human (Sample/Loop)", "Possible Hybrid AI Cover", "Uncertain", "Likely AI", "AI"]
 
 
 # ---------------------------------------------------------------------------

@@ -15,6 +15,7 @@ Design rules:
 """
 from __future__ import annotations
 
+import os
 import time
 from typing import Any
 
@@ -352,13 +353,14 @@ def render_loading(source: Any) -> None:
     def _tick(label: str) -> None:
         _draw(header_ph, bar_ph, steps_ph, completed, label, step_durations)
 
-    def _advance(key: str, step_start: float, error: str | None = None) -> None:
+    def _advance(key: str, step_start: float, error: str | None = None,
+                 context: dict | None = None) -> None:
         nonlocal completed
         duration = time.time() - step_start
         step_durations.append(duration)
         completed += 1
         if error:
-            log.step_error(key, error=error)
+            log.step_error(key, error=error, context=context)
         else:
             log.step_end(key, duration_s=duration)
 
@@ -390,9 +392,10 @@ def render_loading(source: Any) -> None:
         from services.analysis import Analysis
         structure = Analysis().analyze(audio)
     except SyncSafeError as exc:
-        _advance("structure", t0, error=str(exc))
+        _advance("structure", t0, error=str(exc), context=getattr(exc, "context", None))
     except Exception as exc:  # noqa: BLE001 — UI boundary; unexpected errors degrade gracefully
-        _advance("structure", t0, error=str(exc))
+        _advance("structure", t0, error=str(exc),
+                 context={"cause": str(exc.__cause__)} if exc.__cause__ else None)
     else:
         _advance("structure", t0)
 
@@ -498,8 +501,7 @@ def render_loading(source: Any) -> None:
     _draw(header_ph, bar_ph, steps_ph, completed, "", step_durations)
 
     from core.models import AnalysisResult
-    st.session_state.audio    = audio
-    st.session_state.analysis = AnalysisResult(
+    result = AnalysisResult(
         audio=audio,
         structure=structure,
         forensics=forensics,
@@ -509,5 +511,8 @@ def render_loading(source: Any) -> None:
         similar_tracks=similar,
         legal=legal,
     )
-    st.session_state.page = "report"
+
+    st.session_state.audio    = audio
+    st.session_state.analysis = result
+    st.session_state.page     = "report"
     st.rerun()

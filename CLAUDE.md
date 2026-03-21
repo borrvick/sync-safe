@@ -2,6 +2,53 @@
 
 ---
 
+## Environment
+
+- **Machine**: Apple M3 Mac (ARM / Apple Silicon). Never assume Intel architecture.
+- When troubleshooting brew, Python, or venv issues, always use `arch -arm64` prefix.
+- Python environment is managed via a virtualenv. Check `run.sh` for the activation pattern before suggesting manual commands.
+
+---
+
+## Running the App
+
+Always check for `run.sh` in the project root before suggesting `streamlit run app.py` or any generic launch command. The project has a startup script — use it:
+
+```bash
+bash run.sh
+```
+
+Never suggest `streamlit run app.py` directly unless `run.sh` is absent.
+
+---
+
+## Git Workflow
+
+- **Never auto-commit.** Always wait for an explicit instruction like "commit this" or "make a commit" before running `git commit`.
+- Never push unless explicitly asked.
+- Branch strategy: `main` ← `develop` ← feature/fix branches. Always branch off `develop`.
+
+---
+
+## UI & Styling
+
+- Before making any CSS or visual change, ask for a concrete reference: a screenshot, specific hex values, or existing CSS classes to mimic.
+- Make minimal, targeted changes — never rewrite CSS blocks that weren't explicitly flagged.
+- Do not add hover styles unless requested.
+- If the user rejects a design, ask "can you share a reference or describe exactly what you want?" — do not iterate blindly.
+
+---
+
+## Streamlit Conventions
+
+- `st.html()` does **NOT** execute JavaScript. Use `st.components.v1.html(..., height=X)` for any JS execution.
+- `st.audio()` does **NOT** support `key=` in Streamlit 1.55.x. Use `st.empty()` as the container and call `.audio()` on the slot — replacing the slot forces a full widget re-init (same effect as a keyed re-mount).
+- Always add `@st.cache_data` or `@st.cache_resource` to expensive computations (model loads, API calls, audio processing) to prevent re-running on every Streamlit rerun.
+- Initialize all `st.session_state` keys at the top of the script before access.
+- Use `st.components.v1.html()` iframes only when JS is required; use `st.markdown()` for purely decorative HTML.
+
+---
+
 ## Collaboration Rules
 
 1. **Dry Run First**: Before implementing any service, provide a 3-sentence summary of the proposed class hierarchy and data flow. Wait for **'OK'** before writing code.
