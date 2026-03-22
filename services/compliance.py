@@ -37,11 +37,13 @@ from core.models import (
     IntroResult,
     IssueType,
     Section,
+    Severity,
     StingResult,
     TranscriptSegment,
 )
 from data.brand_keywords import BRAND_KEYWORDS
 from data.drug_keywords import DRUG_KEYWORDS
+from data.profanity_supplement import PROFANITY_SUPPLEMENT
 
 try:
     import spaces
@@ -56,19 +58,15 @@ except ImportError:
 # Detoxify thresholds
 # ---------------------------------------------------------------------------
 
-# Detoxify category thresholds — confirmed vs potential for each issue type.
-# Scores are probabilities [0.0, 1.0] from the 'original' multilingual model.
-
-# EXPLICIT: obscene score (Detoxify 'original' model — no sexual_explicit category)
-_EXPLICIT_CONFIRMED: float = 0.60
-_EXPLICIT_POTENTIAL: float = 0.40
-
-# VIOLENCE: threat score
-_VIOLENCE_CONFIRMED: float = 0.70
-_VIOLENCE_POTENTIAL: float = 0.50
-
-# DRUGS: no direct Detoxify category — use overall toxicity + word list
-_DRUGS_TOXIC_MIN: float = 0.75
+# Detoxify score thresholds — sourced from CONSTANTS (core/config.py).
+# All numeric values live there; references here are read-only aliases for brevity.
+_EXPLICIT_CONFIRMED: float = CONSTANTS.EXPLICIT_CONFIRMED
+_EXPLICIT_POTENTIAL: float = CONSTANTS.EXPLICIT_POTENTIAL
+_HARD_OBSCENE_THRESHOLD: float = CONSTANTS.EXPLICIT_HARD
+_VIOLENCE_CONFIRMED: float = CONSTANTS.VIOLENCE_CONFIRMED
+_VIOLENCE_POTENTIAL: float = CONSTANTS.VIOLENCE_POTENTIAL
+_HARD_THREAT_THRESHOLD: float = CONSTANTS.VIOLENCE_HARD
+_DRUGS_TOXIC_MIN: float = CONSTANTS.DRUGS_TOXIC_MIN
 
 # Number of segments in a sliding window used to confirm borderline scores
 _WINDOW_SIZE: int = 3
@@ -76,15 +74,16 @@ _WINDOW_SIZE: int = 3
 # Segments shorter than this carry no classifiable signal
 _MIN_SEGMENT_CHARS: int = 20
 
+# Only these issue types count toward the A–F content grade
+_GRADE_ISSUE_TYPES: frozenset[str] = frozenset({"EXPLICIT", "VIOLENCE", "DRUGS"})
+
 # NER entity labels mapped to our issue types
 _NER_ISSUE_MAP: dict[str, IssueType] = {
     "ORG": "BRAND",
-    "GPE": "LOCATION",
 }
 
 _NER_RECOMMENDATIONS: dict[IssueType, str] = {
-    "BRAND":    "Confirm explicit brand clearance with rights holder.",
-    "LOCATION": "Review placement scope — location may limit territory.",
+    "BRAND": "Confirm explicit brand clearance with rights holder.",
 }
 
 
@@ -153,12 +152,7 @@ class Compliance:
         intro     = self._check_intro(sections, transcript)
         flags     = self._audit_lyrics(transcript)
 
-        grade = _compute_grade(
-            flags=flags,
-            sting=sting,
-            evolution=evolution,
-            intro=intro,
-        )
+        grade = _compute_grade(flags=flags)
 
         return ComplianceReport(
             flags=flags,
@@ -407,15 +401,35 @@ class Compliance:
 
         # Pass 1: profanity word-list on ALL segments — no minimum length,
         # so short segments like "(Holy shit)" are not skipped.
+        # Each word-list hit is cross-validated against Detoxify's obscenity
+        # score to suppress idiomatic false positives (e.g. "tied up right now").
         if pf is not None:
             for seg in transcript:
                 if pf.contains_profanity(seg.text):
+                    try:
+                        obs = float(detector.predict(seg.text).get("obscene", 0.0))
+                    except Exception:  # noqa: BLE001 — Detoxify predict is best-effort; fall back to potential
+                        obs = _EXPLICIT_POTENTIAL
+
+                    if obs >= _EXPLICIT_CONFIRMED:
+                        confidence: str = "confirmed"
+                    elif obs >= _EXPLICIT_POTENTIAL:
+                        confidence = "potential"
+                    else:
+                        continue  # Detoxify disagrees — drop as false positive
+
+                    severity: Severity = "hard" if obs >= _HARD_OBSCENE_THRESHOLD else "soft"
                     raw_flags.append(ComplianceFlag(
                         timestamp_s=int(seg.start),
                         issue_type="EXPLICIT",
                         text=seg.text,
-                        recommendation="Request a clean/radio edit before submission.",
-                        confidence="confirmed",
+                        recommendation=(
+                            "Clean edit required — hard explicit content."
+                            if severity == "hard"
+                            else "Mild language — acceptable for some placements. Supervisor discretion."
+                        ),
+                        confidence=confidence,
+                        severity=severity,
                     ))
 
         # Pass 2: Detoxify + NER + brand keywords on segments ≥ MIN chars
@@ -430,12 +444,15 @@ class Compliance:
                     text=seg.text,
                     recommendation=flag[1],
                     confidence=flag[2],
+                    severity=flag[3],
                 ))
 
             # Curated brand keywords → BRAND (potential)
             raw_flags.extend(_check_brand_keywords(seg.text, ts, self._brand_patterns))
 
-            # spaCy NER → BRAND (ORG, confirmed) + LOCATION (GPE, confirmed)
+            # spaCy NER → BRAND (ORG, potential) — downgraded to potential
+            # because NER in song lyrics produces too many false positives
+            # (e.g. terms of endearment and common nouns mis-classified as ORG).
             if nlp is not None:
                 try:
                     doc = nlp(seg.text)
@@ -447,7 +464,7 @@ class Compliance:
                                 issue_type=issue_type,
                                 text=ent.text,
                                 recommendation=_NER_RECOMMENDATIONS[issue_type],
-                                confidence="confirmed",
+                                confidence="potential",
                             ))
                 except Exception:  # noqa: BLE001 — NER is supplementary
                     pass
@@ -519,6 +536,10 @@ class Compliance:
             except Exception:  # noqa: BLE001 — LDNOOBW fetch is best-effort
                 pass
 
+            # Project-specific supplement (data/profanity_supplement.py)
+            if PROFANITY_SUPPLEMENT:
+                bp.add_censor_words(list(PROFANITY_SUPPLEMENT))
+
             self._profanity_filter = bp
             return self._profanity_filter
         except Exception:  # noqa: BLE001
@@ -566,7 +587,7 @@ def _score_detoxify(
     seg_text: str,
     window_text: str,
     detector,
-) -> list[tuple[IssueType, str, str]]:
+) -> list[tuple[IssueType, str, str, str]]:
     """
     Score a segment with Detoxify and return any flags.
 
@@ -574,7 +595,10 @@ def _score_detoxify(
     borderline scores before promoting them to "confirmed".
 
     Returns:
-        List of (issue_type, recommendation, confidence) tuples — empty if clean.
+        List of (issue_type, recommendation, confidence, severity) tuples.
+        severity is "hard" for absolute deal-breakers, "soft" for
+        placement-dependent issues that are the sync director's call.
+        Returns empty list if clean.
 
     Pure function aside from the detector call — no side effects.
     """
@@ -588,55 +612,76 @@ def _score_detoxify(
     if not solo:
         return []
 
-    flags: list[tuple[IssueType, str, str]] = []
+    flags: list[tuple[IssueType, str, str, str]] = []
 
     # --- EXPLICIT ---
     explicit_score = solo.get("obscene", 0.0)
     if explicit_score >= _EXPLICIT_CONFIRMED:
-        flags.append((
-            "EXPLICIT",
-            "Request a clean/radio edit before submission.",
-            "confirmed",
-        ))
+        sev = "hard" if explicit_score >= _HARD_OBSCENE_THRESHOLD else "soft"
+        rec = (
+            "Clean edit required — hard explicit content."
+            if sev == "hard"
+            else "Mild language — acceptable for some placements. Supervisor discretion."
+        )
+        flags.append(("EXPLICIT", rec, "confirmed", sev))
     elif explicit_score >= _EXPLICIT_POTENTIAL:
         win = _predict(window_text)
-        if win.get("obscene", 0.0) >= _EXPLICIT_CONFIRMED:
-            flags.append(("EXPLICIT", "Request a clean/radio edit before submission.", "confirmed"))
+        win_score = win.get("obscene", 0.0)
+        if win_score >= _EXPLICIT_CONFIRMED:
+            sev = "hard" if win_score >= _HARD_OBSCENE_THRESHOLD else "soft"
+            rec = (
+                "Clean edit required — hard explicit content."
+                if sev == "hard"
+                else "Mild language — acceptable for some placements. Supervisor discretion."
+            )
+            flags.append(("EXPLICIT", rec, "confirmed", sev))
         else:
             flags.append((
                 "EXPLICIT",
                 "Possible explicit content — supervisor should review before submission.",
                 "potential",
+                "soft",
             ))
 
     # --- VIOLENCE ---
     threat_score = solo.get("threat", 0.0)
     if threat_score >= _VIOLENCE_CONFIRMED:
-        flags.append((
-            "VIOLENCE",
-            "Flag for brand-safety review; may disqualify family placements.",
-            "confirmed",
-        ))
+        sev = "hard" if threat_score >= _HARD_THREAT_THRESHOLD else "soft"
+        rec = (
+            "Threatening language — disqualifies family and broadcast placements."
+            if sev == "hard"
+            else "Flag for brand-safety review; may disqualify family placements."
+        )
+        flags.append(("VIOLENCE", rec, "confirmed", sev))
     elif threat_score >= _VIOLENCE_POTENTIAL:
         win = _predict(window_text)
-        if win.get("threat", 0.0) >= _VIOLENCE_CONFIRMED:
-            flags.append(("VIOLENCE", "Flag for brand-safety review; may disqualify family placements.", "confirmed"))
+        win_score = win.get("threat", 0.0)
+        if win_score >= _VIOLENCE_CONFIRMED:
+            sev = "hard" if win_score >= _HARD_THREAT_THRESHOLD else "soft"
+            rec = (
+                "Threatening language — disqualifies family and broadcast placements."
+                if sev == "hard"
+                else "Flag for brand-safety review; may disqualify family placements."
+            )
+            flags.append(("VIOLENCE", rec, "confirmed", sev))
         else:
             flags.append((
                 "VIOLENCE",
                 "Possible violent language — review in context before family placement.",
                 "potential",
+                "soft",
             ))
 
-    # --- DRUGS (toxicity + word-list gate) ---
+    # --- DRUGS (toxicity + word-list gate) — always hard ---
     toxic_score = solo.get("toxicity", 0.0)
     text_lower  = seg_text.lower()
     has_drug_word = any(w in text_lower.split() for w in DRUG_KEYWORDS)
     if toxic_score >= _DRUGS_TOXIC_MIN and has_drug_word:
         flags.append((
             "DRUGS",
-            "Flag for brand-safety review; likely disqualifies broadcast.",
+            "Drug reference — disqualifies broadcast and most brand placements.",
             "confirmed",
+            "hard",
         ))
 
     return flags
@@ -674,58 +719,60 @@ def _deduplicate_flags(flags: list[ComplianceFlag]) -> list[ComplianceFlag]:
     """
     Remove duplicate flags — keep the first occurrence of each (text, issue_type) pair.
 
+    Deduplication is keyed on normalized text + issue type, NOT timestamp, so
+    repeated chorus lines collapse to a single flag at the earliest timestamp.
     Confirmed flags take priority over potential ones for the same key.
     """
-    # Sort: confirmed before potential so confirmed wins dedup
-    ordered  = sorted(flags, key=lambda f: (0 if f.confidence == "confirmed" else 1))
-    seen:    set[tuple[int, str, str]] = set()
-    unique:  list[ComplianceFlag] = []
+    # Sort: confirmed before potential, then by timestamp (earliest first)
+    ordered = sorted(flags, key=lambda f: (0 if f.confidence == "confirmed" else 1, f.timestamp_s))
+    seen:   set[tuple[str, str]] = set()
+    unique: list[ComplianceFlag] = []
     for f in ordered:
-        key = (f.timestamp_s, f.text.strip().lower(), f.issue_type)
+        key = (f.text.strip().lower(), f.issue_type)
         if key not in seen:
             seen.add(key)
             unique.append(f)
     return unique
 
 
-def _compute_grade(
-    flags: list[ComplianceFlag],
-    sting: Optional[StingResult],
-    evolution: Optional[EnergyEvolutionResult],
-    intro: Optional[IntroResult],
-) -> str:
+def _compute_grade(flags: list[ComplianceFlag]) -> str:
     """
-    Compute an A–F sync-readiness grade.
+    Compute an A–F lyric-content grade.
 
-    Grade is based on confirmed flags only — potential flags never lower the
-    grade (they require human review). Structural failures (fade, stagnant
-    energy, long intro) each add one confirmed strike.
+    Only hard-severity EXPLICIT, VIOLENCE, and DRUGS flags count toward the grade.
+    BRAND flags and structural issues (fade, energy, intro) do not affect this
+    grade — structural fitness is handled by the Sync Snapshot verdict.
+    Soft confirmed flags (mild language, brand mentions, borderline metaphors) are
+    shown in the audit table but do not lower the grade below B — they are the
+    sync director's placement call, not absolute blockers.
 
     Grading scale:
-        A — 0 confirmed issues
-        B — 1 confirmed issue
-        C — 2–3 confirmed issues
-        D — 4–5 confirmed issues
-        F — 6+ confirmed issues OR fade ending
+        A — 0 hard confirmed issues, 0 soft/potential flags
+        B — 0 hard confirmed issues, but soft confirmed or potential flags present
+        C — 1 hard confirmed issue
+        D — 2–3 hard confirmed issues
+        F — 4+ hard confirmed issues (or any DRUGS hard confirmed)
     """
-    confirmed = sum(1 for f in flags if f.confidence == "confirmed")
-
-    # Structural strikes
-    if sting and sting.flag:
-        confirmed += 1
-    if evolution and evolution.flag:
-        confirmed += 1
-    if intro and intro.flag:
-        confirmed += 1
-
-    if sting and sting.ending_type == "fade":
+    hard_confirmed = sum(
+        1 for f in flags
+        if f.confidence == "confirmed"
+        and f.severity == "hard"
+        and f.issue_type in _GRADE_ISSUE_TYPES
+    )
+    has_drugs_hard = any(
+        f.issue_type == "DRUGS" and f.confidence == "confirmed" and f.severity == "hard"
+        for f in flags
+    )
+    if has_drugs_hard or hard_confirmed >= 4:
         return "F"
-    if confirmed == 0:
-        return "A"
-    if confirmed == 1:
-        return "B"
-    if confirmed <= 3:
-        return "C"
-    if confirmed <= 5:
+    if hard_confirmed == 3:
         return "D"
-    return "F"
+    if hard_confirmed == 2:
+        return "D"
+    if hard_confirmed == 1:
+        return "C"
+    # 0 hard confirmed — grade on whether any soft/potential flags exist
+    has_advisory = any(
+        f.confidence in ("confirmed", "potential") for f in flags
+    )
+    return "B" if has_advisory else "A"
