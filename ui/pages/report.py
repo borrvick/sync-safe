@@ -7,7 +7,6 @@ All functions accept typed domain models from core.models; no raw dict access.
 from __future__ import annotations
 
 import html as html_mod
-import re
 from collections import Counter, OrderedDict
 from typing import Optional
 
@@ -47,7 +46,7 @@ def render_report(
     _render_nav(audio.label)
     st.markdown('<span id="main-content" tabindex="-1"></span>', unsafe_allow_html=True)
     _render_audio_player(audio)
-    _render_label_picker(audio.label)
+    _render_sync_snapshot(result)
 
     with st.expander("Track Overview", expanded=True):
         c_left, c_right = st.columns([1, 1], gap="large")
@@ -69,6 +68,146 @@ def render_report(
         _render_lyric_section(result)
 
     _render_footer()
+
+
+# ---------------------------------------------------------------------------
+# Sync Snapshot — top-level verdict
+# ---------------------------------------------------------------------------
+
+_VERDICT_READY    = "Ready"
+_VERDICT_CAUTION  = "Caution"
+_VERDICT_NOT_READY = "Not Ready"
+
+# (status, icon, color)
+_STATUS_PASS    = ("pass",    "✓", "var(--grade-b)")
+_STATUS_CAUTION = ("caution", "▲", "var(--grade-c)")
+_STATUS_FAIL    = ("fail",    "✕", "var(--danger)")
+
+
+def _compute_sync_verdict(
+    result: AnalysisResult,
+) -> tuple[str, str, list[tuple[str, str, str, str]]]:
+    """
+    Derive a top-level sync verdict from all pipeline outputs.
+
+    Returns:
+        (verdict, color, categories)
+        verdict:    "Ready" | "Caution" | "Not Ready"
+        color:      CSS color string
+        categories: list of (label, icon, color, detail)
+
+    Pure function — no side effects, no I/O.
+    """
+    categories: list[tuple[str, str, str, str]] = []
+
+    # ── 1. Authenticity (AI detection) ──────────────────────────────────────
+    fv = result.forensics.verdict if result.forensics else None
+    if fv in ("Human", "Human (Sample/Loop)"):
+        auth_status = _STATUS_PASS
+        auth_detail = fv
+    elif fv in ("Likely AI", "AI"):
+        auth_status = _STATUS_FAIL
+        auth_detail = fv
+    elif fv in ("Uncertain", "Possible Hybrid AI Cover"):
+        auth_status = _STATUS_CAUTION
+        auth_detail = fv
+    else:
+        auth_status = _STATUS_CAUTION
+        auth_detail = "No authenticity data"
+    categories.append(("Authenticity", auth_status[1], auth_status[2], auth_detail))
+
+    # ── 2. Arrangement (structural fitness) ──────────────────────────────────
+    comp = result.compliance
+    arr_issues: list[str] = []
+    if comp:
+        if comp.sting.ending_type == "fade":
+            arr_issues.append("Fade ending — needs clean out-point")
+        if comp.intro.flag:
+            arr_issues.append(f"Intro too long ({comp.intro.intro_seconds:.0f}s)")
+        if comp.evolution.flag:
+            arr_issues.append(
+                f"{comp.evolution.stagnant_windows} stagnant energy window"
+                f"{'s' if comp.evolution.stagnant_windows != 1 else ''}"
+            )
+    if arr_issues:
+        arr_status = _STATUS_CAUTION
+        arr_detail = " · ".join(arr_issues)
+    else:
+        arr_status = _STATUS_PASS
+        arr_detail = "No structural issues"
+    categories.append(("Arrangement", arr_status[1], arr_status[2], arr_detail))
+
+    # ── 3. Content (lyric grade) ─────────────────────────────────────────────
+    grade = comp.grade if comp else "N/A"
+    if grade in ("A", "B", "N/A"):
+        cont_status  = _STATUS_PASS
+        hard_count   = len(comp.hard_flags) if comp else 0
+        adv_count    = len(comp.soft_flags) + len(comp.potential_flags) if comp else 0
+        if hard_count == 0 and adv_count == 0:
+            cont_detail = "Clean"
+        else:
+            cont_detail = f"Grade {grade} — {adv_count} advisory flag{'s' if adv_count != 1 else ''}"
+    elif grade == "C":
+        cont_status = _STATUS_CAUTION
+        hard_count  = len(comp.hard_flags) if comp else 0
+        cont_detail = f"Grade {grade} — {hard_count} hard issue, clean edit required"
+    else:
+        cont_status = _STATUS_FAIL
+        hard_count  = len(comp.hard_flags) if comp else 0
+        cont_detail = f"Grade {grade} — {hard_count} hard issue{'s' if hard_count != 1 else ''}"
+    categories.append(("Content", cont_status[1], cont_status[2], cont_detail))
+
+    # ── Overall verdict ───────────────────────────────────────────────────────
+    statuses = [auth_status[0], arr_status[0], cont_status[0]]
+    if "fail" in statuses:
+        verdict = _VERDICT_NOT_READY
+        color   = "var(--danger)"
+    elif "caution" in statuses:
+        verdict = _VERDICT_CAUTION
+        color   = "var(--grade-c)"
+    else:
+        verdict = _VERDICT_READY
+        color   = "var(--grade-b)"
+
+    return verdict, color, categories
+
+
+def _render_sync_snapshot(result: AnalysisResult) -> None:
+    """Render the top-level Sync Snapshot card."""
+    verdict, v_color, categories = _compute_sync_verdict(result)
+
+    rows_html = "".join(
+        f"<div style='display:flex;align-items:flex-start;gap:10px;padding:7px 0;"
+        f"border-bottom:1px solid var(--border-hr);'>"
+        f"<span style='font-family:\"JetBrains Mono\",monospace;font-size:.78rem;"
+        f"font-weight:700;color:{cat_color};min-width:14px;flex-shrink:0;'>{icon}</span>"
+        f"<span style='font-family:\"Chakra Petch\",monospace;font-size:.62rem;"
+        f"font-weight:600;letter-spacing:.08em;text-transform:uppercase;"
+        f"color:var(--text);min-width:100px;flex-shrink:0;'>{html_mod.escape(label)}</span>"
+        f"<span style='font-family:\"Figtree\",sans-serif;font-size:.78rem;"
+        f"color:var(--muted);'>{html_mod.escape(detail)}</span>"
+        f"</div>"
+        for label, icon, cat_color, detail in categories
+    )
+
+    st.markdown(f"""
+    <div style="border:1px solid {v_color}44;border-radius:12px;
+                background:{v_color}0D;padding:18px 22px;margin-bottom:18px;">
+      <div style="display:flex;align-items:center;gap:16px;margin-bottom:14px;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:1.6rem;
+                    font-weight:700;color:{v_color};flex-shrink:0;">{verdict}</div>
+        <div>
+          <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;
+                      font-weight:600;letter-spacing:.18em;text-transform:uppercase;
+                      color:var(--dim);">Sync Snapshot</div>
+          <div style="font-family:'Figtree',sans-serif;font-size:.74rem;
+                      color:var(--muted);margin-top:2px;">
+            Combined verdict across authenticity, arrangement, and content.</div>
+        </div>
+      </div>
+      <div>{rows_html}</div>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------------------
@@ -137,33 +276,6 @@ def _render_audio_player(audio: AudioBuffer) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Track label picker
-# ---------------------------------------------------------------------------
-
-_LABEL_OPTIONS = ["— unrated —", "100% AI", "AI Cover", "Heavily Sampled/Loops", "RAW"]
-
-
-def _render_label_picker(track_label: str) -> None:
-    """Render a category dropdown for manually labelling a track.
-
-    Selection is stored in st.session_state for the current session.
-    When the Django migration is complete this will persist to the database.
-    """
-    session_key = f"label_{re.sub(r'[^\\w]', '_', track_label)[:60]}"
-    current = st.session_state.get(session_key, "— unrated —")
-    idx = _LABEL_OPTIONS.index(current) if current in _LABEL_OPTIONS else 0
-
-    chosen = st.selectbox(
-        "Track category",
-        _LABEL_OPTIONS,
-        index=idx,
-        key=session_key,
-    )
-    if chosen != "— unrated —" and chosen != current:
-        st.session_state[session_key] = chosen
-
-
-# ---------------------------------------------------------------------------
 # Track Overview: metadata + structure
 # ---------------------------------------------------------------------------
 
@@ -225,10 +337,25 @@ def _render_structure_card(sr: Optional[StructureResult]) -> None:
     key      = sr.key if sr else "—"
     sections = sr.sections if sr else []
 
-    pills = "".join(
-        f"<span class='s-pill'>{s.label} {s.start:.0f}s–{s.end:.0f}s</span>"
-        for s in sections
-    ) if sections else "<span style='font-family:var(--mono);font-size:.8rem;color:var(--dim);'>No section data</span>"
+    def _fmt_ts(secs: float) -> str:
+        m, s = divmod(int(secs), 60)
+        return f"{m}:{s:02d}"
+
+    if sections:
+        rows_html = "".join(
+            f"<div style='display:flex;align-items:center;gap:12px;padding:5px 0;"
+            f"border-bottom:1px solid var(--border-hr);'>"
+            f"<span style='font-family:\"JetBrains Mono\",monospace;font-size:.78rem;"
+            f"color:var(--dim);min-width:90px;'>{_fmt_ts(s.start)} – {_fmt_ts(s.end)}</span>"
+            f"<span style='font-family:\"Chakra Petch\",monospace;font-size:.76rem;"
+            f"font-weight:600;letter-spacing:.08em;text-transform:uppercase;"
+            f"color:var(--text);'>{html_mod.escape(s.label)}</span>"
+            f"</div>"
+            for s in sections
+        )
+        sections_html = f"<div style='margin-top:4px;'>{rows_html}</div>"
+    else:
+        sections_html = "<span style='font-family:var(--mono);font-size:.8rem;color:var(--dim);'>No section data</span>"
 
     st.markdown(f"""
     <div class="sig">
@@ -253,7 +380,7 @@ def _render_structure_card(sr: Optional[StructureResult]) -> None:
       </div>
       <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
                   letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:10px;">Detected Sections</div>
-      <div style="display:flex;flex-wrap:wrap;">{pills}</div>
+      {sections_html}
     </div>
     """, unsafe_allow_html=True)
 
@@ -709,35 +836,40 @@ def _render_lyric_column(
 
 
 def _render_audit_column(flags: list[ComplianceFlag], grade: str) -> None:
-    conf_flags = [f for f in flags if f.confidence == "confirmed"]
+    hard_flags = [f for f in flags if f.confidence == "confirmed" and f.severity == "hard"]
+    soft_flags = [f for f in flags if f.confidence == "confirmed" and f.severity == "soft"]
     pot_flags  = [f for f in flags if f.confidence == "potential"]
-    n_conf, n_pot = len(conf_flags), len(pot_flags)
+    n_hard, n_soft, n_pot = len(hard_flags), len(soft_flags), len(pot_flags)
 
-    if n_conf and n_pot:
-        issue_count_label = f"{n_conf} confirmed · {n_pot} potential"
-    elif n_conf:
-        issue_count_label = f"{n_conf} confirmed issue{'s' if n_conf != 1 else ''}"
-    elif n_pot:
-        issue_count_label = f"{n_pot} potential flag{'s' if n_pot != 1 else ''} — review needed"
+    if n_hard:
+        issue_count_label = (
+            f"{n_hard} deal-breaker{'s' if n_hard != 1 else ''}"
+            + (f" · {n_soft + n_pot} advisory" if n_soft + n_pot else "")
+        )
+    elif n_soft or n_pot:
+        issue_count_label = f"{n_soft + n_pot} advisory flag{'s' if n_soft + n_pot != 1 else ''} — director's discretion"
     else:
         issue_count_label = "All clear"
 
     grade_color      = _grade_color(grade)
-    grade_reason_str = _grade_reason(conf_flags, grade)
+    grade_reason_str = _grade_reason(hard_flags, soft_flags, grade)
     all_clear_html   = "<span style='font-family:\"Figtree\",sans-serif;font-size:.8rem;color:var(--sync-pass);'>✓ All clear</span>"
-    grade_pills_html = (_deduped_pills(conf_flags) + _deduped_pills(pot_flags)) if flags else all_clear_html
+    grade_pills_html = (
+        _deduped_pills(hard_flags) + _deduped_pills(soft_flags) + _deduped_pills(pot_flags)
+    ) if flags else all_clear_html
 
     st.markdown(f"""
     <div class="sig" style="margin-bottom:16px;">
       <div class="sig-head">Sync Compliance Grade
         <span class="tip-wrap" style="margin-left:6px;"><span class="tip-icon">?</span>
           <span class="tip-box">Sync readiness scoring for sync licensing.<br><br>
-          <strong>A</strong> — No issues. Clear for submission.<br>
-          <strong>B</strong> — Minor or potential flags only. Confirm clearances.<br>
-          <strong>C</strong> — Explicit/violent content or multiple brand mentions.<br>
-          <strong>D</strong> — Multiple explicit or violence flags. Clean edit required.<br>
-          <strong>F</strong> — Drug references or fade ending. Likely disqualifies broadcast.<br><br>
-          Grades are based on <strong>confirmed</strong> flags only.</span>
+          <strong>A</strong> — Fully clean. Clear for submission in any context.<br>
+          <strong>B</strong> — Advisory flags only. Director's placement call — no hard blockers.<br>
+          <strong>C</strong> — 1 hard content issue. Clean edit required for most placements.<br>
+          <strong>D</strong> — 2–3 hard issues. Clean edit required.<br>
+          <strong>F</strong> — 4+ hard issues or drug references. Disqualifies broadcast.<br><br>
+          Grade is based on <strong>hard</strong> confirmed flags only.<br>
+          Brand mentions and mild language appear as advisory — supervisor's call.</span>
         </span>
       </div>
       <div style="display:flex;align-items:center;gap:16px;margin-bottom:14px;">
@@ -756,19 +888,29 @@ def _render_audit_column(flags: list[ComplianceFlag], grade: str) -> None:
     """, unsafe_allow_html=True)
 
     if flags:
-        if conf_flags:
-            st.markdown("""
-            <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
-                        letter-spacing:.16em;text-transform:uppercase;color:var(--dim);
-                        margin-bottom:10px;">Confirmed Issues — Click to Jump</div>
-            """, unsafe_allow_html=True)
-            _render_flag_rows(conf_flags, "conf")
+        if hard_flags:
+            st.markdown(
+                "<div style='font-family:\"Chakra Petch\",monospace;font-size:.56rem;font-weight:600;"
+                "letter-spacing:.16em;text-transform:uppercase;color:var(--danger);"
+                "margin-bottom:10px;'>Deal-Breakers — Clean Edit Required</div>",
+                unsafe_allow_html=True,
+            )
+            _render_flag_rows(hard_flags, "hard")
+        if soft_flags:
+            st.markdown(
+                "<div style='font-family:\"Chakra Petch\",monospace;font-size:.56rem;font-weight:600;"
+                "letter-spacing:.16em;text-transform:uppercase;color:var(--dim);"
+                f"margin-top:{'14px' if hard_flags else '0'};margin-bottom:10px;'>"
+                "Placement Discretion — Director's Call</div>",
+                unsafe_allow_html=True,
+            )
+            _render_flag_rows(soft_flags, "soft")
         if pot_flags:
             st.markdown(
                 "<div style='font-family:\"Chakra Petch\",monospace;font-size:.56rem;font-weight:600;"
                 "letter-spacing:.16em;text-transform:uppercase;color:var(--needs-review);"
-                "margin-top:14px;margin-bottom:10px;opacity:.7;'>"
-                "Potential — Supervisor Review</div>",
+                f"margin-top:{'14px' if hard_flags or soft_flags else '0'};margin-bottom:10px;opacity:.7;'>"
+                "Supervisor Review — Verify Before Submission</div>",
                 unsafe_allow_html=True,
             )
             _render_flag_rows(pot_flags, "pot")
@@ -888,7 +1030,12 @@ def _assign_sections(
     result  = []
     captured: set[int] = set()
     for sec in ordered:
-        grp = [seg for seg in segments if sec.start <= seg.start < sec.end]
+        # Use midpoint so a segment that starts just before a section boundary
+        # (common with Whisper) is still assigned to the section it mostly lives in.
+        grp = [
+            seg for seg in segments
+            if sec.start <= (seg.start + seg.end) / 2 < sec.end
+        ]
         if grp:
             result.append((sec.label.upper(), grp))
             captured.update(id(seg) for seg in grp)
@@ -928,17 +1075,27 @@ def _grade_color(grade: str) -> str:
     }.get(grade, "var(--dim)")
 
 
-def _grade_reason(conf_flags: list[ComplianceFlag], grade: str) -> str:
-    if not conf_flags:
-        return "No confirmed compliance issues. Track is clear for sync submission."
-    counts = Counter(f.issue_type for f in conf_flags)
-    n      = len(conf_flags)
-    if counts.get("DRUGS", 0) > 0:
-        return f"{counts['DRUGS']} confirmed drug reference(s). Disqualifies broadcast and family placements."
-    if counts.get("EXPLICIT", 0) >= 2:
-        return f"{counts['EXPLICIT']} confirmed explicit flags. A clean edit is required for most sync placements."
-    if counts.get("EXPLICIT", 0) == 1 or counts.get("VIOLENCE", 0) >= 1:
-        return f"{n} confirmed issue(s) including explicit or violent content. Edits required for network TV and family placements."
-    if counts.get("BRAND", 0) >= 2:
-        return f"{counts['BRAND']} brand mentions detected. Explicit clearance required from each brand's rights holder."
-    return f"{n} minor confirmed flag(s). No hard blockers — confirm clearances before placement."
+def _grade_reason(
+    hard_flags: list[ComplianceFlag],
+    soft_flags: list[ComplianceFlag],
+    grade: str,
+) -> str:
+    if not hard_flags and not soft_flags:
+        return "No compliance issues detected. Track is clear for sync submission."
+    if not hard_flags:
+        n = len(soft_flags)
+        return (
+            f"{n} advisory flag{'s' if n != 1 else ''} — mild language or brand mentions. "
+            "No hard blockers. Placement is the director's call."
+        )
+    hard_counts = Counter(f.issue_type for f in hard_flags)
+    n_hard = len(hard_flags)
+    if hard_counts.get("DRUGS", 0) > 0:
+        return f"{hard_counts['DRUGS']} drug reference(s). Disqualifies broadcast and most brand placements."
+    if n_hard >= 4:
+        return f"{n_hard} hard content issues. Clean edit required before any sync submission."
+    if hard_counts.get("EXPLICIT", 0) >= 2:
+        return f"{hard_counts['EXPLICIT']} hard explicit flags. Clean edit required for most placements."
+    if hard_counts.get("VIOLENCE", 0) >= 1:
+        return f"{n_hard} hard content issue(s) including threatening language. Clean edit required for family and broadcast."
+    return f"{n_hard} hard content issue(s). Clean edit required for network TV and family placements."
