@@ -15,11 +15,14 @@ To intentionally accept a verdict change after a deliberate algorithm update:
 """
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
 import pytest
 
 from core.config import CONSTANTS
 from services.forensics import (
+    _SignalBundle,
     _build_flags,
     _check_spectral_slop,
     _compute_ai_probability,
@@ -124,9 +127,9 @@ class TestCheckSpectralSlop:
 # _compute_ai_probability
 # ---------------------------------------------------------------------------
 
-def _human_scores() -> dict:
+def _human_bundle() -> _SignalBundle:
     """Espresso-profile: sample-heavy human production, zero AI signals."""
-    return dict(
+    return _SignalBundle(
         c2pa_flag=False,
         ibi_variance=252.0,
         loop_score=0.88,
@@ -138,9 +141,9 @@ def _human_scores() -> dict:
     )
 
 
-def _ai_scores() -> dict:
+def _ai_bundle() -> _SignalBundle:
     """Careless Whisper AI cover profile: centroid + HNR both above threshold."""
-    return dict(
+    return _SignalBundle(
         c2pa_flag=False,
         ibi_variance=252.0,
         loop_score=0.88,
@@ -154,20 +157,20 @@ def _ai_scores() -> dict:
 
 class TestComputeAiProbability:
     def test_clean_human_scores_zero(self):
-        assert _compute_ai_probability(**_human_scores()) == 0.0
+        assert _compute_ai_probability(_human_bundle()) == 0.0
 
     def test_ai_profile_scores_above_hybrid_threshold(self):
-        prob = _compute_ai_probability(**_ai_scores())
+        prob = _compute_ai_probability(_ai_bundle())
         assert prob >= CONSTANTS.PROB_VERDICT_HYBRID
 
     def test_c2pa_flag_does_not_affect_probability(self):
         # C2PA is a hard override handled in _compute_verdict, not here
-        base = _compute_ai_probability(**{**_human_scores(), "c2pa_flag": False})
-        flagged = _compute_ai_probability(**{**_human_scores(), "c2pa_flag": True})
+        base    = _compute_ai_probability(dataclasses.replace(_human_bundle(), c2pa_flag=False))
+        flagged = _compute_ai_probability(dataclasses.replace(_human_bundle(), c2pa_flag=True))
         assert base == flagged
 
     def test_score_clamped_to_one(self):
-        prob = _compute_ai_probability(
+        prob = _compute_ai_probability(_SignalBundle(
             c2pa_flag=True,
             ibi_variance=0.0,
             loop_score=1.0,
@@ -176,33 +179,51 @@ class TestComputeAiProbability:
             harmonic_ratio_score=0.99,
             synthid_bins=99,
             spectral_slop=1.0,
-        )
+        ))
         assert prob <= 1.0
 
     def test_organic_damping_fires_on_non_repetitive_track(self):
         """Bon Iver profile: elevated centroid but near-zero autocorr should be damped."""
-        undamped = _compute_ai_probability(
+        undamped = _compute_ai_probability(_SignalBundle(
             c2pa_flag=False, ibi_variance=252.0, loop_score=0.0,
             loop_autocorr_score=0.40,        # above organic threshold → no damping
             centroid_instability_score=0.41,
             harmonic_ratio_score=0.79,
             synthid_bins=0, spectral_slop=0.0,
-        )
-        damped = _compute_ai_probability(
+        ))
+        damped = _compute_ai_probability(_SignalBundle(
             c2pa_flag=False, ibi_variance=252.0, loop_score=0.0,
             loop_autocorr_score=0.00,        # below organic threshold → damped
             centroid_instability_score=0.41,
             harmonic_ratio_score=0.79,
             synthid_bins=0, spectral_slop=0.0,
-        )
+        ))
         assert damped < undamped
 
     def test_synthid_medium_adds_weight(self):
-        base = _compute_ai_probability(**{**_human_scores(), "synthid_bins": 0})
+        base        = _compute_ai_probability(_human_bundle())
         with_synthid = _compute_ai_probability(
-            **{**_human_scores(), "synthid_bins": CONSTANTS.SYNTHID_LOW_BINS + 1}
+            dataclasses.replace(_human_bundle(), synthid_bins=CONSTANTS.SYNTHID_LOW_BINS + 1)
         )
         assert with_synthid > base
+
+    def test_noise_floor_bypasses_organic_damping(self):
+        """Orchestral AI (AIVA) profile: no vocals → centroid/HNR = -1.0, low autocorr.
+        noise_floor_ratio must contribute even though damping fires."""
+        # Without noise floor signal: damping fires, score stays at 0.0
+        no_nfr = _compute_ai_probability(_SignalBundle(
+            loop_autocorr_score=0.10,   # low → damping fires
+            centroid_instability_score=-1.0,  # no vocal signals
+            noise_floor_ratio=-1.0,
+        ))
+        # With noise floor signal: hardware_score added after damping
+        with_nfr = _compute_ai_probability(_SignalBundle(
+            loop_autocorr_score=0.10,
+            centroid_instability_score=-1.0,
+            noise_floor_ratio=0.001,    # triggers PROB_WEIGHT_NOISE_FLOOR
+        ))
+        assert with_nfr > no_nfr
+        assert with_nfr >= CONSTANTS.PROB_VERDICT_UNCERTAIN
 
 
 # ---------------------------------------------------------------------------
@@ -211,52 +232,52 @@ class TestComputeAiProbability:
 
 class TestComputeVerdict:
     def test_c2pa_flag_always_returns_ai(self):
-        result = _compute_verdict(
+        result = _compute_verdict(_SignalBundle(
             c2pa_flag=True, ibi_variance=252.0, loop_score=0.0,
             loop_autocorr_score=0.0, centroid_instability_score=0.0,
             synthid_bins=0, spectral_slop=0.0,
-        )
+        ))
         assert result == "AI"
 
     def test_high_synthid_returns_ai(self):
-        result = _compute_verdict(
+        result = _compute_verdict(_SignalBundle(
             c2pa_flag=False, ibi_variance=252.0, loop_score=0.0,
             loop_autocorr_score=0.0, centroid_instability_score=0.0,
             synthid_bins=CONSTANTS.SYNTHID_MEDIUM_BINS + 1, spectral_slop=0.0,
-        )
+        ))
         assert result == "AI"
 
     def test_sample_loop_human_profile_returns_human_sample_loop(self):
-        result = _compute_verdict(
+        result = _compute_verdict(_SignalBundle(
             c2pa_flag=False, ibi_variance=252.0, loop_score=0.88,
             loop_autocorr_score=0.93, centroid_instability_score=0.196,
             synthid_bins=0, spectral_slop=0.0, harmonic_ratio_score=0.227,
-        )
+        ))
         assert result == "Human (Sample/Loop)"
 
     def test_ai_profile_without_metadata_returns_likely_ai(self):
-        result = _compute_verdict(
+        result = _compute_verdict(_SignalBundle(
             c2pa_flag=False, ibi_variance=252.0, loop_score=0.88,
             loop_autocorr_score=0.75, centroid_instability_score=0.364,
             synthid_bins=0, spectral_slop=0.0, harmonic_ratio_score=0.619,
-        )
+        ))
         assert result == "Likely AI"
 
     def test_ai_verdict_requires_hard_evidence(self):
         # "AI" is only returned for C2PA or high SynthID — never from probability alone
-        result = _compute_verdict(
+        result = _compute_verdict(_SignalBundle(
             c2pa_flag=False, ibi_variance=0.0, loop_score=1.0,
             loop_autocorr_score=1.0, centroid_instability_score=0.99,
             synthid_bins=0, spectral_slop=1.0, harmonic_ratio_score=0.99,
-        )
+        ))
         assert result != "AI"
 
     def test_zero_signals_returns_human(self):
-        result = _compute_verdict(
+        result = _compute_verdict(_SignalBundle(
             c2pa_flag=False, ibi_variance=252.0, loop_score=0.0,
             loop_autocorr_score=0.0, centroid_instability_score=0.0,
             synthid_bins=0, spectral_slop=0.0,
-        )
+        ))
         assert result == "Human"
 
 
@@ -265,7 +286,7 @@ class TestComputeVerdict:
 # ---------------------------------------------------------------------------
 
 class TestBuildFlags:
-    _CLEAN = dict(
+    _CLEAN = _SignalBundle(
         c2pa_label="No C2PA Manifest",
         ibi_variance=252.0,
         spectral_slop=0.0,
@@ -277,43 +298,44 @@ class TestBuildFlags:
     )
 
     def test_clean_human_track_has_no_ai_flags(self):
-        flags = _build_flags(**self._CLEAN)
+        flags = _build_flags(self._CLEAN)
         ai_keywords = {"AI signal", "Perfect Quantization", "Formant Drift", "watermark",
                        "Unnaturally Clean"}
         for flag in flags:
             assert not any(kw in flag for kw in ai_keywords), f"Unexpected AI flag: {flag!r}"
 
     def test_c2pa_born_ai_label_appears_in_flags(self):
-        flags = _build_flags(**{**self._CLEAN, "c2pa_label": "Born-AI (Certified)"})
+        flags = _build_flags(dataclasses.replace(self._CLEAN, c2pa_label="Born-AI (Certified)"))
         assert any("Born-AI" in f for f in flags)
 
     def test_high_synthid_generates_high_confidence_flag(self):
-        flags = _build_flags(**{**self._CLEAN, "synthid_bins": CONSTANTS.SYNTHID_MEDIUM_BINS + 1})
+        flags = _build_flags(dataclasses.replace(self._CLEAN, synthid_bins=CONSTANTS.SYNTHID_MEDIUM_BINS + 1))
         assert any("High-confidence" in f for f in flags)
 
     def test_perfect_quantization_on_near_zero_ibi(self):
-        flags = _build_flags(**{**self._CLEAN, "ibi_variance": 0.0001})
+        flags = _build_flags(dataclasses.replace(self._CLEAN, ibi_variance=0.0001))
         assert any("Perfect Quantization" in f for f in flags)
 
     def test_human_feel_flag_on_high_ibi(self):
-        flags = _build_flags(**{**self._CLEAN, "ibi_variance": 200.0})
+        flags = _build_flags(dataclasses.replace(self._CLEAN, ibi_variance=200.0))
         assert any("Human-Feel" in f for f in flags)
 
     def test_loop_ceiling_flag_on_high_loop_score(self):
-        flags = _build_flags(**{**self._CLEAN, "loop_score": 0.99})
+        flags = _build_flags(dataclasses.replace(self._CLEAN, loop_score=0.99))
         assert any("Stock Loop" in f or "Likely Stock" in f for f in flags)
 
     def test_formant_drift_flag_on_high_centroid(self):
-        flags = _build_flags(**{**self._CLEAN, "centroid_instability_score": 0.40,
-                                "loop_autocorr_score": 0.75})
+        flags = _build_flags(dataclasses.replace(
+            self._CLEAN, centroid_instability_score=0.40, loop_autocorr_score=0.75
+        ))
         assert any("Formant Drift" in f for f in flags)
 
     def test_vocoder_flag_on_very_high_centroid(self):
-        flags = _build_flags(**{**self._CLEAN, "centroid_instability_score": 0.70})
+        flags = _build_flags(dataclasses.replace(self._CLEAN, centroid_instability_score=0.70))
         assert any("Vocoder" in f or "Extreme Spectral" in f for f in flags)
 
     def test_harmonic_ratio_flag_on_high_hnr(self):
-        flags = _build_flags(**{**self._CLEAN, "harmonic_ratio_score": 0.70})
+        flags = _build_flags(dataclasses.replace(self._CLEAN, harmonic_ratio_score=0.70))
         assert any("Clean Harmonics" in f or "Unnaturally" in f for f in flags)
 
 
@@ -362,7 +384,7 @@ def test_fixture_verdict_stable(stem: str, data: dict) -> None:
     A failure means a threshold change has flipped a real-track verdict.
     Review the change, then update _EXPECTED_VERDICTS if it's intentional.
     """
-    computed = _compute_verdict(
+    bundle = _SignalBundle(
         c2pa_flag=data.get("c2pa_flag", False),
         ibi_variance=data.get("ibi_variance", -1.0),
         loop_score=data.get("loop_score", 0.0),
@@ -371,7 +393,10 @@ def test_fixture_verdict_stable(stem: str, data: dict) -> None:
         synthid_bins=int(data.get("synthid_score", 0)),
         spectral_slop=data.get("spectral_slop", 0.0),
         harmonic_ratio_score=data.get("harmonic_ratio_score", -1.0),
+        noise_floor_ratio=data.get("noise_floor_ratio", -1.0),
+        spectral_centroid_mean=data.get("spectral_centroid_mean", -1.0),
     )
+    computed = _compute_verdict(bundle)
     expected = _EXPECTED_VERDICTS.get(stem)
     if expected is None:
         pytest.skip(f"No expected verdict registered for {stem!r} — add to _EXPECTED_VERDICTS")

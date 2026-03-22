@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import io
 import json
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -48,6 +49,32 @@ _SYNTHID_N_FFT: int     = 8_192    # ~5.4 Hz/bin at 44.1 kHz
 _SYNTHID_HOP: int       = 2_048
 _SYNTHID_PHASE_STD_MAX: float  = 0.10   # radians; below this = phase-locked bin
 _SYNTHID_MAG_SPIKE_DB: float   = 12.0   # dB above local floor to count as spike
+
+
+# ---------------------------------------------------------------------------
+# Signal bundle — carries all per-signal scores between aggregator functions
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _SignalBundle:
+    """All per-signal scores in one place, eliminating 15-param signatures."""
+    c2pa_flag: bool = False
+    c2pa_label: str = "No C2PA Manifest"
+    ibi_variance: float = -1.0
+    loop_score: float = 0.0
+    loop_autocorr_score: float = 0.0
+    centroid_instability_score: float = -1.0
+    harmonic_ratio_score: float = -1.0
+    synthid_bins: int = 0
+    spectral_slop: float = 0.0
+    kurtosis_variability: float = -1.0
+    decoder_peak_score: float = 0.0
+    spectral_centroid_mean: float = -1.0
+    self_similarity_entropy: float = -1.0
+    noise_floor_ratio: float = -1.0
+    onset_strength_cv: float = -1.0
+    spectral_flatness_var: float = -1.0
+    subbeat_grid_deviation: float = -1.0
 
 
 class Forensics:
@@ -99,45 +126,10 @@ class Forensics:
         spectral_flatness_var               = self._analyse_spectral_flatness(raw)
         subbeat_grid_deviation              = self._analyse_subbeat_grid(raw)
 
-        ai_probability = _compute_ai_probability(
+        bundle = _SignalBundle(
             c2pa_flag=c2pa_flag,
-            ibi_variance=ibi_variance,
-            loop_score=loop_score,
-            loop_autocorr_score=loop_autocorr_score,
-            centroid_instability_score=centroid_instability_score,
-            harmonic_ratio_score=harmonic_ratio_score,
-            synthid_bins=synthid_bins,
-            spectral_slop=spectral_slop,
-            kurtosis_variability=kurtosis_variability,
-            decoder_peak_score=decoder_peak_score,
-            spectral_centroid_mean=spectral_centroid_mean,
-            self_similarity_entropy=self_similarity_entropy,
-            noise_floor_ratio=noise_floor_ratio,
-            onset_strength_cv=onset_strength_cv,
-            spectral_flatness_var=spectral_flatness_var,
-            subbeat_grid_deviation=subbeat_grid_deviation,
-        )
-        flags = _build_flags(
             c2pa_label=c2pa_label,
             ibi_variance=ibi_variance,
-            spectral_slop=spectral_slop,
-            loop_score=loop_score,
-            loop_autocorr_score=loop_autocorr_score,
-            centroid_instability_score=centroid_instability_score,
-            harmonic_ratio_score=harmonic_ratio_score,
-            synthid_bins=synthid_bins,
-            kurtosis_variability=kurtosis_variability,
-            decoder_peak_score=decoder_peak_score,
-            spectral_centroid_mean=spectral_centroid_mean,
-            self_similarity_entropy=self_similarity_entropy,
-            noise_floor_ratio=noise_floor_ratio,
-            onset_strength_cv=onset_strength_cv,
-            spectral_flatness_var=spectral_flatness_var,
-            subbeat_grid_deviation=subbeat_grid_deviation,
-        )
-        verdict = _compute_verdict(
-            c2pa_flag=c2pa_flag,
-            ibi_variance=ibi_variance,
             loop_score=loop_score,
             loop_autocorr_score=loop_autocorr_score,
             centroid_instability_score=centroid_instability_score,
@@ -153,6 +145,9 @@ class Forensics:
             spectral_flatness_var=spectral_flatness_var,
             subbeat_grid_deviation=subbeat_grid_deviation,
         )
+        ai_probability = _compute_ai_probability(bundle)
+        flags          = _build_flags(bundle)
+        verdict        = _compute_verdict(bundle)
 
         result = ForensicsResult(
             c2pa_flag=c2pa_flag,
@@ -1419,134 +1414,116 @@ def compute_decoder_peak_score(
         ) from exc
 
 
-def _compute_ai_probability(
-    c2pa_flag: bool,
-    ibi_variance: float,
-    loop_score: float,
-    loop_autocorr_score: float,
-    centroid_instability_score: float,
-    harmonic_ratio_score: float,
-    synthid_bins: int,
-    spectral_slop: float,
-    kurtosis_variability: float = -1.0,
-    decoder_peak_score: float = 0.0,
-    spectral_centroid_mean: float = -1.0,
-    self_similarity_entropy: float = -1.0,
-    noise_floor_ratio: float = -1.0,
-    onset_strength_cv: float = -1.0,
-    spectral_flatness_var: float = -1.0,
-    subbeat_grid_deviation: float = -1.0,
-) -> float:
+def _score_organic_signals(bundle: _SignalBundle) -> float:
     """
-    Compute a weighted AI probability score in [0.0, 1.0].
+    Weighted sum of dampable AI probability signals.
 
-    Each signal contributes an additive weight when it fires; the sum is
-    clamped to 1.0. Hard-evidence overrides (C2PA, high SynthID) are NOT
-    included here — they bypass probability in _compute_verdict().
-
-    Organic production damping: if autocorr is below
-    PROB_AUTOCORR_ORGANIC_THRESHOLD and centroid is below vocoder range,
-    the probability is halved. Experimental human production (e.g. Bon Iver)
-    uses pitch stacking that elevates centroid and HNR but has near-zero loop
-    repetition — a pattern incompatible with AI generators, which always
-    produce structured repetitive content (autocorr > 0.83 empirically).
-
-    Calibrated against 10 tracks:
-      Human cluster (0–15%):
-        Espresso — Sabrina Carpenter:  centroid=0.196, HNR=0.227 → 0.00
-        Born in the USA — Springsteen: centroid=0.205, HNR=0.485 → 0.00
-        Nuthin' But a G Thang — Dre:  centroid=0.242, HNR=0.563 → 0.00
-        My Body — Young the Giant:     centroid=0.319, HNR=0.368 → 0.00
-        Levitating — Dua Lipa:         centroid=0.299, HNR=0.503 → 0.15
-      Adversarial / edge cases:
-        22 (OVER S∞∞N) — Bon Iver:    centroid=0.408, HNR=0.791, autocorr=0.000 → 0.30 (damped)
-        Hide and Seek — Imogen Heap:   centroid=0.677, HNR=0.789, autocorr=0.562 → 0.60 (vocoder)
-      AI cluster (55–75%):
-        Careless Whisper AI cover:     centroid=0.364, HNR=0.619 → 0.75
-        Walk My Walk — Breaking Rust:  centroid=0.378, HNR=0.664 → 0.75
-        Dust on the Wind — Velvet Sundown: centroid=0.322, HNR=0.718 → 0.75
+    These signals can all be explained by organic production techniques
+    (pitch stacking, heavy DSP, vocal processing) when loop repetition is
+    low. Separated so _compute_ai_probability can apply damping only here
+    without accidentally dampening hardware-evidence signals like noise floor.
 
     Pure function — no I/O, no side effects, deterministic.
     """
     score = 0.0
 
-    # Centroid is flagged only when in the AI range [AI_MIN, VOCODER_MIN).
-    # Above VOCODER_MIN the flag text already says "NOT typical of AI voice
-    # generators" — extreme formant replacement is a hardware/DSP processing
-    # artifact, not AI generation, so it must not add to AI probability.
+    # Centroid flagged only in the AI range [AI_MIN, VOCODER_MIN).
+    # Above VOCODER_MIN it's extreme DSP, not AI generation.
     centroid_flagged = (
-        centroid_instability_score >= CONSTANTS.CENTROID_INSTABILITY_AI_MIN
-        and centroid_instability_score < CONSTANTS.CENTROID_INSTABILITY_VOCODER_MIN
+        bundle.centroid_instability_score >= CONSTANTS.CENTROID_INSTABILITY_AI_MIN
+        and bundle.centroid_instability_score < CONSTANTS.CENTROID_INSTABILITY_VOCODER_MIN
     )
 
     if centroid_flagged:
         score += CONSTANTS.PROB_WEIGHT_CENTROID
 
-    if 0.0 <= ibi_variance < CONSTANTS.IBI_PERFECT_QUANTIZATION_MAX:
+    if 0.0 <= bundle.ibi_variance < CONSTANTS.IBI_PERFECT_QUANTIZATION_MAX:
         score += CONSTANTS.PROB_WEIGHT_IBI_QUANTIZED
 
-    if loop_score > CONSTANTS.LOOP_SCORE_POSSIBLE:
+    if bundle.loop_score > CONSTANTS.LOOP_SCORE_POSSIBLE:
         score += CONSTANTS.PROB_WEIGHT_LOOP_CROSS_CORR
 
-    # Centroid + autocorr together are stronger evidence of AI loop structure
-    if centroid_flagged and loop_autocorr_score >= CONSTANTS.LOOP_AUTOCORR_VERDICT_THRESHOLD:
+    if centroid_flagged and bundle.loop_autocorr_score >= CONSTANTS.LOOP_AUTOCORR_VERDICT_THRESHOLD:
         score += CONSTANTS.PROB_WEIGHT_AUTOCORR_CENTROID
 
-    # Harmonic ratio — contributes only when computed (≥ 0 means real value)
-    if harmonic_ratio_score >= CONSTANTS.HARMONIC_RATIO_AI_MIN:
+    if bundle.harmonic_ratio_score >= CONSTANTS.HARMONIC_RATIO_AI_MIN:
         score += CONSTANTS.PROB_WEIGHT_HARMONIC_RATIO
 
-    synthid_conf = _synthid_confidence(synthid_bins)
+    synthid_conf = _synthid_confidence(bundle.synthid_bins)
     if synthid_conf == "medium":
         score += CONSTANTS.PROB_WEIGHT_SYNTHID_MEDIUM
     elif synthid_conf == "low":
         score += CONSTANTS.PROB_WEIGHT_SYNTHID_LOW
 
-    if spectral_slop > CONSTANTS.SPECTRAL_SLOP_RATIO:
+    if bundle.spectral_slop > CONSTANTS.SPECTRAL_SLOP_RATIO:
         score += CONSTANTS.PROB_WEIGHT_SPECTRAL_SLOP
 
-    # New signals (2026-03-21) — contribute when computed (non-default values)
-    if kurtosis_variability >= CONSTANTS.KURTOSIS_VARIABILITY_AI_MIN:
+    if bundle.kurtosis_variability >= CONSTANTS.KURTOSIS_VARIABILITY_AI_MIN:
         score += CONSTANTS.PROB_WEIGHT_KURTOSIS
 
-    if decoder_peak_score >= CONSTANTS.DECODER_PEAK_SCORE_MIN:
+    if bundle.decoder_peak_score >= CONSTANTS.DECODER_PEAK_SCORE_MIN:
         score += CONSTANTS.PROB_WEIGHT_DECODER_PEAK
 
-    # spectral_centroid_mean > 0 confirms it was computed; low centroid → AI
-    if 0.0 < spectral_centroid_mean <= CONSTANTS.SPECTRAL_CENTROID_MEAN_AI_MAX:
+    if 0.0 < bundle.spectral_centroid_mean <= CONSTANTS.SPECTRAL_CENTROID_MEAN_AI_MAX:
         score += CONSTANTS.PROB_WEIGHT_CENTROID_MEAN
 
-    # Structural / instrumental signals — all weights 0.0 until calibrated
-    # (threshold = 0.0 means the condition below is never true; won't affect score)
-    if 0.0 <= self_similarity_entropy < CONSTANTS.SELF_SIMILARITY_ENTROPY_AI_MAX:
+    if 0.0 <= bundle.self_similarity_entropy < CONSTANTS.SELF_SIMILARITY_ENTROPY_AI_MAX:
         score += CONSTANTS.PROB_WEIGHT_SELF_SIMILARITY
 
-    if 0.0 <= noise_floor_ratio < CONSTANTS.NOISE_FLOOR_RATIO_AI_MAX:
-        score += CONSTANTS.PROB_WEIGHT_NOISE_FLOOR
-
-    if 0.0 <= onset_strength_cv < CONSTANTS.ONSET_STRENGTH_CV_AI_MAX:
+    if 0.0 <= bundle.onset_strength_cv < CONSTANTS.ONSET_STRENGTH_CV_AI_MAX:
         score += CONSTANTS.PROB_WEIGHT_ONSET_STRENGTH
 
-    if 0.0 <= spectral_flatness_var < CONSTANTS.SPECTRAL_FLATNESS_VAR_AI_MAX:
+    if 0.0 <= bundle.spectral_flatness_var < CONSTANTS.SPECTRAL_FLATNESS_VAR_AI_MAX:
         score += CONSTANTS.PROB_WEIGHT_SPECTRAL_FLATNESS
 
-    if 0.0 <= subbeat_grid_deviation < CONSTANTS.SUBBEAT_DEVIATION_AI_MAX:
+    if 0.0 <= bundle.subbeat_grid_deviation < CONSTANTS.SUBBEAT_DEVIATION_AI_MAX:
         score += CONSTANTS.PROB_WEIGHT_SUBBEAT_GRID
 
-    # Organic production damping — fires when the track has near-zero loop
-    # repetition (autocorr < threshold) and centroid is below vocoder range.
-    # In this regime, elevated centroid + HNR are better explained by pitch
-    # processing / vocal stacking (e.g. Bon Iver) than AI generation, which
-    # always produces structured repetitive content (autocorr > 0.83 empirically).
-    # Does NOT fire for vocoder tracks (centroid ≥ VOCODER_MIN) — those should
-    # remain flagged because a sync supervisor needs to review heavy processing.
+    return score
+
+
+def _compute_ai_probability(bundle: _SignalBundle) -> float:
+    """
+    Compute a weighted AI probability score in [0.0, 1.0].
+
+    Each signal contributes an additive weight when it fires; the sum is
+    clamped to 1.0. Hard-evidence overrides (C2PA, high SynthID) bypass
+    probability in _compute_verdict().
+
+    Organic production damping: halves the score when autocorr is below
+    PROB_AUTOCORR_ORGANIC_THRESHOLD and centroid is below vocoder range.
+    Experimental human production (e.g. Bon Iver) elevates centroid + HNR
+    via pitch stacking, but has near-zero loop repetition — a pattern
+    incompatible with AI generators, which always produce structured
+    repetitive content (autocorr > 0.83 empirically).
+
+    Hardware-evidence signals (noise_floor_ratio) are added AFTER damping.
+    A near-zero noise floor is a physical recording-chain property that
+    organic production damping does not explain away.
+
+    Calibrated against 10 tracks — see _score_organic_signals docstring.
+    Pure function — no I/O, no side effects, deterministic.
+    """
+    score = _score_organic_signals(bundle)
+
+    # Organic production damping — fires on non-repetitive + non-vocoder tracks.
+    # Does NOT fire for vocoder tracks (centroid ≥ VOCODER_MIN) — heavy DSP
+    # still needs supervisor review.
     if (
-        loop_autocorr_score < CONSTANTS.PROB_AUTOCORR_ORGANIC_THRESHOLD
-        and centroid_instability_score < CONSTANTS.CENTROID_INSTABILITY_VOCODER_MIN
+        bundle.loop_autocorr_score < CONSTANTS.PROB_AUTOCORR_ORGANIC_THRESHOLD
+        and bundle.centroid_instability_score < CONSTANTS.CENTROID_INSTABILITY_VOCODER_MIN
     ):
         score *= CONSTANTS.PROB_ORGANIC_DAMPING_FACTOR
 
-    return float(min(score, 1.0))
+    # Hardware-evidence signals — bypass organic damping. A VST render has
+    # digital silence (nfr ≈ 0.0); real recordings always have room/mic noise.
+    # This is the primary signal for orchestral AI (AIVA, Emily Howell) which
+    # has no vocals and therefore no centroid/HNR signal.
+    hardware_score = 0.0
+    if 0.0 <= bundle.noise_floor_ratio < CONSTANTS.NOISE_FLOOR_RATIO_AI_MAX:
+        hardware_score += CONSTANTS.PROB_WEIGHT_NOISE_FLOOR
+
+    return float(min(score + hardware_score, 1.0))
 
 
 def _synthid_confidence(coherent_bins: int) -> str:
@@ -1560,24 +1537,7 @@ def _synthid_confidence(coherent_bins: int) -> str:
     return "high"
 
 
-def _build_flags(
-    c2pa_label: str,
-    ibi_variance: float,
-    spectral_slop: float,
-    loop_score: float,
-    loop_autocorr_score: float,
-    centroid_instability_score: float,
-    harmonic_ratio_score: float,
-    synthid_bins: int,
-    kurtosis_variability: float = -1.0,
-    decoder_peak_score: float = 0.0,
-    spectral_centroid_mean: float = -1.0,
-    self_similarity_entropy: float = -1.0,
-    noise_floor_ratio: float = -1.0,
-    onset_strength_cv: float = -1.0,
-    spectral_flatness_var: float = -1.0,
-    subbeat_grid_deviation: float = -1.0,
-) -> list[str]:
+def _build_flags(bundle: _SignalBundle) -> list[str]:
     """
     Build the list of human-readable flag strings for the UI.
 
@@ -1586,135 +1546,118 @@ def _build_flags(
     """
     flags: list[str] = []
 
-    if "Born-AI" in c2pa_label:
-        flags.append(c2pa_label)
+    if "Born-AI" in bundle.c2pa_label:
+        flags.append(bundle.c2pa_label)
 
-    if ibi_variance < 0:
+    if bundle.ibi_variance < 0:
         flags.append("Insufficient data for groove analysis")
-    elif ibi_variance < CONSTANTS.IBI_PERFECT_QUANTIZATION_MAX:
+    elif bundle.ibi_variance < CONSTANTS.IBI_PERFECT_QUANTIZATION_MAX:
         flags.append("Perfect Quantization (AI signal)")
-    elif ibi_variance > CONSTANTS.IBI_ERRATIC_MIN:
+    elif bundle.ibi_variance > CONSTANTS.IBI_ERRATIC_MIN:
         # High variance = human timing imperfection — organic signal, not AI
         flags.append("Human-Feel Timing (Organic)")
 
-    if spectral_slop > CONSTANTS.SPECTRAL_SLOP_RATIO:
-        flags.append(f"Spectral Slop detected ({spectral_slop:.1%} HF energy)")
+    if bundle.spectral_slop > CONSTANTS.SPECTRAL_SLOP_RATIO:
+        flags.append(f"Spectral Slop detected ({bundle.spectral_slop:.1%} HF energy)")
 
-    if isinstance(loop_score, float) and loop_score > CONSTANTS.LOOP_SCORE_CEILING:
-        flags.append(f"Likely Stock Loop/Sample (score {loop_score:.3f})")
-    elif isinstance(loop_score, float) and loop_score > CONSTANTS.LOOP_SCORE_POSSIBLE:
-        flags.append(f"Possible Repetition (score {loop_score:.3f})")
+    if bundle.loop_score > CONSTANTS.LOOP_SCORE_CEILING:
+        flags.append(f"Likely Stock Loop/Sample (score {bundle.loop_score:.3f})")
+    elif bundle.loop_score > CONSTANTS.LOOP_SCORE_POSSIBLE:
+        flags.append(f"Possible Repetition (score {bundle.loop_score:.3f})")
 
-    if loop_autocorr_score >= CONSTANTS.LOOP_AUTOCORR_VERDICT_THRESHOLD:
+    if bundle.loop_autocorr_score >= CONSTANTS.LOOP_AUTOCORR_VERDICT_THRESHOLD:
         flags.append(
             f"Sample-Heavy / Loop-Based (Organic Production) "
-            f"(autocorr score {loop_autocorr_score:.3f})"
+            f"(autocorr score {bundle.loop_autocorr_score:.3f})"
         )
 
-    if centroid_instability_score >= CONSTANTS.CENTROID_INSTABILITY_VOCODER_MIN:
+    if bundle.centroid_instability_score >= CONSTANTS.CENTROID_INSTABILITY_VOCODER_MIN:
         flags.append(
-            f"Extreme Spectral Processing Detected (centroid CV {centroid_instability_score:.3f}) — "
+            f"Extreme Spectral Processing Detected (centroid CV {bundle.centroid_instability_score:.3f}) — "
             f"total formant replacement; consistent with vocoder, talkbox, or heavy DSP. "
             f"Not typical of AI voice generators (AI range: 0.32–0.38)"
         )
-    elif centroid_instability_score >= CONSTANTS.CENTROID_INSTABILITY_AI_MIN:
-        if loop_autocorr_score < CONSTANTS.PROB_AUTOCORR_ORGANIC_THRESHOLD:
+    elif bundle.centroid_instability_score >= CONSTANTS.CENTROID_INSTABILITY_AI_MIN:
+        if bundle.loop_autocorr_score < CONSTANTS.PROB_AUTOCORR_ORGANIC_THRESHOLD:
             flags.append(
-                f"Spectral Processing Detected (centroid CV {centroid_instability_score:.3f}) — "
+                f"Spectral Processing Detected (centroid CV {bundle.centroid_instability_score:.3f}) — "
                 f"elevated formant drift, but non-repetitive song structure (autocorr "
-                f"{loop_autocorr_score:.3f}) suggests pitch correction / vocal stacking "
+                f"{bundle.loop_autocorr_score:.3f}) suggests pitch correction / vocal stacking "
                 f"rather than AI generation. Probability weight reduced."
             )
         else:
             flags.append(
-                f"Formant Drift Detected (centroid CV {centroid_instability_score:.3f}) — "
+                f"Formant Drift Detected (centroid CV {bundle.centroid_instability_score:.3f}) — "
                 f"erratic within-note spectral shift (AI signal)"
             )
 
-    if harmonic_ratio_score >= CONSTANTS.HARMONIC_RATIO_AI_MIN:
+    if bundle.harmonic_ratio_score >= CONSTANTS.HARMONIC_RATIO_AI_MIN:
         flags.append(
-            f"Unnaturally Clean Harmonics (HNR {harmonic_ratio_score:.3f}) — "
+            f"Unnaturally Clean Harmonics (HNR {bundle.harmonic_ratio_score:.3f}) — "
             f"no breath/noise artifacts detected within sustained notes (AI signal)"
         )
 
-    conf = _synthid_confidence(synthid_bins)
+    conf = _synthid_confidence(bundle.synthid_bins)
     if conf == "high":
-        flags.append(f"High-confidence AI watermark ({synthid_bins} coherent bins in 18–22 kHz)")
+        flags.append(f"High-confidence AI watermark ({bundle.synthid_bins} coherent bins in 18–22 kHz)")
     elif conf == "medium":
-        flags.append(f"Medium-confidence AI watermark ({synthid_bins} coherent bins in 18–22 kHz)")
+        flags.append(f"Medium-confidence AI watermark ({bundle.synthid_bins} coherent bins in 18–22 kHz)")
     elif conf == "low":
-        flags.append(f"Low-confidence HF phase anomaly ({synthid_bins} bin{'s' if synthid_bins > 1 else ''}) — monitor")
+        flags.append(f"Low-confidence HF phase anomaly ({bundle.synthid_bins} bin{'s' if bundle.synthid_bins > 1 else ''}) — monitor")
 
-    if kurtosis_variability >= CONSTANTS.KURTOSIS_VARIABILITY_AI_MIN:
+    if bundle.kurtosis_variability >= CONSTANTS.KURTOSIS_VARIABILITY_AI_MIN:
         flags.append(
-            f"Neural Codec Artifacts Detected (mel-kurtosis variance {kurtosis_variability:.1f}) — "
+            f"Neural Codec Artifacts Detected (mel-kurtosis variance {bundle.kurtosis_variability:.1f}) — "
             f"checkerboard mel-band spikes consistent with EnCodec/DAC decoder synthesis"
         )
 
-    if decoder_peak_score >= CONSTANTS.DECODER_PEAK_SCORE_MIN:
+    if bundle.decoder_peak_score >= CONSTANTS.DECODER_PEAK_SCORE_MIN:
         flags.append(
-            f"Decoder Spectral Fingerprint Detected (score {decoder_peak_score:.3f}) — "
+            f"Decoder Spectral Fingerprint Detected (score {bundle.decoder_peak_score:.3f}) — "
             f"periodic peaks in 1–16 kHz consistent with transposed convolution strides (AI vocoder)"
         )
 
-    if 0.0 < spectral_centroid_mean <= CONSTANTS.SPECTRAL_CENTROID_MEAN_AI_MAX:
+    if 0.0 < bundle.spectral_centroid_mean <= CONSTANTS.SPECTRAL_CENTROID_MEAN_AI_MAX:
         flags.append(
-            f"Low Mean Spectral Centroid ({spectral_centroid_mean:.0f} Hz) — "
+            f"Low Mean Spectral Centroid ({bundle.spectral_centroid_mean:.0f} Hz) — "
             f"energy concentrated in lower frequencies (AI generators ~1091 Hz, human recordings ~1501 Hz)"
         )
 
     # Structural / instrumental signals — only flag when threshold is calibrated (> 0.0)
-    if CONSTANTS.SELF_SIMILARITY_ENTROPY_AI_MAX > 0.0 and 0.0 <= self_similarity_entropy < CONSTANTS.SELF_SIMILARITY_ENTROPY_AI_MAX:
+    if CONSTANTS.SELF_SIMILARITY_ENTROPY_AI_MAX > 0.0 and 0.0 <= bundle.self_similarity_entropy < CONSTANTS.SELF_SIMILARITY_ENTROPY_AI_MAX:
         flags.append(
-            f"Low Structural Entropy (self-similarity {self_similarity_entropy:.2f} bits) — "
+            f"Low Structural Entropy (self-similarity {bundle.self_similarity_entropy:.2f} bits) — "
             f"blocky, repetitive structure consistent with AI attention patterns"
         )
 
-    if CONSTANTS.NOISE_FLOOR_RATIO_AI_MAX > 0.0 and 0.0 <= noise_floor_ratio < CONSTANTS.NOISE_FLOOR_RATIO_AI_MAX:
+    if CONSTANTS.NOISE_FLOOR_RATIO_AI_MAX > 0.0 and 0.0 <= bundle.noise_floor_ratio < CONSTANTS.NOISE_FLOOR_RATIO_AI_MAX:
         flags.append(
-            f"Digital Silence Detected (noise floor ratio {noise_floor_ratio:.4f}) — "
+            f"Digital Silence Detected (noise floor ratio {bundle.noise_floor_ratio:.4f}) — "
             f"near-zero energy between notes; consistent with VST render (no room/mic noise)"
         )
 
-    if CONSTANTS.ONSET_STRENGTH_CV_AI_MAX > 0.0 and 0.0 <= onset_strength_cv < CONSTANTS.ONSET_STRENGTH_CV_AI_MAX:
+    if CONSTANTS.ONSET_STRENGTH_CV_AI_MAX > 0.0 and 0.0 <= bundle.onset_strength_cv < CONSTANTS.ONSET_STRENGTH_CV_AI_MAX:
         flags.append(
-            f"Uniform Onset Dynamics (CV {onset_strength_cv:.3f}) — "
+            f"Uniform Onset Dynamics (CV {bundle.onset_strength_cv:.3f}) — "
             f"abnormally consistent hit strength; no performance dynamics variation (AI signal)"
         )
 
-    if CONSTANTS.SPECTRAL_FLATNESS_VAR_AI_MAX > 0.0 and 0.0 <= spectral_flatness_var < CONSTANTS.SPECTRAL_FLATNESS_VAR_AI_MAX:
+    if CONSTANTS.SPECTRAL_FLATNESS_VAR_AI_MAX > 0.0 and 0.0 <= bundle.spectral_flatness_var < CONSTANTS.SPECTRAL_FLATNESS_VAR_AI_MAX:
         flags.append(
-            f"Uniform Spectral Flatness (var {spectral_flatness_var:.6f}) — "
+            f"Uniform Spectral Flatness (var {bundle.spectral_flatness_var:.6f}) — "
             f"no physical noise source detected between notes (AI synthesizer signal)"
         )
 
-    if CONSTANTS.SUBBEAT_DEVIATION_AI_MAX > 0.0 and 0.0 <= subbeat_grid_deviation < CONSTANTS.SUBBEAT_DEVIATION_AI_MAX:
+    if CONSTANTS.SUBBEAT_DEVIATION_AI_MAX > 0.0 and 0.0 <= bundle.subbeat_grid_deviation < CONSTANTS.SUBBEAT_DEVIATION_AI_MAX:
         flags.append(
-            f"On-Grid Timing (16th-note deviation var {subbeat_grid_deviation:.4f}) — "
+            f"On-Grid Timing (16th-note deviation var {bundle.subbeat_grid_deviation:.4f}) — "
             f"onsets land precisely on the grid (AI or heavily quantized production)"
         )
 
     return flags
 
 
-def _compute_verdict(
-    c2pa_flag: bool,
-    ibi_variance: float,
-    loop_score: float,
-    loop_autocorr_score: float,
-    centroid_instability_score: float,
-    synthid_bins: int,
-    spectral_slop: float,
-    harmonic_ratio_score: float = -1.0,
-    kurtosis_variability: float = -1.0,
-    decoder_peak_score: float = 0.0,
-    spectral_centroid_mean: float = -1.0,
-    self_similarity_entropy: float = -1.0,
-    noise_floor_ratio: float = -1.0,
-    onset_strength_cv: float = -1.0,
-    spectral_flatness_var: float = -1.0,
-    subbeat_grid_deviation: float = -1.0,
-) -> ForensicVerdict:
+def _compute_verdict(bundle: _SignalBundle) -> ForensicVerdict:
     """
     Aggregate numeric forensic scores into a final verdict using a
     probability-weighted score rather than a binary signal counter.
@@ -1729,22 +1672,19 @@ def _compute_verdict(
            ≥ PROB_VERDICT_UNCERTAIN → "Uncertain"
            < PROB_VERDICT_UNCERTAIN → "Human"
 
-    harmonic_ratio_score defaults to -1.0 for backward compatibility with
-    fixtures that pre-date the HNR signal.
-
     Pure function — compares numbers against CONSTANTS, no string matching.
     """
     # ── Hard-evidence overrides (bypass probability) ──────────────────────────
-    if c2pa_flag:
+    if bundle.c2pa_flag:
         return "AI"
-    if _synthid_confidence(synthid_bins) == "high":
+    if _synthid_confidence(bundle.synthid_bins) == "high":
         return "AI"
 
     # Centroid flagged only in the AI range — vocoder territory (>= VOCODER_MIN)
     # is extreme DSP processing, not AI generation. Consistent with ai_probability.
     centroid_flagged = (
-        centroid_instability_score >= CONSTANTS.CENTROID_INSTABILITY_AI_MIN
-        and centroid_instability_score < CONSTANTS.CENTROID_INSTABILITY_VOCODER_MIN
+        bundle.centroid_instability_score >= CONSTANTS.CENTROID_INSTABILITY_AI_MIN
+        and bundle.centroid_instability_score < CONSTANTS.CENTROID_INSTABILITY_VOCODER_MIN
     )
 
     # ── Human (Sample/Loop) override ──────────────────────────────────────────
@@ -1757,45 +1697,28 @@ def _compute_verdict(
     #   with a human artist rapping/performing over loops than AI generation.
     #   Calibrated so Careless Whisper AI Cover (ibi=162) is blocked; heavily
     #   sampled hip-hop (ibi=461) passes.
-    hnr_flagged = harmonic_ratio_score >= CONSTANTS.HARMONIC_RATIO_AI_MIN
-    in_vocoder = centroid_instability_score >= CONSTANTS.CENTROID_INSTABILITY_VOCODER_MIN
-    hnr_blocks_override = harmonic_ratio_score >= CONSTANTS.HARMONIC_RATIO_SAMPLE_OVERRIDE_BLOCK
+    hnr_flagged        = bundle.harmonic_ratio_score >= CONSTANTS.HARMONIC_RATIO_AI_MIN
+    in_vocoder         = bundle.centroid_instability_score >= CONSTANTS.CENTROID_INSTABILITY_VOCODER_MIN
+    hnr_blocks_override = bundle.harmonic_ratio_score >= CONSTANTS.HARMONIC_RATIO_SAMPLE_OVERRIDE_BLOCK
 
     no_ai_signals = not centroid_flagged and not hnr_flagged
     strong_human_timing = (
-        ibi_variance > CONSTANTS.IBI_SAMPLE_LOOP_HUMAN_MIN_WITH_AI_SIGNALS
+        bundle.ibi_variance > CONSTANTS.IBI_SAMPLE_LOOP_HUMAN_MIN_WITH_AI_SIGNALS
         and not hnr_blocks_override
     )
 
     if (
-        loop_autocorr_score >= CONSTANTS.LOOP_AUTOCORR_SAMPLE_VERDICT_THRESHOLD
-        and ibi_variance > CONSTANTS.IBI_ERRATIC_MIN
-        and synthid_bins == 0
-        and spectral_slop <= CONSTANTS.SPECTRAL_SLOP_RATIO
+        bundle.loop_autocorr_score >= CONSTANTS.LOOP_AUTOCORR_SAMPLE_VERDICT_THRESHOLD
+        and bundle.ibi_variance > CONSTANTS.IBI_ERRATIC_MIN
+        and bundle.synthid_bins == 0
+        and bundle.spectral_slop <= CONSTANTS.SPECTRAL_SLOP_RATIO
         and not in_vocoder
         and (no_ai_signals or strong_human_timing)
     ):
         return "Human (Sample/Loop)"
 
     # ── Probability-weighted verdict ──────────────────────────────────────────
-    prob = _compute_ai_probability(
-        c2pa_flag=c2pa_flag,
-        ibi_variance=ibi_variance,
-        loop_score=loop_score,
-        loop_autocorr_score=loop_autocorr_score,
-        centroid_instability_score=centroid_instability_score,
-        harmonic_ratio_score=harmonic_ratio_score,
-        synthid_bins=synthid_bins,
-        spectral_slop=spectral_slop,
-        kurtosis_variability=kurtosis_variability,
-        decoder_peak_score=decoder_peak_score,
-        spectral_centroid_mean=spectral_centroid_mean,
-        self_similarity_entropy=self_similarity_entropy,
-        noise_floor_ratio=noise_floor_ratio,
-        onset_strength_cv=onset_strength_cv,
-        spectral_flatness_var=spectral_flatness_var,
-        subbeat_grid_deviation=subbeat_grid_deviation,
-    )
+    prob = _compute_ai_probability(bundle)
 
     if prob >= CONSTANTS.PROB_VERDICT_AI:
         return "Likely AI"
