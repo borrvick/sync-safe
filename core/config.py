@@ -207,6 +207,17 @@ class SystemConstants:
     # Profanity classifier score above this threshold → EXPLICIT flag
     PROFANITY_SCORE_THRESHOLD: float = 0.5
 
+    # Detoxify obscenity/threat score bands for compliance grading
+    # Scores between CONFIRMED and HARD thresholds → soft (director's call)
+    # Scores at or above HARD threshold → hard deal-breaker in any sync context
+    EXPLICIT_CONFIRMED: float = 0.60
+    EXPLICIT_POTENTIAL: float = 0.40
+    EXPLICIT_HARD:      float = 0.80
+    VIOLENCE_CONFIRMED: float = 0.70
+    VIOLENCE_POTENTIAL: float = 0.50
+    VIOLENCE_HARD:      float = 0.85
+    DRUGS_TOXIC_MIN:    float = 0.75
+
     # Lyric authorship signals — thresholds from lyric_authorship.py
     BURSTINESS_CV_THRESHOLD: float = 0.20      # below → low variance (AI signal)
     UNIQUE_WORD_RATIO_THRESHOLD: float = 0.45  # below → low vocabulary (AI signal)

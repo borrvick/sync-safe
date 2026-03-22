@@ -26,8 +26,9 @@ from pydantic import BaseModel, ConfigDict, Field
 # Type aliases — used as Literal constraints throughout
 # ---------------------------------------------------------------------------
 
-IssueType    = Literal["EXPLICIT", "BRAND", "LOCATION", "VIOLENCE", "DRUGS"]
+IssueType    = Literal["EXPLICIT", "BRAND", "VIOLENCE", "DRUGS"]
 Confidence   = Literal["confirmed", "potential"]
+Severity     = Literal["hard", "soft"]
 EndingType   = Literal["sting", "fade", "cut"]
 AIVerdict    = Literal["Likely Human", "Uncertain", "Likely AI", "Insufficient data"]
 ForensicVerdict = Literal["Human", "Human (Sample/Loop)", "Possible Hybrid AI Cover", "Uncertain", "Likely AI", "AI"]
@@ -157,6 +158,8 @@ class ComplianceFlag(BaseModel):
     text: str                               # flagged excerpt or brand name
     recommendation: str                     # supervisor action guidance
     confidence: Confidence = "confirmed"    # confirmed = NER hit; potential = keyword
+    severity: Severity     = "soft"         # hard = deal-breaker in any context;
+                                            # soft = placement-dependent, director's call
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
@@ -217,6 +220,16 @@ class ComplianceReport(BaseModel):
     @property
     def confirmed_flags(self) -> list[ComplianceFlag]:
         return [f for f in self.flags if f.confidence == "confirmed"]
+
+    @property
+    def hard_flags(self) -> list[ComplianceFlag]:
+        """Confirmed flags that are absolute deal-breakers in any placement context."""
+        return [f for f in self.flags if f.confidence == "confirmed" and f.severity == "hard"]
+
+    @property
+    def soft_flags(self) -> list[ComplianceFlag]:
+        """Confirmed flags that are placement-dependent — sync director's call."""
+        return [f for f in self.flags if f.confidence == "confirmed" and f.severity == "soft"]
 
     @property
     def potential_flags(self) -> list[ComplianceFlag]:

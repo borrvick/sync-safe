@@ -184,13 +184,16 @@ class TestDeduplicateFlags:
         result = _deduplicate_flags(flags)
         assert len(result) == 2
 
-    def test_different_timestamps_not_deduped(self):
+    def test_same_text_different_timestamps_deduped_to_earliest(self):
+        # Same lyric at two timestamps (chorus repeat) collapses to one flag
+        # at the earliest timestamp.
         flags = [
             _flag("shit", "EXPLICIT", "confirmed", timestamp_s=10),
             _flag("shit", "EXPLICIT", "confirmed", timestamp_s=60),
         ]
         result = _deduplicate_flags(flags)
-        assert len(result) == 2
+        assert len(result) == 1
+        assert result[0].timestamp_s == 10
 
     def test_empty_input_returns_empty(self):
         assert _deduplicate_flags([]) == []
@@ -208,56 +211,67 @@ class TestDeduplicateFlags:
 # _compute_grade
 # ---------------------------------------------------------------------------
 
+def _hard(text: str = "test", issue_type: str = "EXPLICIT", timestamp_s: int = 0) -> ComplianceFlag:
+    """Helper: confirmed hard flag."""
+    return ComplianceFlag(
+        timestamp_s=timestamp_s, issue_type=issue_type, text=text,
+        recommendation="review", confidence="confirmed", severity="hard",
+    )
+
+
+def _soft(text: str = "test", issue_type: str = "EXPLICIT", timestamp_s: int = 0) -> ComplianceFlag:
+    """Helper: confirmed soft flag."""
+    return ComplianceFlag(
+        timestamp_s=timestamp_s, issue_type=issue_type, text=text,
+        recommendation="review", confidence="confirmed", severity="soft",
+    )
+
+
 class TestComputeGrade:
-    def test_zero_confirmed_issues_is_grade_a(self):
-        assert _compute_grade([], _sting(), _evolution(), _intro()) == "A"
+    def test_no_flags_is_grade_a(self):
+        assert _compute_grade([]) == "A"
 
-    def test_one_confirmed_flag_is_grade_b(self):
-        assert _compute_grade([_flag()], _sting(), _evolution(), _intro()) == "B"
+    def test_soft_confirmed_only_is_grade_b(self):
+        # Mild language / brand — director's call, no hard blocker
+        assert _compute_grade([_soft()]) == "B"
 
-    def test_two_confirmed_flags_is_grade_c(self):
-        flags = [_flag(), _flag("violence", "VIOLENCE")]
-        assert _compute_grade(flags, _sting(), _evolution(), _intro()) == "C"
-
-    def test_four_confirmed_flags_is_grade_d(self):
-        flags = [_flag(f"word{i}") for i in range(4)]
-        assert _compute_grade(flags, _sting(), _evolution(), _intro()) == "D"
-
-    def test_six_confirmed_flags_is_grade_f(self):
-        flags = [_flag(f"word{i}") for i in range(6)]
-        assert _compute_grade(flags, _sting(), _evolution(), _intro()) == "F"
-
-    def test_fade_ending_is_always_grade_f(self):
-        # Even with zero other issues, a fade ending → F
-        assert _compute_grade([], _sting(flag=True, ending_type="fade"),
-                               _evolution(), _intro()) == "F"
-
-    def test_sting_flag_adds_structural_strike(self):
-        # Sting flag (non-fade) adds 1 confirmed strike → B
-        assert _compute_grade([], _sting(flag=True, ending_type="sting"),
-                               _evolution(), _intro()) == "B"
-
-    def test_energy_evolution_flag_adds_strike(self):
-        assert _compute_grade([], _sting(), _evolution(flag=True), _intro()) == "B"
-
-    def test_intro_flag_adds_strike(self):
-        assert _compute_grade([], _sting(), _evolution(), _intro(flag=True)) == "B"
-
-    def test_potential_flags_do_not_lower_grade(self):
-        # 5 potential flags should leave grade at A (only confirmed count)
+    def test_potential_only_is_grade_b(self):
+        # Potential flags bump to B so the director knows to review
         flags = [_flag(f"w{i}", confidence="potential") for i in range(5)]
-        assert _compute_grade(flags, _sting(), _evolution(), _intro()) == "A"
+        assert _compute_grade(flags) == "B"
 
-    def test_none_inputs_handled_gracefully(self):
-        # All structural results can be None (e.g. audio too short for analysis)
-        grade = _compute_grade([], None, None, None)
-        assert grade == "A"
+    def test_one_hard_confirmed_is_grade_c(self):
+        assert _compute_grade([_hard()]) == "C"
 
-    def test_combined_structural_and_lyric_strikes(self):
-        # 1 lyric flag + intro flag + evolution flag = 3 confirmed → C
-        flags = [_flag()]
-        grade = _compute_grade(flags, _sting(), _evolution(flag=True), _intro(flag=True))
-        assert grade == "C"
+    def test_two_hard_confirmed_is_grade_d(self):
+        flags = [_hard("f1"), _hard("f2", "VIOLENCE")]
+        assert _compute_grade(flags) == "D"
+
+    def test_four_hard_confirmed_is_grade_f(self):
+        flags = [_hard(f"word{i}") for i in range(4)]
+        assert _compute_grade(flags) == "F"
+
+    def test_drugs_hard_is_always_grade_f(self):
+        assert _compute_grade([_hard("crack", "DRUGS")]) == "F"
+
+    def test_soft_flags_do_not_raise_above_b(self):
+        # 10 confirmed soft flags — still B, not C/D/F
+        flags = [_soft(f"mild{i}") for i in range(10)]
+        assert _compute_grade(flags) == "B"
+
+    def test_brand_confirmed_soft_does_not_affect_hard_grade(self):
+        # 1 hard EXPLICIT + 5 confirmed BRAND soft → C not D/F
+        flags = [_hard("expletive")] + [_soft(f"brand{i}", "BRAND") for i in range(5)]
+        assert _compute_grade(flags) == "C"
+
+    def test_structural_issues_do_not_affect_lyric_grade(self):
+        # Fade ending, energy stagnation, long intro — none lower the lyric grade
+        assert _compute_grade([]) == "A"
+
+    def test_brand_and_location_flags_do_not_affect_grade(self):
+        # BRAND soft confirmed — informational only, stays at B
+        flags = [_soft(f"brand{i}", "BRAND") for i in range(10)]
+        assert _compute_grade(flags) == "B"
 
 
 # ---------------------------------------------------------------------------
