@@ -90,6 +90,14 @@ class Forensics:
         centroid_instability_score          = self._analyse_centroid_instability(raw)
         harmonic_ratio_score                = self._analyse_harmonic_ratio(raw)
         synthid_bins                        = self._check_synthid(raw)
+        kurtosis_variability                = self._analyse_kurtosis_variability(raw)
+        decoder_peak_score                  = self._detect_decoder_peaks(raw)
+        spectral_centroid_mean              = self._compute_spectral_centroid_mean(raw)
+        self_similarity_entropy             = self._analyse_self_similarity(raw)
+        noise_floor_ratio                   = self._analyse_noise_floor(raw)
+        onset_strength_cv                   = self._analyse_onset_strength(raw)
+        spectral_flatness_var               = self._analyse_spectral_flatness(raw)
+        subbeat_grid_deviation              = self._analyse_subbeat_grid(raw)
 
         ai_probability = _compute_ai_probability(
             c2pa_flag=c2pa_flag,
@@ -100,6 +108,14 @@ class Forensics:
             harmonic_ratio_score=harmonic_ratio_score,
             synthid_bins=synthid_bins,
             spectral_slop=spectral_slop,
+            kurtosis_variability=kurtosis_variability,
+            decoder_peak_score=decoder_peak_score,
+            spectral_centroid_mean=spectral_centroid_mean,
+            self_similarity_entropy=self_similarity_entropy,
+            noise_floor_ratio=noise_floor_ratio,
+            onset_strength_cv=onset_strength_cv,
+            spectral_flatness_var=spectral_flatness_var,
+            subbeat_grid_deviation=subbeat_grid_deviation,
         )
         flags = _build_flags(
             c2pa_label=c2pa_label,
@@ -110,6 +126,14 @@ class Forensics:
             centroid_instability_score=centroid_instability_score,
             harmonic_ratio_score=harmonic_ratio_score,
             synthid_bins=synthid_bins,
+            kurtosis_variability=kurtosis_variability,
+            decoder_peak_score=decoder_peak_score,
+            spectral_centroid_mean=spectral_centroid_mean,
+            self_similarity_entropy=self_similarity_entropy,
+            noise_floor_ratio=noise_floor_ratio,
+            onset_strength_cv=onset_strength_cv,
+            spectral_flatness_var=spectral_flatness_var,
+            subbeat_grid_deviation=subbeat_grid_deviation,
         )
         verdict = _compute_verdict(
             c2pa_flag=c2pa_flag,
@@ -120,6 +144,14 @@ class Forensics:
             harmonic_ratio_score=harmonic_ratio_score,
             synthid_bins=synthid_bins,
             spectral_slop=spectral_slop,
+            kurtosis_variability=kurtosis_variability,
+            decoder_peak_score=decoder_peak_score,
+            spectral_centroid_mean=spectral_centroid_mean,
+            self_similarity_entropy=self_similarity_entropy,
+            noise_floor_ratio=noise_floor_ratio,
+            onset_strength_cv=onset_strength_cv,
+            spectral_flatness_var=spectral_flatness_var,
+            subbeat_grid_deviation=subbeat_grid_deviation,
         )
 
         result = ForensicsResult(
@@ -131,9 +163,17 @@ class Forensics:
             synthid_score=float(synthid_bins),
             centroid_instability_score=centroid_instability_score,
             harmonic_ratio_score=harmonic_ratio_score,
+            kurtosis_variability=kurtosis_variability,
+            decoder_peak_score=decoder_peak_score,
+            spectral_centroid_mean=spectral_centroid_mean,
             ai_probability=ai_probability,
             flags=flags,
             verdict=verdict,
+            self_similarity_entropy=self_similarity_entropy,
+            noise_floor_ratio=noise_floor_ratio,
+            onset_strength_cv=onset_strength_cv,
+            spectral_flatness_var=spectral_flatness_var,
+            subbeat_grid_deviation=subbeat_grid_deviation,
         )
 
         return result
@@ -465,6 +505,274 @@ class Forensics:
                 context={"original_error": str(exc)},
             ) from exc
 
+    # ------------------------------------------------------------------
+    # Private: Chroma self-similarity entropy  (GPU)
+    # ------------------------------------------------------------------
+
+    @spaces.GPU
+    def _analyse_self_similarity(self, raw: bytes) -> float:
+        """
+        Compute Shannon entropy of the chroma recurrence matrix.
+
+        Low entropy = blocky, repetitive structure typical of AI transformer
+        attention patterns. High entropy = varied, organic song structure.
+
+        Returns:
+            Entropy in bits (0.0–log2(20) ≈ 4.32). -1.0 if too short.
+
+        Raises:
+            ModelInferenceError: on librosa load failure.
+        """
+        try:
+            import librosa
+            audio, sr = librosa.load(io.BytesIO(raw), sr=CONSTANTS.SAMPLE_RATE, mono=True)
+        except Exception as exc:
+            raise ModelInferenceError(
+                "Self-similarity: audio load failed.",
+                context={"original_error": str(exc)},
+            ) from exc
+
+        return compute_self_similarity_entropy(audio, sr)
+
+    # ------------------------------------------------------------------
+    # Private: Noise floor ratio  (GPU)
+    # ------------------------------------------------------------------
+
+    @spaces.GPU
+    def _analyse_noise_floor(self, raw: bytes) -> float:
+        """
+        Measure the ratio of quiet-moment RMS to mean RMS.
+
+        VST renders have digital silence (ratio ≈ 0) between notes;
+        real recordings always have a room/mic noise floor.
+
+        Returns:
+            Ratio in [0.0, 1.0]. -1.0 if audio is too quiet to analyse.
+
+        Raises:
+            ModelInferenceError: on librosa load failure.
+        """
+        try:
+            import librosa
+            audio, sr = librosa.load(io.BytesIO(raw), sr=CONSTANTS.SAMPLE_RATE, mono=True)
+        except Exception as exc:
+            raise ModelInferenceError(
+                "Noise floor: audio load failed.",
+                context={"original_error": str(exc)},
+            ) from exc
+
+        return compute_noise_floor_ratio(audio)
+
+    # ------------------------------------------------------------------
+    # Private: Onset strength CV  (GPU)
+    # ------------------------------------------------------------------
+
+    @spaces.GPU
+    def _analyse_onset_strength(self, raw: bytes) -> float:
+        """
+        Measure the coefficient of variation of onset strengths.
+
+        Low CV = uniform hit strength = AI (no performance dynamics).
+        High CV = varied dynamics = human (ghost notes, accents, expression).
+
+        Returns:
+            CV (std/mean) of onset strength envelope. -1.0 if not computable.
+
+        Raises:
+            ModelInferenceError: on librosa load failure.
+        """
+        try:
+            import librosa
+            audio, sr = librosa.load(io.BytesIO(raw), sr=CONSTANTS.SAMPLE_RATE, mono=True)
+        except Exception as exc:
+            raise ModelInferenceError(
+                "Onset strength: audio load failed.",
+                context={"original_error": str(exc)},
+            ) from exc
+
+        return compute_onset_strength_cv(audio, sr)
+
+    # ------------------------------------------------------------------
+    # Private: Spectral flatness variance  (GPU)
+    # ------------------------------------------------------------------
+
+    @spaces.GPU
+    def _analyse_spectral_flatness(self, raw: bytes) -> float:
+        """
+        Measure the variance of Wiener entropy (spectral flatness) over time.
+
+        Low variance = uniform spectral flatness = AI synthesizer (no physical
+        noise source between notes). High variance = real recording (tonal
+        notes interspersed with noise — breath, bow, room).
+
+        Returns:
+            Variance of spectral flatness frames. -1.0 if not computable.
+
+        Raises:
+            ModelInferenceError: on librosa load failure.
+        """
+        try:
+            import librosa
+            audio, sr = librosa.load(io.BytesIO(raw), sr=CONSTANTS.SAMPLE_RATE, mono=True)
+        except Exception as exc:
+            raise ModelInferenceError(
+                "Spectral flatness: audio load failed.",
+                context={"original_error": str(exc)},
+            ) from exc
+
+        return compute_spectral_flatness_variance(audio)
+
+    # ------------------------------------------------------------------
+    # Private: Sub-beat grid deviation  (GPU)
+    # ------------------------------------------------------------------
+
+    @spaces.GPU
+    def _analyse_subbeat_grid(self, raw: bytes) -> float:
+        """
+        Measure the variance of onset-to-nearest-16th-note-grid offsets.
+
+        Low variance = onsets land precisely on the grid = AI generation
+        or heavily quantized production (weak signal for modern pop/hip-hop).
+        High variance = human micro-timing feel.
+
+        Returns:
+            Variance of normalised grid offsets. -1.0 if BPM undetectable.
+
+        Raises:
+            ModelInferenceError: on librosa load failure.
+        """
+        try:
+            import librosa
+            audio, sr = librosa.load(io.BytesIO(raw), sr=CONSTANTS.SAMPLE_RATE, mono=True)
+        except Exception as exc:
+            raise ModelInferenceError(
+                "Sub-beat grid: audio load failed.",
+                context={"original_error": str(exc)},
+            ) from exc
+
+        return compute_subbeat_grid_deviation(audio, sr)
+
+    # ------------------------------------------------------------------
+    # Private: Mel-band kurtosis variability  (GPU)
+    # ------------------------------------------------------------------
+
+    @spaces.GPU
+    def _analyse_kurtosis_variability(self, raw: bytes) -> float:
+        """
+        Compute the variance of per-frame mel-band kurtosis across time.
+
+        Neural audio codec decoders (EnCodec, DAC) introduce checkerboard
+        artifacts in the mel spectrogram — occasional sharp energy spikes in
+        specific mel bands. These spikes appear as high per-frame kurtosis
+        values that vary wildly between frames, producing very high kurtosis
+        variance. Human audio has smooth, consistent mel distributions with
+        near-zero kurtosis variance.
+
+        Source: ISMIR TISMIR 2025 (Cros Vila) — Suno: ~1508 ± 1304, Human: ~2.
+
+        Returns:
+            Variance of per-frame mel-band kurtosis (float ≥ 0.0).
+            -1.0 when audio is too short to analyse.
+
+        Raises:
+            ModelInferenceError: on librosa load failure.
+        """
+        try:
+            import librosa
+            from scipy.stats import kurtosis as scipy_kurtosis
+
+            audio, sr = librosa.load(io.BytesIO(raw), sr=CONSTANTS.SAMPLE_RATE, mono=True)
+        except Exception as exc:
+            raise ModelInferenceError(
+                "Kurtosis variability: audio load failed.",
+                context={"original_error": str(exc)},
+            ) from exc
+
+        return compute_kurtosis_variability(audio, sr, CONSTANTS.KURTOSIS_N_MELS)
+
+    # ------------------------------------------------------------------
+    # Private: Neural decoder spectral peak fingerprint  (GPU)
+    # ------------------------------------------------------------------
+
+    @spaces.GPU
+    def _detect_decoder_peaks(self, raw: bytes) -> float:
+        """
+        Detect the periodic spectral peak fingerprint left by transposed
+        convolution layers in neural audio vocoders / codec decoders.
+
+        Transposed convolution with stride k periodizes the spectrum of any
+        bias component at intervals of f_s / k. Multiple stacked layers
+        compound this, creating a comb of regularly-spaced peaks in the
+        1–16 kHz range that is absent in natural recordings.
+
+        Source: arXiv 2506.19108 — >99% accuracy on uncompressed audio.
+
+        Returns:
+            Score in [0.0, 1.0] — 1.0 = strong periodic peak pattern found.
+            Loaded at 44.1 kHz to access the full 1–16 kHz analysis band.
+
+        Raises:
+            ModelInferenceError: on librosa load failure.
+        """
+        try:
+            import librosa
+
+            # Load at 44.1 kHz — must resolve peaks up to 16 kHz
+            audio, sr = librosa.load(io.BytesIO(raw), sr=_SYNTHID_LOAD_SR, mono=True)
+        except Exception as exc:
+            raise ModelInferenceError(
+                "Decoder peak detection: audio load failed.",
+                context={"original_error": str(exc)},
+            ) from exc
+
+        return compute_decoder_peak_score(
+            audio,
+            sr,
+            CONSTANTS.DECODER_PEAK_WINDOW_HZ,
+            CONSTANTS.DECODER_PEAK_PROMINENCE_DB,
+            CONSTANTS.DECODER_PEAK_REGULARITY_MAX,
+            CONSTANTS.DECODER_PEAK_MIN_COUNT,
+        )
+
+    # ------------------------------------------------------------------
+    # Private: Mean spectral centroid  (GPU)
+    # ------------------------------------------------------------------
+
+    @spaces.GPU
+    def _compute_spectral_centroid_mean(self, raw: bytes) -> float:
+        """
+        Compute the mean spectral centroid of the track in Hz.
+
+        AI generators concentrate energy in lower frequency bands; natural
+        recordings contain more high-frequency content from room acoustics,
+        instrument overtones, and recording noise.
+
+        Source: ISMIR TISMIR 2025 — Suno: 1091 ± 386 Hz, Human: 1501 ± 632 Hz.
+
+        Returns:
+            Mean spectral centroid in Hz (float > 0), or -1.0 on failure.
+
+        Raises:
+            ModelInferenceError: on librosa load failure.
+        """
+        try:
+            import librosa
+
+            audio, sr = librosa.load(io.BytesIO(raw), sr=CONSTANTS.SAMPLE_RATE, mono=True)
+        except Exception as exc:
+            raise ModelInferenceError(
+                "Spectral centroid mean: audio load failed.",
+                context={"original_error": str(exc)},
+            ) from exc
+
+        try:
+            centroid_frames = librosa.feature.spectral_centroid(y=audio, sr=sr)[0]
+            return float(np.mean(centroid_frames))
+        except Exception as exc:
+            raise ModelInferenceError(
+                "Spectral centroid mean: computation failed.",
+                context={"original_error": str(exc)},
+            ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -721,6 +1029,396 @@ def compute_harmonic_ratio_score(
         ) from exc
 
 
+def compute_self_similarity_entropy(
+    audio: np.ndarray,
+    sr: int,
+    subsample: int = 4,
+) -> float:
+    """
+    Compute Shannon entropy of the chroma recurrence matrix upper triangle.
+
+    Algorithm:
+      1. Compute chroma CQT features and subsample for efficiency.
+      2. Build an affinity-mode symmetric recurrence matrix.
+      3. Extract upper-triangle values (excludes self-similarity diagonal).
+      4. Bin into 20 buckets over [0, 1] and compute Shannon entropy.
+
+    Low entropy = similarity values concentrated near 0 or 1 (blocky structure
+    from AI attention patterns). High entropy = spread distribution (organic
+    human performance drift and variation).
+
+    Args:
+        audio:      Mono waveform.
+        sr:         Sample rate.
+        subsample:  Keep every Nth chroma frame to keep matrix size tractable.
+
+    Returns:
+        Shannon entropy in bits [0.0, log2(20)≈4.32]. -1.0 if too short.
+
+    Pure function — no I/O, no side effects, deterministic.
+
+    Raises:
+        ModelInferenceError: if librosa raises unexpectedly.
+    """
+    try:
+        import librosa
+
+        chroma = librosa.feature.chroma_cqt(y=audio, sr=sr)
+        chroma = chroma[:, ::subsample]
+
+        if chroma.shape[1] < 4:
+            return -1.0
+
+        R = librosa.segment.recurrence_matrix(chroma, mode="affinity", sym=True)
+        triu = R[np.triu_indices_from(R, k=1)]
+
+        if len(triu) == 0:
+            return -1.0
+
+        hist, _ = np.histogram(triu, bins=20, range=(0.0, 1.0))
+        hist = hist.astype(float) + 1e-10
+        hist /= hist.sum()
+        return float(-np.sum(hist * np.log2(hist)))
+
+    except Exception as exc:
+        raise ModelInferenceError(
+            "Self-similarity entropy computation failed.",
+            context={"original_error": str(exc)},
+        ) from exc
+
+
+def compute_noise_floor_ratio(audio: np.ndarray) -> float:
+    """
+    Compute the ratio of quiet-moment RMS energy to mean RMS energy.
+
+    Algorithm:
+      1. Compute RMS in short frames (512-sample hop).
+      2. Take the 5th-percentile RMS value as the "noise floor".
+      3. Return floor / mean.
+
+    Near-zero ratio = digital silence between notes = VST render (no room noise).
+    Higher ratio = consistent background noise = real microphone recording.
+
+    Args:
+        audio: Mono waveform.
+
+    Returns:
+        Ratio in [0.0, 1.0]. -1.0 if mean energy is too low to measure.
+
+    Pure function — no I/O, no side effects, deterministic.
+
+    Raises:
+        ModelInferenceError: if numpy raises unexpectedly.
+    """
+    try:
+        import librosa
+
+        rms = librosa.feature.rms(y=audio, frame_length=2048, hop_length=512)[0]
+        mean_rms = float(np.mean(rms))
+
+        if mean_rms < 1e-9:
+            return -1.0
+
+        floor_rms = float(np.percentile(rms, 5))
+        return float(np.clip(floor_rms / mean_rms, 0.0, 1.0))
+
+    except Exception as exc:
+        raise ModelInferenceError(
+            "Noise floor ratio computation failed.",
+            context={"original_error": str(exc)},
+        ) from exc
+
+
+def compute_onset_strength_cv(audio: np.ndarray, sr: int) -> float:
+    """
+    Compute the coefficient of variation of the onset strength envelope.
+
+    Low CV = uniform hit strength = AI generation (no performance dynamics).
+    High CV = varied attack strengths = human expression (ghost notes, accents).
+
+    Args:
+        audio: Mono waveform.
+        sr:    Sample rate.
+
+    Returns:
+        CV (std / mean) of onset strength. -1.0 if not computable.
+
+    Pure function — no I/O, no side effects, deterministic.
+
+    Raises:
+        ModelInferenceError: if librosa raises unexpectedly.
+    """
+    try:
+        import librosa
+
+        onset_env = librosa.onset.onset_strength(y=audio, sr=sr)
+
+        if len(onset_env) < 2:
+            return -1.0
+
+        mean = float(np.mean(onset_env))
+        if mean < 1e-9:
+            return -1.0
+
+        return float(np.std(onset_env) / mean)
+
+    except Exception as exc:
+        raise ModelInferenceError(
+            "Onset strength CV computation failed.",
+            context={"original_error": str(exc)},
+        ) from exc
+
+
+def compute_spectral_flatness_variance(audio: np.ndarray) -> float:
+    """
+    Compute the variance of Wiener entropy (spectral flatness) over time.
+
+    Low variance = AI synthesizer — no physical noise source, spectral
+    flatness stays constant between notes. High variance = real recording —
+    tonal note frames (low flatness) alternate with noise frames (high flatness).
+
+    Args:
+        audio: Mono waveform.
+
+    Returns:
+        Variance of spectral flatness frames. -1.0 if not computable.
+
+    Pure function — no I/O, no side effects, deterministic.
+
+    Raises:
+        ModelInferenceError: if librosa raises unexpectedly.
+    """
+    try:
+        import librosa
+
+        flatness = librosa.feature.spectral_flatness(y=audio)[0]
+
+        if len(flatness) < 2:
+            return -1.0
+
+        return float(np.var(flatness))
+
+    except Exception as exc:
+        raise ModelInferenceError(
+            "Spectral flatness variance computation failed.",
+            context={"original_error": str(exc)},
+        ) from exc
+
+
+def compute_subbeat_grid_deviation(audio: np.ndarray, sr: int) -> float:
+    """
+    Measure how precisely onsets land on the 16th-note grid.
+
+    Algorithm:
+      1. Detect BPM and beat positions via librosa beat tracker.
+      2. Derive 16th-note grid positions (4 subdivisions per beat).
+      3. Detect all onsets in the track.
+      4. For each onset, compute the distance to the nearest grid position,
+         normalised by the 16th-note duration.
+      5. Return the variance of those normalised offsets.
+
+    Near-zero variance = all onsets on the grid = AI (or heavily quantized
+    production — expected to be a weak signal for modern pop/hip-hop).
+    High variance = micro-timing feel = human performance or live recording.
+
+    Args:
+        audio: Mono waveform.
+        sr:    Sample rate.
+
+    Returns:
+        Variance of normalised grid offsets (float ≥ 0). -1.0 if BPM
+        is undetectable or fewer than 4 onsets found.
+
+    Pure function — no I/O, no side effects, deterministic.
+
+    Raises:
+        ModelInferenceError: if librosa raises unexpectedly.
+    """
+    try:
+        import librosa
+
+        tempo, beat_frames = librosa.beat.beat_track(y=audio, sr=sr)
+        if len(beat_frames) < 2:
+            return -1.0
+
+        bpm = float(tempo) if np.ndim(tempo) == 0 else float(tempo[0])
+        if bpm < 40.0 or bpm > 300.0:
+            return -1.0
+
+        sixteenth = 60.0 / (bpm * 4)  # duration of one 16th note in seconds
+
+        onset_frames = librosa.onset.onset_detect(y=audio, sr=sr)
+        if len(onset_frames) < 4:
+            return -1.0
+
+        onset_times = librosa.frames_to_time(onset_frames, sr=sr)
+        deviations = []
+        for t in onset_times:
+            nearest_grid = round(t / sixteenth) * sixteenth
+            dev = abs(t - nearest_grid) / sixteenth
+            deviations.append(dev)
+
+        return float(np.var(deviations))
+
+    except Exception as exc:
+        raise ModelInferenceError(
+            "Sub-beat grid deviation computation failed.",
+            context={"original_error": str(exc)},
+        ) from exc
+
+
+def compute_kurtosis_variability(
+    audio: np.ndarray,
+    sr: int,
+    n_mels: int,
+) -> float:
+    """
+    Compute the variance of per-frame mel-band kurtosis across time.
+
+    Neural audio codec decoders (EnCodec, DAC) introduce checkerboard
+    artifacts in the mel spectrogram: occasional sharp energy spikes in
+    specific mel bands that appear as high kurtosis values in some frames
+    but not others, producing very high kurtosis variance. Human recordings
+    have smooth, consistent mel distributions with near-zero variance.
+
+    Algorithm:
+      1. Compute mel power spectrogram (n_mels × n_frames).
+      2. For each time frame, compute Fisher kurtosis across the n_mels bands.
+      3. Return the variance of those per-frame kurtosis values.
+
+    Source: ISMIR TISMIR 2025 (Cros Vila) — Suno: ~1508 ± 1304, Human MSD: ~2.
+
+    Args:
+        audio:  Mono waveform array.
+        sr:     Sample rate (Hz).
+        n_mels: Number of mel bands.
+
+    Returns:
+        Variance of per-frame mel-band kurtosis (float ≥ 0.0).
+        -1.0 when audio is too short to analyse (< 1 second).
+
+    Pure function — no I/O, no side effects, deterministic.
+
+    Raises:
+        ModelInferenceError: if librosa or scipy raises unexpectedly.
+    """
+    if len(audio) < sr:
+        return -1.0
+
+    try:
+        import librosa
+        from scipy.stats import kurtosis as scipy_kurtosis
+
+        mel = librosa.feature.melspectrogram(y=audio, sr=sr, n_mels=n_mels)
+        # mel: (n_mels, n_frames) — compute kurtosis across the mel axis per frame
+        frame_kurtosis = scipy_kurtosis(mel, axis=0, fisher=True)
+        # Use nanvar: kurtosis returns NaN for frames where all mel bins are equal
+        # (e.g. silent/zero frames) — exclude those rather than propagating NaN.
+        return float(np.nanvar(frame_kurtosis))
+
+    except Exception as exc:
+        raise ModelInferenceError(
+            "Kurtosis variability computation failed.",
+            context={"original_error": str(exc)},
+        ) from exc
+
+
+def compute_decoder_peak_score(
+    audio: np.ndarray,
+    sr: int,
+    window_hz: int,
+    prominence_db: float,
+    regularity_max: float,
+    min_count: int,
+) -> float:
+    """
+    Detect the periodic spectral peak fingerprint left by transposed
+    convolution layers in neural audio vocoders / codec decoders.
+
+    Transposed convolution with stride k periodizes the spectrum of any
+    bias component at intervals of f_s / k.  Multiple stacked layers
+    compound this, creating a comb of regularly-spaced peaks in the
+    1–16 kHz range that is absent in natural recordings.
+
+    Algorithm:
+      1. Compute the average power spectrum via high-resolution rfft.
+      2. Convert to dB and subtract a rolling median floor to isolate peaks.
+      3. Find peaks in the 1–16 kHz band above prominence_db threshold.
+      4. Accept only if at least min_count peaks found.
+      5. Check inter-peak spacing regularity: CV (std/mean) < regularity_max.
+      6. Score: count and regularity components combined in [0.0, 1.0].
+
+    Source: arXiv 2506.19108 — >99% accuracy on uncompressed audio.
+
+    Args:
+        audio:           Mono waveform loaded at 44.1 kHz.
+        sr:              Sample rate (Hz) — must be ≥ 32 kHz to resolve 16 kHz.
+        window_hz:       Rolling median half-width in Hz for floor estimation.
+        prominence_db:   Minimum peak height above floor (dB) to count.
+        regularity_max:  Max CV (std/mean spacing) to accept as periodic.
+        min_count:       Minimum qualifying peaks to return a non-zero score.
+
+    Returns:
+        Score in [0.0, 1.0].  0.0 when no periodic pattern found.
+
+    Pure function — no I/O, no side effects, deterministic.
+
+    Raises:
+        ModelInferenceError: if numpy or scipy raises unexpectedly.
+    """
+    if len(audio) < sr:
+        return 0.0
+
+    try:
+        from scipy.signal import find_peaks, medfilt
+
+        # High-resolution power spectrum — 32768 bins ≈ 1.3 Hz/bin at 44.1 kHz
+        n_fft = min(32768, len(audio))
+        power = np.abs(np.fft.rfft(audio, n=n_fft)) ** 2
+        freqs = np.fft.rfftfreq(n_fft, d=1.0 / sr)
+
+        # Restrict to 1–16 kHz
+        band = (freqs >= 1000) & (freqs <= 16000)
+        if not np.any(band):
+            return 0.0
+
+        band_power = power[band]
+        power_db = 10.0 * np.log10(band_power + 1e-12)
+
+        # Rolling median floor — window in bins
+        bin_hz = freqs[1] - freqs[0]
+        window_bins = max(3, int(window_hz / bin_hz))
+        if window_bins % 2 == 0:
+            window_bins += 1
+        floor_db = medfilt(power_db, kernel_size=window_bins)
+
+        residual_db = power_db - floor_db
+        peak_indices, _ = find_peaks(residual_db, height=prominence_db)
+
+        if len(peak_indices) < min_count:
+            return 0.0
+
+        spacings = np.diff(peak_indices)
+        if len(spacings) < 2:
+            return 0.0
+
+        mean_spacing = float(np.mean(spacings))
+        cv = float(np.std(spacings) / (mean_spacing + 1e-9))
+        if cv > regularity_max:
+            return 0.0
+
+        # Score: 50% from peak density, 50% from spacing tightness
+        count_component = min(float(len(peak_indices)) / float(min_count * 4), 0.5)
+        regularity_component = 0.5 * (1.0 - min(cv / regularity_max, 1.0))
+        return float(count_component + regularity_component)
+
+    except Exception as exc:
+        raise ModelInferenceError(
+            "Decoder peak score computation failed.",
+            context={"original_error": str(exc)},
+        ) from exc
+
+
 def _compute_ai_probability(
     c2pa_flag: bool,
     ibi_variance: float,
@@ -730,6 +1428,14 @@ def _compute_ai_probability(
     harmonic_ratio_score: float,
     synthid_bins: int,
     spectral_slop: float,
+    kurtosis_variability: float = -1.0,
+    decoder_peak_score: float = 0.0,
+    spectral_centroid_mean: float = -1.0,
+    self_similarity_entropy: float = -1.0,
+    noise_floor_ratio: float = -1.0,
+    onset_strength_cv: float = -1.0,
+    spectral_flatness_var: float = -1.0,
+    subbeat_grid_deviation: float = -1.0,
 ) -> float:
     """
     Compute a weighted AI probability score in [0.0, 1.0].
@@ -799,6 +1505,34 @@ def _compute_ai_probability(
     if spectral_slop > CONSTANTS.SPECTRAL_SLOP_RATIO:
         score += CONSTANTS.PROB_WEIGHT_SPECTRAL_SLOP
 
+    # New signals (2026-03-21) — contribute when computed (non-default values)
+    if kurtosis_variability >= CONSTANTS.KURTOSIS_VARIABILITY_AI_MIN:
+        score += CONSTANTS.PROB_WEIGHT_KURTOSIS
+
+    if decoder_peak_score >= CONSTANTS.DECODER_PEAK_SCORE_MIN:
+        score += CONSTANTS.PROB_WEIGHT_DECODER_PEAK
+
+    # spectral_centroid_mean > 0 confirms it was computed; low centroid → AI
+    if 0.0 < spectral_centroid_mean <= CONSTANTS.SPECTRAL_CENTROID_MEAN_AI_MAX:
+        score += CONSTANTS.PROB_WEIGHT_CENTROID_MEAN
+
+    # Structural / instrumental signals — all weights 0.0 until calibrated
+    # (threshold = 0.0 means the condition below is never true; won't affect score)
+    if 0.0 <= self_similarity_entropy < CONSTANTS.SELF_SIMILARITY_ENTROPY_AI_MAX:
+        score += CONSTANTS.PROB_WEIGHT_SELF_SIMILARITY
+
+    if 0.0 <= noise_floor_ratio < CONSTANTS.NOISE_FLOOR_RATIO_AI_MAX:
+        score += CONSTANTS.PROB_WEIGHT_NOISE_FLOOR
+
+    if 0.0 <= onset_strength_cv < CONSTANTS.ONSET_STRENGTH_CV_AI_MAX:
+        score += CONSTANTS.PROB_WEIGHT_ONSET_STRENGTH
+
+    if 0.0 <= spectral_flatness_var < CONSTANTS.SPECTRAL_FLATNESS_VAR_AI_MAX:
+        score += CONSTANTS.PROB_WEIGHT_SPECTRAL_FLATNESS
+
+    if 0.0 <= subbeat_grid_deviation < CONSTANTS.SUBBEAT_DEVIATION_AI_MAX:
+        score += CONSTANTS.PROB_WEIGHT_SUBBEAT_GRID
+
     # Organic production damping — fires when the track has near-zero loop
     # repetition (autocorr < threshold) and centroid is below vocoder range.
     # In this regime, elevated centroid + HNR are better explained by pitch
@@ -835,6 +1569,14 @@ def _build_flags(
     centroid_instability_score: float,
     harmonic_ratio_score: float,
     synthid_bins: int,
+    kurtosis_variability: float = -1.0,
+    decoder_peak_score: float = 0.0,
+    spectral_centroid_mean: float = -1.0,
+    self_similarity_entropy: float = -1.0,
+    noise_floor_ratio: float = -1.0,
+    onset_strength_cv: float = -1.0,
+    spectral_flatness_var: float = -1.0,
+    subbeat_grid_deviation: float = -1.0,
 ) -> list[str]:
     """
     Build the list of human-readable flag strings for the UI.
@@ -903,6 +1645,55 @@ def _build_flags(
     elif conf == "low":
         flags.append(f"Low-confidence HF phase anomaly ({synthid_bins} bin{'s' if synthid_bins > 1 else ''}) — monitor")
 
+    if kurtosis_variability >= CONSTANTS.KURTOSIS_VARIABILITY_AI_MIN:
+        flags.append(
+            f"Neural Codec Artifacts Detected (mel-kurtosis variance {kurtosis_variability:.1f}) — "
+            f"checkerboard mel-band spikes consistent with EnCodec/DAC decoder synthesis"
+        )
+
+    if decoder_peak_score >= CONSTANTS.DECODER_PEAK_SCORE_MIN:
+        flags.append(
+            f"Decoder Spectral Fingerprint Detected (score {decoder_peak_score:.3f}) — "
+            f"periodic peaks in 1–16 kHz consistent with transposed convolution strides (AI vocoder)"
+        )
+
+    if 0.0 < spectral_centroid_mean <= CONSTANTS.SPECTRAL_CENTROID_MEAN_AI_MAX:
+        flags.append(
+            f"Low Mean Spectral Centroid ({spectral_centroid_mean:.0f} Hz) — "
+            f"energy concentrated in lower frequencies (AI generators ~1091 Hz, human recordings ~1501 Hz)"
+        )
+
+    # Structural / instrumental signals — only flag when threshold is calibrated (> 0.0)
+    if CONSTANTS.SELF_SIMILARITY_ENTROPY_AI_MAX > 0.0 and 0.0 <= self_similarity_entropy < CONSTANTS.SELF_SIMILARITY_ENTROPY_AI_MAX:
+        flags.append(
+            f"Low Structural Entropy (self-similarity {self_similarity_entropy:.2f} bits) — "
+            f"blocky, repetitive structure consistent with AI attention patterns"
+        )
+
+    if CONSTANTS.NOISE_FLOOR_RATIO_AI_MAX > 0.0 and 0.0 <= noise_floor_ratio < CONSTANTS.NOISE_FLOOR_RATIO_AI_MAX:
+        flags.append(
+            f"Digital Silence Detected (noise floor ratio {noise_floor_ratio:.4f}) — "
+            f"near-zero energy between notes; consistent with VST render (no room/mic noise)"
+        )
+
+    if CONSTANTS.ONSET_STRENGTH_CV_AI_MAX > 0.0 and 0.0 <= onset_strength_cv < CONSTANTS.ONSET_STRENGTH_CV_AI_MAX:
+        flags.append(
+            f"Uniform Onset Dynamics (CV {onset_strength_cv:.3f}) — "
+            f"abnormally consistent hit strength; no performance dynamics variation (AI signal)"
+        )
+
+    if CONSTANTS.SPECTRAL_FLATNESS_VAR_AI_MAX > 0.0 and 0.0 <= spectral_flatness_var < CONSTANTS.SPECTRAL_FLATNESS_VAR_AI_MAX:
+        flags.append(
+            f"Uniform Spectral Flatness (var {spectral_flatness_var:.6f}) — "
+            f"no physical noise source detected between notes (AI synthesizer signal)"
+        )
+
+    if CONSTANTS.SUBBEAT_DEVIATION_AI_MAX > 0.0 and 0.0 <= subbeat_grid_deviation < CONSTANTS.SUBBEAT_DEVIATION_AI_MAX:
+        flags.append(
+            f"On-Grid Timing (16th-note deviation var {subbeat_grid_deviation:.4f}) — "
+            f"onsets land precisely on the grid (AI or heavily quantized production)"
+        )
+
     return flags
 
 
@@ -915,6 +1706,14 @@ def _compute_verdict(
     synthid_bins: int,
     spectral_slop: float,
     harmonic_ratio_score: float = -1.0,
+    kurtosis_variability: float = -1.0,
+    decoder_peak_score: float = 0.0,
+    spectral_centroid_mean: float = -1.0,
+    self_similarity_entropy: float = -1.0,
+    noise_floor_ratio: float = -1.0,
+    onset_strength_cv: float = -1.0,
+    spectral_flatness_var: float = -1.0,
+    subbeat_grid_deviation: float = -1.0,
 ) -> ForensicVerdict:
     """
     Aggregate numeric forensic scores into a final verdict using a
@@ -988,6 +1787,14 @@ def _compute_verdict(
         harmonic_ratio_score=harmonic_ratio_score,
         synthid_bins=synthid_bins,
         spectral_slop=spectral_slop,
+        kurtosis_variability=kurtosis_variability,
+        decoder_peak_score=decoder_peak_score,
+        spectral_centroid_mean=spectral_centroid_mean,
+        self_similarity_entropy=self_similarity_entropy,
+        noise_floor_ratio=noise_floor_ratio,
+        onset_strength_cv=onset_strength_cv,
+        spectral_flatness_var=spectral_flatness_var,
+        subbeat_grid_deviation=subbeat_grid_deviation,
     )
 
     if prob >= CONSTANTS.PROB_VERDICT_AI:

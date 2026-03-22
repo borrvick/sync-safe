@@ -194,6 +194,15 @@ class SystemConstants:
     PROB_WEIGHT_SYNTHID_MEDIUM: float = 0.10    # medium-confidence watermark
     PROB_WEIGHT_SYNTHID_LOW: float = 0.05       # low-confidence watermark
     PROB_WEIGHT_SPECTRAL_SLOP: float = 0.10     # HF energy anomaly
+    # New signals (2026-03-21)
+    # TODO: kurtosis and decoder_peak are calibrated on uncompressed audio (ISMIR TISMIR 2025,
+    # arXiv 2506.19108). YouTube MP3 encoding masks both artifacts — overlap between AI and human
+    # distributions collapses to noise (AI mean=664 vs Human mean=622 for kurtosis;
+    # decoder_peak=0.0 for all 54 tracks). Re-enable and recalibrate once direct file upload
+    # (uncompressed WAV/FLAC) is the primary input path.
+    PROB_WEIGHT_KURTOSIS: float = 0.0           # DISABLED — requires uncompressed audio
+    PROB_WEIGHT_DECODER_PEAK: float = 0.0       # DISABLED — requires uncompressed audio
+    PROB_WEIGHT_CENTROID_MEAN: float = 0.10     # low mean spectral centroid (AI energy concentrated low)
 
     # Probability thresholds for final verdict assignment
     PROB_VERDICT_AI: float = 0.70               # ≥ this → "AI"
@@ -215,6 +224,94 @@ class SystemConstants:
     # ---- Forensics: Spectral slop --------------------------------------------
     # HF-to-total energy ratio above this → spectral slop flag
     SPECTRAL_SLOP_RATIO: float = 0.15
+
+    # ---- Forensics: Mel-band kurtosis variability ----------------------------
+    # Variance of per-frame mel-band kurtosis.
+    # Source: ISMIR TISMIR 2025 (Cros Vila) — Suno: ~1508 ± 1304, Human MSD: ~2.
+    # Codec decoder checkerboard artifacts create sharp per-frame mel-band spikes
+    # (high kurtosis) that vary wildly frame-to-frame → high variance.
+    # Human audio has smooth, consistent mel distributions → near-zero variance.
+    # Uncompressed threshold: ~50 (Suno=1508, Human=2). On YouTube audio both collapse
+    # to ~640 with heavy overlap — see calibration run 2026-03-21. Raised to 9999 to
+    # effectively disable until direct-upload path is available (PROB_WEIGHT_KURTOSIS=0).
+    # TODO: recalibrate on uncompressed WAV/FLAC uploads; expected threshold ~800.
+    KURTOSIS_VARIABILITY_AI_MIN: float = 9999.0
+    # Number of mel bands used for kurtosis computation
+    KURTOSIS_N_MELS: int = 128
+
+    # ---- Forensics: Decoder spectral peak fingerprint ------------------------
+    # Neural vocoders (HiFi-GAN, EnCodec, DAC) use transposed convolution with
+    # fixed strides, which periodizes bias components into the spectrum at
+    # intervals of f_s / stride. Multiple layers compound.
+    # Source: arXiv 2506.19108 — >99% accuracy on uncompressed audio.
+    # Peak detection window half-width in Hz (used to group nearby peaks)
+    DECODER_PEAK_WINDOW_HZ: int = 200
+    # Minimum peak prominence above local baseline (dB) to count as a spike
+    DECODER_PEAK_PROMINENCE_DB: float = 3.0
+    # Periodicity tolerance: ratio of std/mean spacing below which peaks are
+    # considered periodic (tight clustering = decoder artifact)
+    DECODER_PEAK_REGULARITY_MAX: float = 0.25
+    # Minimum number of evenly-spaced peaks to flag a periodic pattern
+    DECODER_PEAK_MIN_COUNT: int = 4
+    # Score above this → decoder fingerprint detected.
+    # TODO: all 54 YouTube tracks scored 0.0 — MP3 encoding masks the periodic peaks.
+    # Re-enable on direct uncompressed uploads. Set to 2.0 (unreachable) until then.
+    DECODER_PEAK_SCORE_MIN: float = 2.0
+
+    # ---- Forensics: Spectral centroid mean -----------------------------------
+    # Mean spectral centroid across the full track in Hz.
+    # Source: ISMIR TISMIR 2025 — Suno: 1091 ± 386 Hz, Human: 1501 ± 632 Hz.
+    # AI generators concentrate energy lower in the spectrum; real recordings
+    # have more high-frequency content from room acoustics, instrument overtones,
+    # and natural noise. Threshold set conservatively above the Suno mean + 1σ:
+    # 1091 + 386 = 1477 ≈ 1400 Hz. Will be refined after batch scan.
+    SPECTRAL_CENTROID_MEAN_AI_MAX: float = 1400.0
+
+    # ---- Forensics: Structural / instrumental signals (2026-03-21) -----------
+    # All weights start at 0.0 — disabled pending calibration against 54-track dataset.
+    # TODO: run scripts/calibrate_signals.py after implementing, set thresholds from
+    # the AI vs Human distribution data, then enable weights.
+
+    # Self-similarity entropy: Shannon entropy of chroma recurrence matrix upper-triangle.
+    # Calibrated 2026-03-21: AI mean=0.296, Human mean=0.262 — WRONG direction.
+    # AI has HIGHER entropy than human, opposite of hypothesis. Likely because AI-generated
+    # chroma has more mid-range similarities (0.3–0.7) rather than clean high/low clusters.
+    # TODO: try spatial/structural entropy (e.g. diagonal line density) instead of
+    # distribution entropy — may better capture regularity of repetition intervals.
+    SELF_SIMILARITY_ENTROPY_AI_MAX: float = 0.0   # DISABLED — wrong direction
+    PROB_WEIGHT_SELF_SIMILARITY: float = 0.0
+
+    # Noise floor ratio: quiet-moment RMS / mean RMS.
+    # Near-zero = digital silence between notes = VST render (no room noise).
+    # Real recordings always have a noise floor from room/mic/preamps.
+    # Calibrated 2026-03-21 against 54 tracks:
+    #   9 AI tracks score exactly 0.000 (AIVA, Emily Howell — pure VST renders)
+    #   Lowest human track: cimoNqiulUE = 0.005 → threshold 0.005 gives 0 false positives.
+    #   Catches 10/42 AI (24%) at 100% precision, specifically the orchestral/instrumental
+    #   AI that vocal signals (centroid instability, HNR) cannot detect.
+    NOISE_FLOOR_RATIO_AI_MAX: float = 0.005
+    PROB_WEIGHT_NOISE_FLOOR: float = 0.30           # high precision warrants meaningful weight
+
+    # Onset strength CV: coefficient of variation of the onset strength envelope.
+    # Calibrated 2026-03-21: AI mean=1.03, Human mean=1.13 — gap too small, heavy overlap.
+    # TODO: revisit with larger human dataset; currently disabled.
+    ONSET_STRENGTH_CV_AI_MAX: float = 0.0          # DISABLED — insufficient separation
+    PROB_WEIGHT_ONSET_STRENGTH: float = 0.0
+
+    # Spectral flatness variance: variance of Wiener entropy over time.
+    # Calibrated 2026-03-21: signal fires in the WRONG direction (AI higher than human).
+    # The high AI variance is caused by digital silence in VST renders (flatness swings
+    # between near-0 during notes and near-1 during zero-energy frames) — same phenomenon
+    # as noise_floor_ratio, not independent. Covered by PROB_WEIGHT_NOISE_FLOOR instead.
+    # TODO: re-evaluate on uncompressed uploads where noise floor can be cleanly measured.
+    SPECTRAL_FLATNESS_VAR_AI_MAX: float = 0.0      # DISABLED — correlated with noise floor
+    PROB_WEIGHT_SPECTRAL_FLATNESS: float = 0.0
+
+    # Sub-beat grid deviation: variance of onset-to-nearest-16th-note offset (normalised).
+    # Calibrated 2026-03-21: AI mean=0.0217, Human mean=0.0219 — essentially identical.
+    # Confirmed: modern music is recorded to a click grid regardless of AI origin.
+    SUBBEAT_DEVIATION_AI_MAX: float = 0.0          # DISABLED — no separation found
+    PROB_WEIGHT_SUBBEAT_GRID: float = 0.0
 
     # ---- Forensics: SynthID watermark scan -----------------------------------
     # Coherent-bin count thresholds for low / medium / high confidence

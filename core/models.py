@@ -135,7 +135,17 @@ class ForensicsResult(BaseModel):
     synthid_score: float    = 0.0       # phase coherence in 18–22 kHz band
     centroid_instability_score: float = -1.0  # mean within-interval centroid CV; -1 = not computed
     harmonic_ratio_score: float = -1.0        # mean HNR within sustained intervals; -1 = not computed
+    # New signals (2026-03-21) — calibrated from ISMIR TISMIR 2025 + arXiv 2506.19108
+    kurtosis_variability: float = -1.0        # variance of per-frame mel-band kurtosis; -1 = not computed
+    decoder_peak_score: float = 0.0           # periodic deconvolution peak density in 1–16 kHz band
+    spectral_centroid_mean: float = -1.0      # mean spectral centroid in Hz across the track
     ai_probability: float = 0.0               # weighted probability score [0.0–1.0] used for verdict
+    # Structural / instrumental signals (2026-03-21) — pending calibration, weights=0 until thresholds set
+    self_similarity_entropy: float = -1.0     # Shannon entropy of chroma recurrence matrix; low = repetitive AI structure
+    noise_floor_ratio: float = -1.0           # quiet-frame RMS / mean RMS; near-zero = VST render (no room noise)
+    onset_strength_cv: float = -1.0           # CV of onset strength envelope; low = uniform AI dynamics
+    spectral_flatness_var: float = -1.0       # variance of Wiener entropy over time; low = AI synth uniformity
+    subbeat_grid_deviation: float = -1.0      # variance of onset-to-nearest-16th-note offset; low = on-grid
 
     flags: list[str]        = Field(default_factory=list)  # human-readable flag labels
     verdict: ForensicVerdict = "Human"
