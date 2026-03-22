@@ -17,11 +17,15 @@ Design notes:
 from __future__ import annotations
 
 import io
+import json
+import re
 import shutil
 import subprocess
+import urllib.request
+import wave
 from pathlib import Path
 from typing import Union
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 from core.config import CONSTANTS, Settings, get_settings
 from core.exceptions import AudioSourceError, ConfigurationError, ValidationError
@@ -89,6 +93,11 @@ class Ingestion:
 
         ytdlp_bin  = _find_binary("yt-dlp")
         ffmpeg_bin = _find_binary("ffmpeg")
+
+        # Fetch metadata before the download so YouTube doesn't rate-limit
+        # two consecutive requests for the same video. --dump-json is a
+        # lightweight info-only call (~2s); the download follows separately.
+        track_metadata = _fetch_youtube_metadata(url, ytdlp_bin)
 
         ytdlp_cmd = [
             ytdlp_bin,
@@ -163,10 +172,13 @@ class Ingestion:
 
             _check_size(len(wav_bytes), self._settings.max_upload_mb)
 
+            track_metadata.update(_wav_info(wav_bytes))
+
             return AudioBuffer(
                 raw=wav_bytes,
                 sample_rate=CONSTANTS.SAMPLE_RATE,
                 label=_label_from_url(url),
+                metadata=track_metadata,
             )
 
         finally:
@@ -258,6 +270,168 @@ def _label_from_url(url: str) -> str:
     except Exception:
         pass
     return url[:60]
+
+
+def _fetch_youtube_metadata(url: str, ytdlp_bin: str) -> dict[str, str]:
+    """
+    Fetch title and artist via YouTube's public oEmbed API.
+
+    oEmbed is a lightweight JSON endpoint that requires no auth and no yt-dlp.
+    It returns in ~200ms and is not subject to the bot-detection blocking that
+    affects yt-dlp metadata calls made outside the main download subprocess.
+
+    Response fields used:
+      title       — e.g. "Sabrina Carpenter - Espresso"
+      author_name — channel name; may have " - Topic" suffix for auto-channels
+
+    Artist resolution:
+      1. Strip " - Topic" from author_name if present
+      2. Use author_name directly (official artist channels)
+      3. Parse "Artist - Title" from the video title as a last resort
+
+    Never raises — metadata is supplementary. Any failure returns empty strings.
+    """
+    try:
+        oembed_url = (
+            "https://www.youtube.com/oembed"
+            f"?url={quote(url, safe='')}&format=json"
+        )
+        req = urllib.request.Request(
+            oembed_url,
+            headers={"User-Agent": "sync-safe-forensic-portal/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data: dict = json.loads(resp.read().decode("utf-8"))
+
+        title_raw   = str(data.get("title") or "")
+        author_name = str(data.get("author_name") or "")
+
+        # " - Topic" channels → strip suffix; otherwise use as-is
+        artist = _artist_from_uploader(author_name) or author_name
+
+        # If title follows "Artist - Title" convention, prefer the parsed
+        # artist (more precise than the channel name).
+        if title_raw and " - " in title_raw:
+            parsed_artist, parsed_title = _split_artist_title(title_raw)
+            if parsed_artist:
+                return {"title": _clean_title(parsed_title), "artist": parsed_artist}
+
+        return {"title": _clean_title(title_raw), "artist": artist}
+    except Exception:  # noqa: BLE001 — metadata is always best-effort
+        return {"title": "", "artist": ""}
+
+
+def _artist_from_uploader(uploader: str) -> str:
+    """
+    Extract an artist name from YouTube's 'Artist - Topic' channel convention.
+
+    Pure function — no I/O.
+    """
+    suffix = " - Topic"
+    if uploader.endswith(suffix):
+        return uploader[: -len(suffix)]
+    return ""
+
+
+def _split_artist_title(video_title: str) -> tuple[str, str]:
+    """
+    Parse artist and track title from YouTube's common 'Artist - Title' format.
+
+    Also strips trailing qualifiers like '(Official Video)', '(Lyric Video)',
+    '(Official Music Video)', '(Audio)' that appear in YouTube titles but
+    would confuse a lyrics API search.
+
+    Returns (artist, clean_title). If the ' - ' separator is absent, returns
+    ("", original_title) so the caller can decide what to do.
+
+    Pure function — no I/O.
+    """
+    import re
+    # Strip parenthetical/bracketed suffixes common in music video titles
+    clean = re.sub(
+        r"\s*[\(\[]"
+        r"(Official\s*(Music\s*|Lyric\s*|Audio\s*)?Video"
+        r"|Lyric\s*Video|Audio|Live( Version)?|Visualizer)"
+        r"[^\)\]]*[\)\]]\s*$",
+        "",
+        video_title,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    if " - " in clean:
+        artist_part, title_part = clean.split(" - ", 1)
+        return artist_part.strip(), title_part.strip()
+
+    return "", video_title
+
+
+def _clean_title(title: str) -> str:
+    """
+    Strip common YouTube parenthetical suffixes from a track title.
+
+    Removes qualifiers like '(Official Audio)', '(Official Video)',
+    '(Official Music Video)', '(Lyric Video)', '(Visualizer)', '(Live)',
+    '(Radio Edit)', and bracketed equivalents.
+
+    Pure function — no I/O.
+    """
+    clean = re.sub(
+        r"\s*[\(\[]"
+        r"(Official\s*(Music\s*|Lyric\s*|Audio\s*)?Video"
+        r"|Official\s*Audio"
+        r"|Lyric\s*Video|Audio|Live( Version)?|Visualizer"
+        r"|Radio\s*Edit|Remaster(ed)?|feat\.[^\)\]]*)"
+        r"[^\)\]]*[\)\]]\s*$",
+        "",
+        title,
+        flags=re.IGNORECASE,
+    ).strip()
+    return clean or title
+
+
+def _wav_info(wav_bytes: bytes) -> dict[str, str]:
+    """
+    Extract technical audio metadata from raw WAV bytes.
+
+    Returns a dict with keys: duration, sample_rate, bit_depth, channels.
+    All values are strings. Returns an empty dict on any parse error.
+
+    ffmpeg piped output writes 0xFFFFFFFF as the RIFF data-chunk size
+    placeholder because it cannot seek back to update the header on a
+    stream. wave.getnframes() would read that placeholder (~27 hours).
+    Instead, duration is derived from the actual byte length of wav_bytes
+    using the header fields ffmpeg does write correctly.
+
+    WAV header layout (standard 44-byte PCM header):
+      offset 22 — num channels  (uint16 LE)
+      offset 24 — sample rate   (uint32 LE)
+      offset 34 — bits/sample   (uint16 LE)
+      offset 44+ — audio data
+
+    Pure function — no I/O beyond reading the provided bytes.
+    """
+    import struct
+    try:
+        if len(wav_bytes) < 44:
+            return {}
+        num_channels    = struct.unpack_from("<H", wav_bytes, 22)[0]
+        sample_rate     = struct.unpack_from("<I", wav_bytes, 24)[0]
+        bits_per_sample = struct.unpack_from("<H", wav_bytes, 34)[0]
+        if sample_rate == 0 or num_channels == 0 or bits_per_sample == 0:
+            return {}
+        bytes_per_frame = (bits_per_sample // 8) * num_channels
+        data_bytes      = len(wav_bytes) - 44
+        total_seconds   = int(data_bytes / bytes_per_frame / sample_rate)
+        minutes, seconds = divmod(total_seconds, 60)
+        channel_label   = "Mono" if num_channels == 1 else ("Stereo" if num_channels == 2 else str(num_channels))
+        return {
+            "duration":    f"{minutes}:{seconds:02d}",
+            "sample_rate": f"{sample_rate:,} Hz",
+            "bit_depth":   f"{bits_per_sample}-bit",
+            "channels":    channel_label,
+        }
+    except Exception:
+        return {}
 
 
 def _check_size(byte_count: int, max_mb: int) -> None:

@@ -1,3 +1,23 @@
+# ---------------------------------------------------------------------------
+# Local dev / testing infrastructure
+# These directories are used during local development and algorithm tuning.
+# They are intentionally excluded from the repository — delete the whole
+# block below to nuke all local testing data when it's no longer needed:
+#
+#   tmp/       — audio + result JSON written by the app during dev runs
+#   debug/     — full pipeline cache written by DEBUG_ANALYSIS=1
+#   scripts/   — one-off batch scanning and debugging scripts (local only)
+#   tests/fixtures/results/   — captured pipeline results (CAPTURE_RESULTS=1)
+#   tests/fixtures/forensics/ — captured forensics fixtures (CAPTURE_OUTPUTS=1)
+# ---------------------------------------------------------------------------
+tmp/
+debug/
+scripts/
+tests/fixtures/results/*
+tests/fixtures/forensics/*
+!tests/fixtures/results/.gitkeep
+!tests/fixtures/forensics/.gitkeep
+
 # Secrets / credentials
 cookies.txt
 .env
@@ -30,3 +50,7 @@ spec/
 
 # Generated / exported artifacts
 *.html
+
+# Daily pipeline logs (local only — rotated automatically at startup)
+logs/
+*.log

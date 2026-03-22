@@ -18,17 +18,18 @@ Swap guide:
   TranscriptionProvider → swap Whisper for Deepgram, AssemblyAI, or Azure STT
   StructureAnalyzer  → swap allin1 for a custom BPM/section detector
   ForensicsAnalyzer  → swap the librosa heuristics for a trained classifier
-  ComplianceChecker  → swap Gallo-Method for a different editorial standard
+  ComplianceChecker  → swap sync readiness rules for a different editorial standard
   AuthorshipAnalyzer → swap RoBERTa for GPTZero API or a fine-tuned model
   TrackDiscovery     → swap Last.fm for Spotify, Soundcharts, or internal DB
   LegalLinksProvider → swap static URL templates for a live licensing API
 """
 from __future__ import annotations
 
-from typing import Union, runtime_checkable
+from typing import TYPE_CHECKING, Union, runtime_checkable
 from typing import Protocol
 
-import streamlit as st  # type: ignore[import]  — UploadedFile is UI-layer only here
+if TYPE_CHECKING:
+    import streamlit as st  # UploadedFile type hint only — no runtime dependency
 
 from core.models import (
     AnalysisResult,
@@ -76,6 +77,33 @@ class AudioProvider(Protocol):
 
 
 # ---------------------------------------------------------------------------
+# Lyrics lookup (pre-transcription)
+# ---------------------------------------------------------------------------
+
+@runtime_checkable
+class LyricsProvider(Protocol):
+    """
+    Fetch synced lyrics for a known track title + artist.
+
+    Implementations: services/lyrics_provider.py (LRCLibClient)
+    Swap candidates:  Genius API, Musixmatch, local lyrics DB
+    """
+
+    def get_lyrics(self, title: str, artist: str) -> list[TranscriptSegment] | None:
+        """
+        Args:
+            title:  Track title.
+            artist: Artist name.
+
+        Returns:
+            Ordered list of time-stamped TranscriptSegment objects if synced
+            lyrics are found, or None if the track is unknown or has no
+            synced lyrics.
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
 # Transcription
 # ---------------------------------------------------------------------------
 
@@ -84,14 +112,23 @@ class TranscriptionProvider(Protocol):
     """
     Transcribe audio to time-stamped text segments.
 
-    Implementations: services/transcription.py (Whisper)
+    Implementations:
+        services/transcription.py — LyricsOrchestrator (LRCLib → Whisper full-mix)
+        services/transcription.py — Transcription (Whisper-only, used as fallback)
     Swap candidates:  Deepgram, AssemblyAI, Azure Speech, Google STT
     """
 
-    def transcribe(self, audio: AudioBuffer) -> list[TranscriptSegment]:
+    def transcribe(
+        self,
+        audio: AudioBuffer,
+        title: str = "",
+        artist: str = "",
+    ) -> list[TranscriptSegment]:
         """
         Args:
-            audio: In-memory audio buffer.
+            audio:  In-memory audio buffer.
+            title:  Track title (used by LyricsOrchestrator for lyrics lookup).
+            artist: Artist name (used by LyricsOrchestrator for lyrics lookup).
 
         Returns:
             Ordered list of TranscriptSegment objects.
@@ -165,7 +202,7 @@ class ComplianceChecker(Protocol):
     """
     Apply editorial compliance rules to audio and its transcript.
 
-    Implementations: services/compliance.py (Gallo-Method)
+    Implementations: services/compliance.py (sync readiness rules)
     Swap candidates:  A different editorial standard, a paid compliance API
     """
 
@@ -173,7 +210,7 @@ class ComplianceChecker(Protocol):
         self,
         audio: AudioBuffer,
         transcript: list[TranscriptSegment],
-        sections: list,         # list[Section] — forward ref avoids circular import
+        sections: "list[Section]",  # forward ref avoids circular import
         beats: list[float],
     ) -> ComplianceReport:
         """
@@ -187,7 +224,7 @@ class ComplianceChecker(Protocol):
             intro check, and an A–F grade.
 
         Raises:
-            ModelInferenceError: on NLI or spaCy processing failure.
+            ModelInferenceError: on Detoxify or spaCy processing failure.
         """
         ...
 

@@ -26,11 +26,12 @@ from pydantic import BaseModel, ConfigDict, Field
 # Type aliases — used as Literal constraints throughout
 # ---------------------------------------------------------------------------
 
-IssueType    = Literal["EXPLICIT", "BRAND", "LOCATION", "VIOLENCE", "DRUGS"]
+IssueType    = Literal["EXPLICIT", "BRAND", "VIOLENCE", "DRUGS"]
 Confidence   = Literal["confirmed", "potential"]
+Severity     = Literal["hard", "soft"]
 EndingType   = Literal["sting", "fade", "cut"]
 AIVerdict    = Literal["Likely Human", "Uncertain", "Likely AI", "Insufficient data"]
-ForensicVerdict = Literal["Human", "Uncertain", "AI"]
+ForensicVerdict = Literal["Human", "Human (Sample/Loop)", "Possible Hybrid AI Cover", "Uncertain", "Likely AI", "AI"]
 
 
 # ---------------------------------------------------------------------------
@@ -44,13 +45,19 @@ class AudioBuffer(BaseModel):
     `raw` holds the WAV/MP3 bytes as ingested — no resampling is done here.
     Each service is responsible for resampling to its required rate via
     librosa.load(buffer.to_bytesio(), sr=CONSTANTS.SAMPLE_RATE).
+
+    `metadata` carries title/artist extracted at ingestion time (e.g. from
+    yt-dlp's --dump-json for YouTube sources). This is the primary source
+    for the LRCLib lyrics lookup since embedded audio tags are stripped
+    during the yt-dlp → ffmpeg transcode.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    raw: bytes = Field(repr=False)          # excluded from repr; can be 50 MB
+    raw: bytes = Field(repr=False)                          # excluded from repr; can be 50 MB
     sample_rate: int = Field(default=22_050)
-    label: str = Field(default="")          # display name shown in the UI
+    label: str = Field(default="")                          # display name shown in the UI
+    metadata: dict[str, str] = Field(default_factory=dict)  # title, artist from ingestion
 
     def to_bytesio(self) -> io.BytesIO:
         """Return a fresh BytesIO cursor at position 0."""
@@ -123,8 +130,22 @@ class ForensicsResult(BaseModel):
     c2pa_flag: bool         = False     # True → born-AI assertion found in manifest
     ibi_variance: float     = 1.0       # inter-beat interval variance
     loop_score: float       = 0.0       # highest cross-correlation across 4-bar windows
+    loop_autocorr_score: float = 0.0    # onset autocorrelation loop repetition score
     spectral_slop: float    = 0.0       # anomalous energy above SPECTRAL_SLOP_HZ
     synthid_score: float    = 0.0       # phase coherence in 18–22 kHz band
+    centroid_instability_score: float = -1.0  # mean within-interval centroid CV; -1 = not computed
+    harmonic_ratio_score: float = -1.0        # mean HNR within sustained intervals; -1 = not computed
+    # New signals (2026-03-21) — calibrated from ISMIR TISMIR 2025 + arXiv 2506.19108
+    kurtosis_variability: float = -1.0        # variance of per-frame mel-band kurtosis; -1 = not computed
+    decoder_peak_score: float = 0.0           # periodic deconvolution peak density in 1–16 kHz band
+    spectral_centroid_mean: float = -1.0      # mean spectral centroid in Hz across the track
+    ai_probability: float = 0.0               # weighted probability score [0.0–1.0] used for verdict
+    # Structural / instrumental signals (2026-03-21) — pending calibration, weights=0 until thresholds set
+    self_similarity_entropy: float = -1.0     # Shannon entropy of chroma recurrence matrix; low = repetitive AI structure
+    noise_floor_ratio: float = -1.0           # quiet-frame RMS / mean RMS; near-zero = VST render (no room noise)
+    onset_strength_cv: float = -1.0           # CV of onset strength envelope; low = uniform AI dynamics
+    spectral_flatness_var: float = -1.0       # variance of Wiener entropy over time; low = AI synth uniformity
+    subbeat_grid_deviation: float = -1.0      # variance of onset-to-nearest-16th-note offset; low = on-grid
 
     flags: list[str]        = Field(default_factory=list)  # human-readable flag labels
     verdict: ForensicVerdict = "Human"
@@ -147,6 +168,8 @@ class ComplianceFlag(BaseModel):
     text: str                               # flagged excerpt or brand name
     recommendation: str                     # supervisor action guidance
     confidence: Confidence = "confirmed"    # confirmed = NER hit; potential = keyword
+    severity: Severity     = "soft"         # hard = deal-breaker in any context;
+                                            # soft = placement-dependent, director's call
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
@@ -194,19 +217,29 @@ class IntroResult(BaseModel):
 
 
 class ComplianceReport(BaseModel):
-    """Aggregated output of all Gallo-Method compliance checks."""
+    """Aggregated output of all sync readiness compliance checks."""
 
     model_config = ConfigDict(frozen=True)
 
     flags: list[ComplianceFlag]         = Field(default_factory=list)
-    sting: StingResult                  = Field(default_factory=StingResult.model_construct)
-    evolution: EnergyEvolutionResult    = Field(default_factory=EnergyEvolutionResult.model_construct)
-    intro: IntroResult                  = Field(default_factory=IntroResult.model_construct)
+    sting: StingResult                  = Field(default_factory=lambda: StingResult(ending_type="cut", sync_ready=False, final_energy_ratio=0.0))
+    evolution: EnergyEvolutionResult    = Field(default_factory=EnergyEvolutionResult)
+    intro: IntroResult                  = Field(default_factory=IntroResult)
     grade: str                          = "N/A"     # A–F or "N/A"
 
     @property
     def confirmed_flags(self) -> list[ComplianceFlag]:
         return [f for f in self.flags if f.confidence == "confirmed"]
+
+    @property
+    def hard_flags(self) -> list[ComplianceFlag]:
+        """Confirmed flags that are absolute deal-breakers in any placement context."""
+        return [f for f in self.flags if f.confidence == "confirmed" and f.severity == "hard"]
+
+    @property
+    def soft_flags(self) -> list[ComplianceFlag]:
+        """Confirmed flags that are placement-dependent — sync director's call."""
+        return [f for f in self.flags if f.confidence == "confirmed" and f.severity == "soft"]
 
     @property
     def potential_flags(self) -> list[ComplianceFlag]:
@@ -280,13 +313,13 @@ class AnalysisResult(BaseModel):
     """
 
     audio: AudioBuffer
-    structure: Optional[StructureResult]        = None
-    forensics: Optional[ForensicsResult]        = None
-    transcript: list[TranscriptSegment]         = Field(default_factory=list)
-    compliance: Optional[ComplianceReport]      = None
-    authorship: Optional[AuthorshipResult]      = None
-    similar_tracks: list[TrackCandidate]        = Field(default_factory=list)
-    legal: Optional[LegalLinks]                 = None
+    structure: Optional[StructureResult]                    = None
+    forensics: Optional[ForensicsResult]                    = None
+    transcript: list[TranscriptSegment]                     = Field(default_factory=list)
+    compliance: Optional[ComplianceReport]                  = None
+    authorship: Optional[AuthorshipResult]                  = None
+    similar_tracks: list[TrackCandidate]                    = Field(default_factory=list)
+    legal: Optional[LegalLinks]                             = None
 
     def to_dict(self) -> dict[str, Any]:
         """

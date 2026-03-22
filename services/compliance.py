@@ -1,22 +1,21 @@
 """
 services/compliance.py
-Gallo-Method compliance checks — implements the ComplianceChecker protocol.
+Sync readiness compliance checks — implements the ComplianceChecker protocol.
 
 Five checks, one class:
   1. Sting / ending type  — librosa RMS + onset strength
   2. 4-8 bar energy rule  — librosa spectral contrast per window
   3. Intro timer          — allin1 sections + Whisper fallback
-  4. Lyric audit          — DeBERTa-v3 zero-shot NLI + spaCy NER
-  5. Brand keywords       — curated regex list (services/brand_keywords.py)
+  4. Lyric audit          — Detoxify transformer + spaCy NER
+  5. Brand keywords       — curated regex list (data/brand_keywords.py)
 
 Design notes:
-- NLI and spaCy models are lazy-initialized on first use and cached as
+- Detoxify and spaCy models are lazy-initialized on first use and cached as
   instance attributes — no module-level globals.
 - Brand patterns are compiled once in __init__, not at module import.
-- NLI load failure → ModelInferenceError (hard — audit cannot run).
-- spaCy load failure → graceful degradation (NER is supplementary to NLI).
-- All thresholds come from CONSTANTS or ZeroShotCheck fields; no inline
-  magic numbers.
+- Detoxify load failure → ModelInferenceError (hard — audit cannot run).
+- spaCy load failure → graceful degradation (NER is supplementary).
+- All thresholds are module-level constants; no inline magic numbers.
 - _compute_grade and all small helpers are pure module-level functions for
   independent testability.
 """
@@ -24,7 +23,6 @@ from __future__ import annotations
 
 import io
 import re
-from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
@@ -39,10 +37,13 @@ from core.models import (
     IntroResult,
     IssueType,
     Section,
+    Severity,
     StingResult,
     TranscriptSegment,
 )
-from services.brand_keywords import BRAND_KEYWORDS
+from data.brand_keywords import BRAND_KEYWORDS
+from data.drug_keywords import DRUG_KEYWORDS
+from data.profanity_supplement import PROFANITY_SUPPLEMENT
 
 try:
     import spaces
@@ -54,82 +55,41 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# Zero-shot check configuration
+# Detoxify thresholds
 # ---------------------------------------------------------------------------
 
-@dataclass(frozen=True)
-class ZeroShotCheck:
-    """
-    Configuration for a single zero-shot NLI compliance check.
+# Detoxify score thresholds — sourced from CONSTANTS (core/config.py).
+# All numeric values live there; references here are read-only aliases for brevity.
+_EXPLICIT_CONFIRMED: float = CONSTANTS.EXPLICIT_CONFIRMED
+_EXPLICIT_POTENTIAL: float = CONSTANTS.EXPLICIT_POTENTIAL
+_HARD_OBSCENE_THRESHOLD: float = CONSTANTS.EXPLICIT_HARD
+_VIOLENCE_CONFIRMED: float = CONSTANTS.VIOLENCE_CONFIRMED
+_VIOLENCE_POTENTIAL: float = CONSTANTS.VIOLENCE_POTENTIAL
+_HARD_THREAT_THRESHOLD: float = CONSTANTS.VIOLENCE_HARD
+_DRUGS_TOXIC_MIN: float = CONSTANTS.DRUGS_TOXIC_MIN
 
-    Using a frozen dataclass instead of a plain dict catches typos at
-    definition time (AttributeError) rather than silently at runtime.
-    """
-    hypothesis: str
-    issue_type: IssueType
-    threshold_confirmed: float
-    threshold_potential: float
-    recommendation: str
-    recommendation_potential: str
-    negative_label: str = ""    # non-empty → competitive (multi_label=False) mode
-
-
-_ZS_CHECKS: tuple[ZeroShotCheck, ...] = (
-    ZeroShotCheck(
-        # Competitive: sexual vs romantic — reduces false positives on love songs
-        hypothesis="sexual content, sexual acts, or explicit innuendo",
-        negative_label="romantic love, emotional connection, or general relationship",
-        issue_type="EXPLICIT",
-        threshold_confirmed=0.55,
-        threshold_potential=0.40,
-        recommendation="Request a clean/radio edit before submission.",
-        recommendation_potential=(
-            "Possible sexual innuendo — supervisor should review before submission."
-        ),
-    ),
-    ZeroShotCheck(
-        hypothesis="This lyric glorifies or references illegal drug use.",
-        issue_type="DRUGS",
-        threshold_confirmed=0.85,
-        threshold_potential=0.70,
-        recommendation="Flag for brand-safety review; likely disqualifies broadcast.",
-        recommendation_potential=(
-            "Possible drug reference — context review recommended before placement."
-        ),
-    ),
-    ZeroShotCheck(
-        hypothesis="This lyric contains graphic violence, a weapon, or an explicit threat.",
-        issue_type="VIOLENCE",
-        threshold_confirmed=0.85,
-        threshold_potential=0.70,
-        recommendation="Flag for brand-safety review; may disqualify family placements.",
-        recommendation_potential=(
-            "Possible violent language — review in context before family placement."
-        ),
-    ),
-)
-
-# Number of segments in a sliding confirmation window for borderline scores
+# Number of segments in a sliding window used to confirm borderline scores
 _WINDOW_SIZE: int = 3
 
 # Segments shorter than this carry no classifiable signal
 _MIN_SEGMENT_CHARS: int = 20
 
+# Only these issue types count toward the A–F content grade
+_GRADE_ISSUE_TYPES: frozenset[str] = frozenset({"EXPLICIT", "VIOLENCE", "DRUGS"})
+
 # NER entity labels mapped to our issue types
 _NER_ISSUE_MAP: dict[str, IssueType] = {
     "ORG": "BRAND",
-    "GPE": "LOCATION",
 }
 
 _NER_RECOMMENDATIONS: dict[IssueType, str] = {
-    "BRAND":    "Confirm explicit brand clearance with rights holder.",
-    "LOCATION": "Review placement scope — location may limit territory.",
+    "BRAND": "Confirm explicit brand clearance with rights holder.",
 }
 
 
 class Compliance:
     """
-    Applies Gallo-Method compliance rules to audio and lyrics.
+    Applies sync readiness compliance rules to audio and lyrics.
 
     Implements: ComplianceChecker protocol (core/protocols.py)
 
@@ -144,8 +104,9 @@ class Compliance:
     def __init__(self, params: ModelParams | None = None) -> None:
         self._params = params or ModelParams()
         # Lazy model handles — loaded on first call, not at import time
-        self._zs_pipeline = None
-        self._spacy_nlp   = None
+        self._detoxify_model   = None
+        self._profanity_filter = None
+        self._spacy_nlp        = None
         # Brand patterns compiled once here, not at module import
         self._brand_patterns: list[tuple[str, re.Pattern]] = [
             (
@@ -170,7 +131,7 @@ class Compliance:
         beats: list[float],
     ) -> ComplianceReport:
         """
-        Run all Gallo-Method checks and return a typed ComplianceReport.
+        Run all sync readiness checks and return a typed ComplianceReport.
 
         Args:
             audio:      In-memory audio buffer.
@@ -191,12 +152,7 @@ class Compliance:
         intro     = self._check_intro(sections, transcript)
         flags     = self._audit_lyrics(transcript)
 
-        grade = _compute_grade(
-            flags=flags,
-            sting=sting,
-            evolution=evolution,
-            intro=intro,
-        )
+        grade = _compute_grade(flags=flags)
 
         return ComplianceReport(
             flags=flags,
@@ -239,8 +195,8 @@ class Compliance:
                 flag=False,
             )
 
-        hop = 512
-        rms          = librosa.feature.rms(y=audio, frame_length=1024, hop_length=hop)[0]
+        hop = CONSTANTS.STING_HOP_LENGTH
+        rms          = librosa.feature.rms(y=audio, frame_length=CONSTANTS.STING_FRAME_LENGTH, hop_length=hop)[0]
         overall_mean = float(np.mean(rms)) + 1e-9
 
         # Fade: declining RMS slope over last 10s AND low tail energy
@@ -250,7 +206,7 @@ class Compliance:
         final_ratio = tail_mean / overall_mean
         x           = np.arange(len(tail_rms), dtype=float)
         norm_slope  = float(np.polyfit(x, tail_rms, 1)[0]) / overall_mean
-        is_fade     = (norm_slope < -0.0005) and (final_ratio < 0.25)
+        is_fade     = (norm_slope < CONSTANTS.FADE_SLOPE_THRESHOLD) and (final_ratio < CONSTANTS.FADE_RATIO_MAX)
 
         # Sting: onset spike ≥ STING_SPIKE_FACTOR × local mean AND
         #        ≥ STING_RMS_DROP_RATIO energy collapse within 1s after peak
@@ -424,41 +380,79 @@ class Compliance:
         self, transcript: list[TranscriptSegment]
     ) -> list[ComplianceFlag]:
         """
-        Run zero-shot NLI, spaCy NER, and brand keyword scan on each segment.
+        Run Detoxify toxicity scoring, spaCy NER, and brand keyword scan on
+        each segment.
 
         Raises:
-            ModelInferenceError: if the NLI model fails to load.
+            ModelInferenceError: if Detoxify fails to load.
         """
         if not transcript:
             return []
 
-        classifier = self._load_zs_model()   # raises ModelInferenceError on failure
-        nlp        = self._load_spacy()       # None on failure — NER is optional
+        detector  = self._load_detoxify()        # raises ModelInferenceError on failure
+        pf        = self._load_profanity()       # None on failure — supplementary
+        nlp       = self._load_spacy()           # None on failure — NER is optional
+
 
         classifiable = [s for s in transcript if len(s.text) >= _MIN_SEGMENT_CHARS]
         windows      = _build_windows(classifiable, _WINDOW_SIZE)
 
         raw_flags: list[ComplianceFlag] = []
 
+        # Pass 1: profanity word-list on ALL segments — no minimum length,
+        # so short segments like "(Holy shit)" are not skipped.
+        # Each word-list hit is cross-validated against Detoxify's obscenity
+        # score to suppress idiomatic false positives (e.g. "tied up right now").
+        if pf is not None:
+            for seg in transcript:
+                if pf.contains_profanity(seg.text):
+                    try:
+                        obs = float(detector.predict(seg.text).get("obscene", 0.0))
+                    except Exception:  # noqa: BLE001 — Detoxify predict is best-effort; fall back to potential
+                        obs = _EXPLICIT_POTENTIAL
+
+                    if obs >= _EXPLICIT_CONFIRMED:
+                        confidence: str = "confirmed"
+                    elif obs >= _EXPLICIT_POTENTIAL:
+                        confidence = "potential"
+                    else:
+                        continue  # Detoxify disagrees — drop as false positive
+
+                    severity: Severity = "hard" if obs >= _HARD_OBSCENE_THRESHOLD else "soft"
+                    raw_flags.append(ComplianceFlag(
+                        timestamp_s=int(seg.start),
+                        issue_type="EXPLICIT",
+                        text=seg.text,
+                        recommendation=(
+                            "Clean edit required — hard explicit content."
+                            if severity == "hard"
+                            else "Mild language — acceptable for some placements. Supervisor discretion."
+                        ),
+                        confidence=confidence,
+                        severity=severity,
+                    ))
+
+        # Pass 2: Detoxify + NER + brand keywords on segments ≥ MIN chars
         for i, seg in enumerate(classifiable):
             ts = int(seg.start)
 
-            # Zero-shot NLI → EXPLICIT / DRUGS / VIOLENCE
-            for check in _ZS_CHECKS:
-                flag = _score_segment(seg.text, windows[i], check, classifier)
-                if flag is not None:
-                    raw_flags.append(ComplianceFlag(
-                        timestamp_s=ts,
-                        issue_type=flag[0],
-                        text=seg.text,
-                        recommendation=flag[1],
-                        confidence=flag[2],
-                    ))
+            # Detoxify → EXPLICIT / VIOLENCE / DRUGS
+            for flag in _score_detoxify(seg.text, windows[i], detector):
+                raw_flags.append(ComplianceFlag(
+                    timestamp_s=ts,
+                    issue_type=flag[0],
+                    text=seg.text,
+                    recommendation=flag[1],
+                    confidence=flag[2],
+                    severity=flag[3],
+                ))
 
             # Curated brand keywords → BRAND (potential)
             raw_flags.extend(_check_brand_keywords(seg.text, ts, self._brand_patterns))
 
-            # spaCy NER → BRAND (ORG, confirmed) + LOCATION (GPE, confirmed)
+            # spaCy NER → BRAND (ORG, potential) — downgraded to potential
+            # because NER in song lyrics produces too many false positives
+            # (e.g. terms of endearment and common nouns mis-classified as ORG).
             if nlp is not None:
                 try:
                     doc = nlp(seg.text)
@@ -470,7 +464,7 @@ class Compliance:
                                 issue_type=issue_type,
                                 text=ent.text,
                                 recommendation=_NER_RECOMMENDATIONS[issue_type],
-                                confidence="confirmed",
+                                confidence="potential",
                             ))
                 except Exception:  # noqa: BLE001 — NER is supplementary
                     pass
@@ -481,30 +475,75 @@ class Compliance:
     # Private: lazy model loaders
     # ------------------------------------------------------------------
 
-    def _load_zs_model(self):
+    def _load_detoxify(self):
         """
-        Load and cache the zero-shot NLI pipeline.
+        Load and cache the Detoxify 'original' toxicity classifier.
 
         Raises:
-            ModelInferenceError: if the transformers pipeline cannot load.
+            ModelInferenceError: if Detoxify cannot be imported or loaded.
         """
-        if self._zs_pipeline is not None:
-            return self._zs_pipeline
+        if self._detoxify_model is not None:
+            return self._detoxify_model
         try:
-            from transformers import pipeline as hf_pipeline
-            self._zs_pipeline = hf_pipeline(
-                "zero-shot-classification",
-                model=self._params.nli_model,
-            )
-            return self._zs_pipeline
+            from detoxify import Detoxify
+            self._detoxify_model = Detoxify("original")
+            return self._detoxify_model
         except Exception as exc:
             raise ModelInferenceError(
-                "Zero-shot NLI model failed to load.",
-                context={
-                    "model": self._params.nli_model,
-                    "original_error": str(exc),
-                },
+                "Detoxify model failed to load.",
+                context={"original_error": str(exc)},
             ) from exc
+
+    def _load_profanity(self):
+        """
+        Load and cache the better-profanity word-list filter.
+
+        Word sources (additive):
+          1. better-profanity built-in list (handles leetspeak variants)
+          2. LDNOOBW English list fetched from GitHub — the canonical open-source
+             profanity list originally created by Shutterstock.
+
+        Fetch failure is silently swallowed — the built-in list still works
+        if GitHub is unreachable.
+
+        Returns None on failure — profanity detection is supplementary to Detoxify.
+        """
+        if self._profanity_filter is not None:
+            return self._profanity_filter
+        try:
+            from better_profanity import profanity as bp
+            bp.load_censor_words()
+
+            # Extend with LDNOOBW English word list
+            try:
+                import urllib.request
+                url = (
+                    "https://raw.githubusercontent.com/"
+                    "LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words"
+                    "/master/en"
+                )
+                req = urllib.request.Request(
+                    url,
+                    headers={"User-Agent": "sync-safe-forensic-portal/1.0"},
+                )
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    ldnoobw_words = [
+                        line.strip()
+                        for line in resp.read().decode("utf-8").splitlines()
+                        if line.strip()
+                    ]
+                bp.add_censor_words(ldnoobw_words)
+            except Exception:  # noqa: BLE001 — LDNOOBW fetch is best-effort
+                pass
+
+            # Project-specific supplement (data/profanity_supplement.py)
+            if PROFANITY_SUPPLEMENT:
+                bp.add_censor_words(list(PROFANITY_SUPPLEMENT))
+
+            self._profanity_filter = bp
+            return self._profanity_filter
+        except Exception:  # noqa: BLE001
+            return None
 
     def _load_spacy(self):
         """
@@ -544,52 +583,108 @@ def _build_windows(
     }
 
 
-def _score_segment(
+def _score_detoxify(
     seg_text: str,
     window_text: str,
-    check: ZeroShotCheck,
-    classifier,
-) -> Optional[tuple[IssueType, str, str]]:
+    detector,
+) -> list[tuple[IssueType, str, str, str]]:
     """
-    Score a single segment against one ZeroShotCheck.
+    Score a segment with Detoxify and return any flags.
+
+    Uses the segment score first; falls back to the sliding window to confirm
+    borderline scores before promoting them to "confirmed".
 
     Returns:
-        (issue_type, recommendation, confidence) if flagged, else None.
+        List of (issue_type, recommendation, confidence, severity) tuples.
+        severity is "hard" for absolute deal-breakers, "soft" for
+        placement-dependent issues that are the sync director's call.
+        Returns empty list if clean.
 
-    Pure function aside from the classifier call — no side effects.
+    Pure function aside from the detector call — no side effects.
     """
-    def _run(text: str) -> float:
+    def _predict(text: str) -> dict[str, float]:
         try:
-            if check.negative_label:
-                r = classifier(
-                    text,
-                    [check.hypothesis, check.negative_label],
-                    multi_label=False,
-                )
-            else:
-                r = classifier(text, [check.hypothesis], multi_label=True)
-            return dict(zip(r["labels"], r["scores"])).get(check.hypothesis, 0.0)
+            return {k: float(v) for k, v in detector.predict(text).items()}
         except Exception:  # noqa: BLE001
-            return 0.0
+            return {}
 
-    solo = _run(seg_text)
+    solo = _predict(seg_text)
+    if not solo:
+        return []
 
-    if solo >= check.threshold_confirmed:
-        return (check.issue_type, check.recommendation, "confirmed")
+    flags: list[tuple[IssueType, str, str, str]] = []
 
-    borderline_floor = check.threshold_confirmed - 0.10
-    if solo >= borderline_floor:
-        # Confirm against the sliding window
-        win_score = _run(window_text)
-        if win_score >= check.threshold_confirmed - 0.05:
-            return (check.issue_type, check.recommendation, "confirmed")
-        if win_score >= check.threshold_potential:
-            return (check.issue_type, check.recommendation_potential, "potential")
+    # --- EXPLICIT ---
+    explicit_score = solo.get("obscene", 0.0)
+    if explicit_score >= _EXPLICIT_CONFIRMED:
+        sev = "hard" if explicit_score >= _HARD_OBSCENE_THRESHOLD else "soft"
+        rec = (
+            "Clean edit required — hard explicit content."
+            if sev == "hard"
+            else "Mild language — acceptable for some placements. Supervisor discretion."
+        )
+        flags.append(("EXPLICIT", rec, "confirmed", sev))
+    elif explicit_score >= _EXPLICIT_POTENTIAL:
+        win = _predict(window_text)
+        win_score = win.get("obscene", 0.0)
+        if win_score >= _EXPLICIT_CONFIRMED:
+            sev = "hard" if win_score >= _HARD_OBSCENE_THRESHOLD else "soft"
+            rec = (
+                "Clean edit required — hard explicit content."
+                if sev == "hard"
+                else "Mild language — acceptable for some placements. Supervisor discretion."
+            )
+            flags.append(("EXPLICIT", rec, "confirmed", sev))
+        else:
+            flags.append((
+                "EXPLICIT",
+                "Possible explicit content — supervisor should review before submission.",
+                "potential",
+                "soft",
+            ))
 
-    if solo >= check.threshold_potential:
-        return (check.issue_type, check.recommendation_potential, "potential")
+    # --- VIOLENCE ---
+    threat_score = solo.get("threat", 0.0)
+    if threat_score >= _VIOLENCE_CONFIRMED:
+        sev = "hard" if threat_score >= _HARD_THREAT_THRESHOLD else "soft"
+        rec = (
+            "Threatening language — disqualifies family and broadcast placements."
+            if sev == "hard"
+            else "Flag for brand-safety review; may disqualify family placements."
+        )
+        flags.append(("VIOLENCE", rec, "confirmed", sev))
+    elif threat_score >= _VIOLENCE_POTENTIAL:
+        win = _predict(window_text)
+        win_score = win.get("threat", 0.0)
+        if win_score >= _VIOLENCE_CONFIRMED:
+            sev = "hard" if win_score >= _HARD_THREAT_THRESHOLD else "soft"
+            rec = (
+                "Threatening language — disqualifies family and broadcast placements."
+                if sev == "hard"
+                else "Flag for brand-safety review; may disqualify family placements."
+            )
+            flags.append(("VIOLENCE", rec, "confirmed", sev))
+        else:
+            flags.append((
+                "VIOLENCE",
+                "Possible violent language — review in context before family placement.",
+                "potential",
+                "soft",
+            ))
 
-    return None
+    # --- DRUGS (toxicity + word-list gate) — always hard ---
+    toxic_score = solo.get("toxicity", 0.0)
+    text_lower  = seg_text.lower()
+    has_drug_word = any(w in text_lower.split() for w in DRUG_KEYWORDS)
+    if toxic_score >= _DRUGS_TOXIC_MIN and has_drug_word:
+        flags.append((
+            "DRUGS",
+            "Drug reference — disqualifies broadcast and most brand placements.",
+            "confirmed",
+            "hard",
+        ))
+
+    return flags
 
 
 def _check_brand_keywords(
@@ -624,12 +719,14 @@ def _deduplicate_flags(flags: list[ComplianceFlag]) -> list[ComplianceFlag]:
     """
     Remove duplicate flags — keep the first occurrence of each (text, issue_type) pair.
 
+    Deduplication is keyed on normalized text + issue type, NOT timestamp, so
+    repeated chorus lines collapse to a single flag at the earliest timestamp.
     Confirmed flags take priority over potential ones for the same key.
     """
-    # Sort: confirmed before potential so confirmed wins dedup
-    ordered  = sorted(flags, key=lambda f: (0 if f.confidence == "confirmed" else 1))
-    seen:    set[tuple[str, str]] = set()
-    unique:  list[ComplianceFlag] = []
+    # Sort: confirmed before potential, then by timestamp (earliest first)
+    ordered = sorted(flags, key=lambda f: (0 if f.confidence == "confirmed" else 1, f.timestamp_s))
+    seen:   set[tuple[str, str]] = set()
+    unique: list[ComplianceFlag] = []
     for f in ordered:
         key = (f.text.strip().lower(), f.issue_type)
         if key not in seen:
@@ -638,44 +735,44 @@ def _deduplicate_flags(flags: list[ComplianceFlag]) -> list[ComplianceFlag]:
     return unique
 
 
-def _compute_grade(
-    flags: list[ComplianceFlag],
-    sting: Optional[StingResult],
-    evolution: Optional[EnergyEvolutionResult],
-    intro: Optional[IntroResult],
-) -> str:
+def _compute_grade(flags: list[ComplianceFlag]) -> str:
     """
-    Compute an A–F sync-readiness grade.
+    Compute an A–F lyric-content grade.
 
-    Grade is based on confirmed flags only — potential flags never lower the
-    grade (they require human review). Structural failures (fade, stagnant
-    energy, long intro) each add one confirmed strike.
+    Only hard-severity EXPLICIT, VIOLENCE, and DRUGS flags count toward the grade.
+    BRAND flags and structural issues (fade, energy, intro) do not affect this
+    grade — structural fitness is handled by the Sync Snapshot verdict.
+    Soft confirmed flags (mild language, brand mentions, borderline metaphors) are
+    shown in the audit table but do not lower the grade below B — they are the
+    sync director's placement call, not absolute blockers.
 
     Grading scale:
-        A — 0 confirmed issues
-        B — 1 confirmed issue
-        C — 2–3 confirmed issues
-        D — 4–5 confirmed issues
-        F — 6+ confirmed issues OR fade ending
+        A — 0 hard confirmed issues, 0 soft/potential flags
+        B — 0 hard confirmed issues, but soft confirmed or potential flags present
+        C — 1 hard confirmed issue
+        D — 2–3 hard confirmed issues
+        F — 4+ hard confirmed issues (or any DRUGS hard confirmed)
     """
-    confirmed = sum(1 for f in flags if f.confidence == "confirmed")
-
-    # Structural strikes
-    if sting and sting.flag:
-        confirmed += 1
-    if evolution and evolution.flag:
-        confirmed += 1
-    if intro and intro.flag:
-        confirmed += 1
-
-    if sting and sting.ending_type == "fade":
+    hard_confirmed = sum(
+        1 for f in flags
+        if f.confidence == "confirmed"
+        and f.severity == "hard"
+        and f.issue_type in _GRADE_ISSUE_TYPES
+    )
+    has_drugs_hard = any(
+        f.issue_type == "DRUGS" and f.confidence == "confirmed" and f.severity == "hard"
+        for f in flags
+    )
+    if has_drugs_hard or hard_confirmed >= 4:
         return "F"
-    if confirmed == 0:
-        return "A"
-    if confirmed == 1:
-        return "B"
-    if confirmed <= 3:
-        return "C"
-    if confirmed <= 5:
+    if hard_confirmed == 3:
         return "D"
-    return "F"
+    if hard_confirmed == 2:
+        return "D"
+    if hard_confirmed == 1:
+        return "C"
+    # 0 hard confirmed — grade on whether any soft/potential flags exist
+    has_advisory = any(
+        f.confidence in ("confirmed", "potential") for f in flags
+    )
+    return "B" if has_advisory else "A"

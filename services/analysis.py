@@ -142,29 +142,51 @@ class Analysis:
                 fh.write(raw)
 
             device = self._resolve_device()
+            _patch_allin1_metrical()
             result = allin1.analyze(
                 tmp_path,
+                model=self._params.allin1_model,
                 device=device,
                 demix_dir=os.path.join(tmp_dir, "demix"),
                 spec_dir=os.path.join(tmp_dir, "spec"),
+                # multiprocess=True (allin1 default) spawns worker processes via
+                # Python's 'spawn' start method on macOS. Each worker re-executes
+                # app.py as __main__ to initialise itself, which crashes because
+                # there is no Streamlit session state in the subprocess.
+                multiprocess=False,
             )
 
-            bpm = (
-                float(result.bpm)
-                if hasattr(result, "bpm") and result.bpm is not None
-                else "N/A"
-            )
-            sections = _parse_sections(result)
-            beats = (
-                [float(b) for b in result.beats]
-                if hasattr(result, "beats") and result.beats
-                else []
-            )
+            bpm, sections, beats = _extract_allin1_results(result, raw)
             return bpm, sections, beats
 
         except ModelInferenceError:
             raise
         except Exception as exc:
+            # MPS can leave dirty state between runs on Apple Silicon.
+            # If the chosen device was MPS, clear the cache and retry once on CPU
+            # before giving up — this fixes the intermittent allin1 failure pattern.
+            if device == "mps":
+                try:
+                    import torch
+                    torch.mps.empty_cache()
+                except Exception:
+                    pass
+                try:
+                    result = allin1.analyze(
+                        tmp_path,
+                        model=self._params.allin1_model,
+                        device="cpu",
+                        demix_dir=os.path.join(tmp_dir, "demix"),
+                        spec_dir=os.path.join(tmp_dir, "spec"),
+                        multiprocess=False,
+                    )
+                    bpm, sections, beats = _extract_allin1_results(result, raw)
+                    return bpm, sections, beats
+                except Exception as cpu_exc:
+                    raise ModelInferenceError(
+                        "allin1 analysis failed.",
+                        context={"original_error": str(exc), "cpu_retry_error": str(cpu_exc)},
+                    ) from cpu_exc
             raise ModelInferenceError(
                 "allin1 analysis failed.",
                 context={"original_error": str(exc)},
@@ -288,20 +310,125 @@ class Analysis:
 # Module-level pure function — independently testable
 # ---------------------------------------------------------------------------
 
+def _patch_allin1_metrical() -> None:
+    """
+    Monkey-patch allin1.helpers.postprocess_metrical_structure so that a
+    madmom DBN failure (e.g. "inhomogeneous shape" on some tracks) returns
+    empty beats instead of crashing — letting allin1 still return segments.
+
+    Safe to call multiple times; subsequent calls are no-ops.
+    """
+    try:
+        import allin1.helpers as _h
+
+        if getattr(_h, "_metrical_patched", False):
+            return
+
+        _original = _h.postprocess_metrical_structure
+
+        def _safe_postprocess(logits: object, cfg: object) -> dict:
+            try:
+                return _original(logits, cfg)
+            except Exception:
+                return {"beats": [], "downbeats": [], "beat_positions": []}
+
+        _h.postprocess_metrical_structure = _safe_postprocess
+        _h._metrical_patched = True
+    except Exception:
+        pass  # If patching fails, let allin1 run unpatched
+
+
+def _extract_allin1_results(
+    result: object, raw: bytes
+) -> tuple[float | str, list[Section], list[float]]:
+    """
+    Extract BPM, sections, and beats from an allin1 AnalysisResult.
+
+    When allin1 returns empty beats (madmom DBN produced nothing), falls back
+    to librosa beat_track so BPM and beats are always populated.
+
+    Args:
+        result: allin1.typings.AnalysisResult
+        raw:    original audio bytes (used for librosa fallback)
+
+    Returns:
+        (bpm, sections, beats)
+    """
+    sections = _parse_sections(result)
+    beats = (
+        [float(b) for b in result.beats]
+        if hasattr(result, "beats") and result.beats
+        else []
+    )
+    bpm: float | str = (
+        float(result.bpm)
+        if hasattr(result, "bpm") and result.bpm is not None
+        else "N/A"
+    )
+
+    # Fallback: if allin1's madmom beat tracker returned nothing, use librosa.
+    if not beats:
+        try:
+            import io as _io
+            import librosa
+
+            audio_np, sr = librosa.load(_io.BytesIO(raw), sr=None, mono=True)
+            tempo, beat_frames = librosa.beat.beat_track(y=audio_np, sr=sr)
+            # librosa ≥ 0.10 returns tempo as a 1-element array
+            bpm = float(tempo[0]) if hasattr(tempo, "__len__") else float(tempo)
+            beats = librosa.frames_to_time(beat_frames, sr=sr).tolist()
+        except Exception:
+            pass  # librosa fallback failed; leave beats=[] and bpm="N/A"
+
+    return bpm, sections, beats
+
+
 def _parse_sections(result: object) -> list[Section]:
     """
     Convert an allin1 AnalysisResult's segments into typed Section objects.
+
+    Consecutive segments sharing the same label are merged into a single
+    Section so a chorus that allin1 splits into four 8-second fragments
+    appears as one block in the UI and downstream checks.
 
     Pure function: takes the allin1 result object, returns a list of Section.
     Kept at module level so it can be unit-tested without running allin1.
     """
     if not hasattr(result, "segments"):
         return []
-    sections: list[Section] = []
-    for seg in result.segments:
-        sections.append(Section(
+    raw: list[Section] = [
+        Section(
             label=str(getattr(seg, "label", "unknown")),
             start=float(getattr(seg, "start", 0.0)),
             end=float(getattr(seg, "end", 0.0)),
-        ))
-    return sections
+        )
+        for seg in result.segments
+    ]
+    return _merge_consecutive_sections(raw)
+
+
+def _merge_consecutive_sections(sections: list[Section]) -> list[Section]:
+    """
+    Collapse adjacent Section objects with the same label into one.
+
+    Example:
+        [chorus 0:30-0:38, chorus 0:38-0:46, verse 0:46-1:02]
+        → [chorus 0:30-0:46, verse 0:46-1:02]
+
+    Pure function — no side effects.
+    """
+    if not sections:
+        return []
+    merged: list[Section] = [sections[0]]
+    for sec in sections[1:]:
+        if sec.label.lower() == merged[-1].label.lower():
+            # Replace the tail entry with a new Section spanning to sec.end
+            # (Section is frozen, so we create a new instance rather than mutating)
+            merged[-1] = Section(
+                label=merged[-1].label,
+                start=merged[-1].start,
+                end=sec.end,
+            )
+        else:
+            merged.append(sec)
+    return merged
