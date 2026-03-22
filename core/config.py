@@ -163,6 +163,24 @@ class SystemConstants:
     # Margin: 0.087 on human side, 0.074 on AI side.
     HARMONIC_RATIO_AI_MIN: float = 0.59
 
+    # HNR threshold for blocking the Human (Sample/Loop) override when centroid
+    # is also flagged. Sampled tracks from clean libraries score 0.60–0.62; true
+    # AI covers score 0.66+. Set above the sampled-track cluster (0.62) and below
+    # the AI cluster (0.66) to allow high-autocorr / high-IBI sampled tracks
+    # through the override while still blocking AI covers.
+    # Calibrated: 01a4x17A3Ks (Heavily Sampled)=0.615 → passes; Careless Whisper
+    # AI Cover=0.619 → passes (blocked by IBI gate); ea5C9IVarZM (100% AI)=0.68
+    # → blocked by this threshold.
+    HARMONIC_RATIO_SAMPLE_OVERRIDE_BLOCK: float = 0.65
+
+    # IBI variance required to override "Human (Sample/Loop)" when centroid IS
+    # flagged (i.e. AI vocal signals are present). The idea: if centroid is in the
+    # AI range but ibi_variance is very high, the human timing jitter is strong
+    # enough to override the weaker centroid signal. Calibrated so that the
+    # Careless Whisper AI cover (ibi=162) does NOT trigger but 01a4x17A3Ks
+    # (ibi=461, genuinely heavy-sampled) does.
+    IBI_SAMPLE_LOOP_HUMAN_MIN_WITH_AI_SIGNALS: float = 300.0
+
     # ---- Forensics: Probability weights for verdict scoring ------------------
     # Each weight is the contribution to ai_probability [0.0, 1.0] when the
     # corresponding signal fires. Weights are additive; score is clamped to 1.0.
