@@ -338,8 +338,12 @@ _EXPECTED_VERDICTS: dict[str, str] = {
         "Human (Sample/Loop)",
     "George_Michael_-_Careless_Whisper__1960_s_Motown_Soul_AI_Cover___BEST_VERSION__forensics":
         "Likely AI",
+    # Intentionally updated 2026-03-21: centroid=0.677 is in vocoder territory
+    # (>= CENTROID_INSTABILITY_VOCODER_MIN 0.50) — extreme DSP processing, not AI.
+    # Centroid no longer contributes to ai_probability above VOCODER_MIN.
+    # "Human" is correct: Hide and Seek is a famously processed but fully human track.
     "Imogen_Heap_-_Hide_And_Seek_forensics":
-        "Possible Hybrid AI Cover",
+        "Human",
     "Sabrina_Carpenter_-_Espresso_forensics":
         "Human (Sample/Loop)",
     "The_Velvet_Sundown_-_Dust_on_the_Wind__Lyrics__forensics":

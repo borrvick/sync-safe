@@ -764,9 +764,13 @@ def _compute_ai_probability(
     """
     score = 0.0
 
+    # Centroid is flagged only when in the AI range [AI_MIN, VOCODER_MIN).
+    # Above VOCODER_MIN the flag text already says "NOT typical of AI voice
+    # generators" — extreme formant replacement is a hardware/DSP processing
+    # artifact, not AI generation, so it must not add to AI probability.
     centroid_flagged = (
         centroid_instability_score >= CONSTANTS.CENTROID_INSTABILITY_AI_MIN
-        and centroid_instability_score >= 0.0
+        and centroid_instability_score < CONSTANTS.CENTROID_INSTABILITY_VOCODER_MIN
     )
 
     if centroid_flagged:
@@ -937,22 +941,40 @@ def _compute_verdict(
     if _synthid_confidence(synthid_bins) == "high":
         return "AI"
 
+    # Centroid flagged only in the AI range — vocoder territory (>= VOCODER_MIN)
+    # is extreme DSP processing, not AI generation. Consistent with ai_probability.
     centroid_flagged = (
         centroid_instability_score >= CONSTANTS.CENTROID_INSTABILITY_AI_MIN
-        and centroid_instability_score >= 0.0
+        and centroid_instability_score < CONSTANTS.CENTROID_INSTABILITY_VOCODER_MIN
     )
 
     # ── Human (Sample/Loop) override ──────────────────────────────────────────
-    # Strong autocorr + human-feel timing + no centroid/HNR AI signals
-    # → Splice/sample-loop-heavy production by a human artist.
+    # High autocorr + human-feel timing + no hard AI evidence → organic sampled
+    # production. Two paths to pass:
+    #
+    # Path A — no AI vocal signals (centroid clear, HNR clear): simple gate.
+    # Path B — centroid in AI range BUT very high IBI (> 300ms² variance) AND
+    #   HNR not strongly elevated: the extreme timing jitter is more consistent
+    #   with a human artist rapping/performing over loops than AI generation.
+    #   Calibrated so Careless Whisper AI Cover (ibi=162) is blocked; heavily
+    #   sampled hip-hop (ibi=461) passes.
     hnr_flagged = harmonic_ratio_score >= CONSTANTS.HARMONIC_RATIO_AI_MIN
+    in_vocoder = centroid_instability_score >= CONSTANTS.CENTROID_INSTABILITY_VOCODER_MIN
+    hnr_blocks_override = harmonic_ratio_score >= CONSTANTS.HARMONIC_RATIO_SAMPLE_OVERRIDE_BLOCK
+
+    no_ai_signals = not centroid_flagged and not hnr_flagged
+    strong_human_timing = (
+        ibi_variance > CONSTANTS.IBI_SAMPLE_LOOP_HUMAN_MIN_WITH_AI_SIGNALS
+        and not hnr_blocks_override
+    )
+
     if (
         loop_autocorr_score >= CONSTANTS.LOOP_AUTOCORR_SAMPLE_VERDICT_THRESHOLD
         and ibi_variance > CONSTANTS.IBI_ERRATIC_MIN
         and synthid_bins == 0
         and spectral_slop <= CONSTANTS.SPECTRAL_SLOP_RATIO
-        and not centroid_flagged
-        and not hnr_flagged
+        and not in_vocoder
+        and (no_ai_signals or strong_human_timing)
     ):
         return "Human (Sample/Loop)"
 
