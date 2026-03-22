@@ -383,6 +383,18 @@ def render_loading(source: Any) -> None:
         return
     _advance("ingestion", t0)
 
+    # Debug hook: save raw audio for iterative debugging without re-ingesting.
+    # Gate: DEBUG_ANALYSIS=1. All files land in debug/ (gitignored).
+    if os.getenv("DEBUG_ANALYSIS"):
+        import re as _re
+        from pathlib import Path as _Path
+        _debug_dir = _Path(__file__).parent.parent.parent / "debug"
+        _debug_dir.mkdir(exist_ok=True)
+        _safe = _re.sub(r"[^\w\-]", "_", audio.label)[:60]
+        _dest = _debug_dir / f"{_safe}.wav"
+        _dest.write_bytes(audio.raw)
+        print(f"[DEBUG_ANALYSIS] Audio saved → {_dest}")
+
     # ── Step 2: Structure analysis (title/artist needed for lyrics lookup) ──
     _tick("Analysing Structure")
     t0 = time.time()
@@ -511,6 +523,36 @@ def render_loading(source: Any) -> None:
         similar_tracks=similar,
         legal=legal,
     )
+
+    # Debug hook: save forensics scores + full result JSON for offline iteration.
+    # Runs only when DEBUG_ANALYSIS=1 — never in production.
+    if os.getenv("DEBUG_ANALYSIS"):
+        import json as _json
+        import re as _re
+        from pathlib import Path as _Path
+        _debug_dir = _Path(__file__).parent.parent.parent / "debug"
+        _debug_dir.mkdir(exist_ok=True)
+        _safe = _re.sub(r"[^\w\-]", "_", audio.label)[:60]
+        if forensics is not None:
+            _fdest = _debug_dir / f"{_safe}_forensics.json"
+            _fdest.write_text(_json.dumps(forensics.model_dump(), indent=2))
+            print(f"[DEBUG_ANALYSIS] Forensics saved → {_fdest}")
+        _rdest = _debug_dir / f"{_safe}_result.json"
+        _rdest.write_text(result.to_json())
+        print(f"[DEBUG_ANALYSIS] Result saved   → {_rdest}")
+        # Save the label the user selected on the portal before scanning
+        _debug_label = st.session_state.pop("debug_label", None)
+        if _debug_label and _debug_label != "— unrated —":
+            _labels_file = _debug_dir / "labels.json"
+            _existing: dict = {}
+            if _labels_file.exists():
+                try:
+                    _existing = _json.loads(_labels_file.read_text())
+                except Exception:
+                    pass
+            _existing[audio.label] = _debug_label
+            _labels_file.write_text(_json.dumps(_existing, indent=2, ensure_ascii=False))
+            print(f"[DEBUG_ANALYSIS] Label saved    → {audio.label}: {_debug_label}")
 
     st.session_state.audio    = audio
     st.session_state.analysis = result
