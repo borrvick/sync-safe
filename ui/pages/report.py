@@ -58,6 +58,9 @@ def render_report(
     with st.expander("Authenticity Audit", expanded=True):
         _render_forensics_card(result.forensics)
 
+    with st.expander("Production Analysis", expanded=True):
+        _render_production_analysis_card(result.forensics)
+
     with st.expander("Sync Readiness Checks", expanded=True):
         _render_sync_readiness(result.compliance)
 
@@ -102,14 +105,11 @@ def _compute_sync_verdict(
 
     # ── 1. Authenticity (AI detection) ──────────────────────────────────────
     fv = result.forensics.verdict if result.forensics else None
-    if fv in ("Human", "Human (Sample/Loop)"):
+    if fv in ("Likely Not AI", "Not AI"):
         auth_status = _STATUS_PASS
         auth_detail = fv
     elif fv in ("Likely AI", "AI"):
         auth_status = _STATUS_FAIL
-        auth_detail = fv
-    elif fv in ("Uncertain", "Possible Hybrid AI Cover"):
-        auth_status = _STATUS_CAUTION
         auth_detail = fv
     else:
         auth_status = _STATUS_CAUTION
@@ -400,12 +400,31 @@ def _render_forensics_card(fr: Optional[ForensicsResult]) -> None:
 
     verdict   = fr.verdict
     v_cls     = {
-        "Human": "v-h",
-        "Human (Sample/Loop)": "v-h",
-        "Possible Hybrid AI Cover": "v-u",
-        "Likely AI": "v-a",
-        "AI": "v-a",
+        "AI":             "v-a",
+        "Likely AI":      "v-a",
+        "Likely Not AI":  "v-h",
+        "Not AI":         "v-h",
     }.get(verdict, "v-u")
+
+    _VERDICT_MESSAGES: dict[str, str] = {
+        "AI": (
+            "Verifiably 100% AI-generated — a certified AI-generation assertion was found "
+            "embedded in this file's C2PA Content Credentials manifest."
+        ),
+        "Likely AI": (
+            "Likely AI-generated — no embedded certification was found, but our analysis "
+            "detected patterns strongly consistent with AI generation. We cannot confirm "
+            "this with absolute certainty."
+        ),
+        "Likely Not AI": (
+            "Likely not AI-generated — our analysis did not detect significant AI indicators. "
+            "See signal notes below for additional context."
+        ),
+        "Not AI": (
+            "Not AI-generated — confirmed by verified provenance data."
+        ),
+    }
+    verdict_message = _VERDICT_MESSAGES.get(verdict, "")
 
     # C2PA
     c2pa_fmt  = (
@@ -417,27 +436,6 @@ def _render_forensics_card(fr: Optional[ForensicsResult]) -> None:
     ibi       = fr.ibi_variance
     ibi_fmt   = f"{ibi:.3f}" if isinstance(ibi, float) and ibi >= 0 else "—"
     groove_flag = _groove_label(ibi)
-
-    # Loop (cross-correlation)
-    loop      = fr.loop_score
-    loop_num  = f"{loop:.3f}" if isinstance(loop, float) else "—"
-    loop_label = (
-        "Likely Stock Loop" if loop > CONSTANTS.LOOP_SCORE_CEILING
-        else "Possible Repetition" if loop > CONSTANTS.LOOP_SCORE_POSSIBLE
-        else "Organic"
-    )
-    loop_fmt  = f"{loop_num} ({loop_label})"
-
-    # Loop autocorrelation
-    autocorr       = fr.loop_autocorr_score
-    autocorr_num   = f"{autocorr:.3f}" if isinstance(autocorr, float) else "—"
-    autocorr_label = (
-        "Strong Repetition Detected (Possible Sample/Loop Usage)" if autocorr >= CONSTANTS.LOOP_AUTOCORR_SAMPLE_VERDICT_THRESHOLD
-        else "Repetition Detected (Possible Sample/Loop Usage)" if autocorr >= CONSTANTS.LOOP_AUTOCORR_VERDICT_THRESHOLD
-        else "Moderate" if autocorr >= CONSTANTS.LOOP_AUTOCORR_DISPLAY_MODERATE_MIN
-        else "Low"
-    )
-    autocorr_fmt = f"{autocorr_num} ({autocorr_label})"
 
     # Spectral slop
     slop_val  = fr.spectral_slop
@@ -464,7 +462,7 @@ def _render_forensics_card(fr: Optional[ForensicsResult]) -> None:
     st.markdown(f"""
     <div class="sig">
       <div class="sig-head">Authenticity Audit</div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
         <div>
           <div style="font-family:'Chakra Petch',monospace;font-size:.64rem;font-weight:500;
                       letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:6px;">
@@ -474,10 +472,16 @@ def _render_forensics_card(fr: Optional[ForensicsResult]) -> None:
         </div>
         <div style="text-align:right;">
           <div style="font-family:'JetBrains Mono',monospace;font-size:.62rem;color:var(--dim);
-                      margin-bottom:3px;">8 signals analysed</div>
+                      margin-bottom:3px;">6 signals analysed</div>
           <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;color:var(--dim);
-                      letter-spacing:.1em;text-transform:uppercase;">C2PA · IBI · Groove · Loop · Autocorr · Centroid · Spectral · SynthID</div>
+                      letter-spacing:.1em;text-transform:uppercase;">C2PA · IBI · Groove · Centroid · Spectral · SynthID</div>
         </div>
+      </div>
+      <div style="font-family:'Figtree',sans-serif;font-size:.82rem;color:var(--text);
+                  line-height:1.5;margin-bottom:20px;padding:10px 14px;
+                  background:var(--surface);border-left:3px solid var(--accent);
+                  border-radius:0 6px 6px 0;">
+        {html_mod.escape(verdict_message)}
       </div>
       <div class="sig-row">
         <span class="sk">C2PA Manifest
@@ -502,22 +506,6 @@ def _render_forensics_card(fr: Optional[ForensicsResult]) -> None:
           </span>
         </span>
         <span class="sv">{groove_flag}</span>
-      </div>
-      <div class="sig-row">
-        <span class="sk">Loop Score
-          <span class="tip-wrap"><span class="tip-icon">?</span>
-            <span class="tip-box">Cross-correlation of 4-bar spectral fingerprints across the track. Score &gt;0.98 means segments are near-identical — a hallmark of stock loops or AI generation.</span>
-          </span>
-        </span>
-        <span class="sv">{loop_fmt}</span>
-      </div>
-      <div class="sig-row">
-        <span class="sk">Loop Autocorr
-          <span class="tip-wrap"><span class="tip-icon">?</span>
-            <span class="tip-box">Onset-envelope autocorrelation — detects regular loop repetition independent of BPM. High score = Splice-style loop structure. Loop-based production is common in modern pop (2018–present) and does not alone indicate AI generation. However, strong repetition combined with low timbre variance (see Timbre Consistency) can indicate an AI generator tuned for human feel — a pattern common in 2025+ AI covers. No watermark detected does not rule out AI.</span>
-          </span>
-        </span>
-        <span class="sv">{autocorr_fmt}</span>
       </div>
       <div class="sig-row">
         <span class="sk">Centroid Instability
@@ -562,10 +550,83 @@ def _render_forensics_card(fr: Optional[ForensicsResult]) -> None:
             unsafe_allow_html=True,
         )
 
+# ---------------------------------------------------------------------------
+# Production Analysis — sample & loop detection (separate from AI detection)
+# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Sync Readiness Checks (structural placement rules)
-# ---------------------------------------------------------------------------
+def _render_production_analysis_card(fr: Optional[ForensicsResult]) -> None:
+    if fr is None:
+        st.markdown(
+            "<div style='color:var(--dim);font-size:.84rem;padding:8px 0;'>"
+            "Production analysis unavailable.</div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    loop      = fr.loop_score
+    loop_num  = f"{loop:.3f}" if isinstance(loop, float) else "—"
+    loop_label = (
+        "Likely Stock Loop" if loop > CONSTANTS.LOOP_SCORE_CEILING
+        else "Possible Repetition" if loop > CONSTANTS.LOOP_SCORE_POSSIBLE
+        else "Organic"
+    )
+    loop_fmt = f"{loop_num} ({loop_label})"
+
+    autocorr       = fr.loop_autocorr_score
+    autocorr_num   = f"{autocorr:.3f}" if isinstance(autocorr, float) else "—"
+    autocorr_label = (
+        "Strong Repetition Detected" if autocorr >= CONSTANTS.LOOP_AUTOCORR_SAMPLE_VERDICT_THRESHOLD
+        else "Repetition Detected" if autocorr >= CONSTANTS.LOOP_AUTOCORR_VERDICT_THRESHOLD
+        else "Moderate" if autocorr >= CONSTANTS.LOOP_AUTOCORR_DISPLAY_MODERATE_MIN
+        else "Low"
+    )
+    autocorr_fmt = f"{autocorr_num} ({autocorr_label})"
+
+    st.markdown(f"""
+    <div class="sig">
+      <div class="sig-head">Production Analysis</div>
+      <div style="font-family:'Figtree',sans-serif;font-size:.82rem;color:var(--dim);
+                  line-height:1.5;margin-bottom:18px;">
+        Detects whether this track is built on loops or pre-made samples.
+        This is independent of AI detection — loop-based production is standard
+        practice in modern pop and hip-hop and does not indicate AI generation.
+      </div>
+      <div class="sig-row">
+        <span class="sk">Loop Score
+          <span class="tip-wrap"><span class="tip-icon">?</span>
+            <span class="tip-box">Cross-correlation of 4-bar spectral fingerprints across the track. Score &gt;0.98 means segments are near-identical — a hallmark of stock loops or heavily repeated sections.</span>
+          </span>
+        </span>
+        <span class="sv">{loop_fmt}</span>
+      </div>
+      <div class="sig-row">
+        <span class="sk">Loop Autocorr
+          <span class="tip-wrap"><span class="tip-icon">?</span>
+            <span class="tip-box">Onset-envelope autocorrelation — detects regular loop repetition independent of BPM. High score = Splice-style loop structure. Common in modern pop (2018–present). Does not alone indicate AI generation.</span>
+          </span>
+        </span>
+        <span class="sv">{autocorr_fmt}</span>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if fr.forensic_notes:
+        notes_html = "".join(
+            f"<div style='font-family:\"Figtree\",sans-serif;font-size:.82rem;"
+            f"color:var(--text);padding:8px 0;border-bottom:1px solid var(--border);'>"
+            f"ℹ {html_mod.escape(note)}</div>"
+            for note in fr.forensic_notes
+        )
+        st.markdown(
+            f"<div style='margin-top:14px;'>"
+            f"<div style='font-family:\"Chakra Petch\",monospace;font-size:.56rem;font-weight:600;"
+            f"letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:8px;'>"
+            f"Notes</div>"
+            f"{notes_html}</div>",
+            unsafe_allow_html=True,
+        )
+
+
 
 def _render_sync_readiness(compliance: Optional[ComplianceReport]) -> None:
     sting     = compliance.sting     if compliance else None

@@ -179,6 +179,7 @@ class Ingestion:
                 sample_rate=CONSTANTS.SAMPLE_RATE,
                 label=_label_from_url(url),
                 metadata=track_metadata,
+                source="youtube",
             )
 
         finally:
@@ -218,6 +219,7 @@ class Ingestion:
             raw=raw,
             sample_rate=CONSTANTS.SAMPLE_RATE,
             label=name,
+            source="file",
         )
 
 
