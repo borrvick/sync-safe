@@ -30,6 +30,11 @@ from core.models import (
 from ui.components import ISSUE_META, authorship_color, eq_bars, fmt_ts, issue_pill
 
 
+# AudioSource literal value for YouTube — matches core/models.py AudioSource type.
+# Defined here to avoid repeating the string across multiple render functions.
+_SOURCE_YOUTUBE: str = "youtube"
+
+
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
@@ -56,10 +61,10 @@ def render_report(
             _render_structure_card(result.structure)
 
     with st.expander("Authenticity Audit", expanded=True):
-        _render_forensics_card(result.forensics)
+        _render_forensics_card(result.forensics, source=result.audio.source)
 
-    with st.expander("Production Analysis", expanded=True):
-        _render_production_analysis_card(result.forensics)
+    with st.expander("Structural Repetition", expanded=True):
+        _render_production_analysis_card(result.forensics, source=result.audio.source)
 
     with st.expander("Sync Readiness Checks", expanded=True):
         _render_sync_readiness(result.compliance)
@@ -113,7 +118,11 @@ def _compute_sync_verdict(
         auth_detail = fv
     else:
         auth_status = _STATUS_CAUTION
-        auth_detail = "No authenticity data"
+        auth_detail = (
+            "Upload file for full AI detection"
+            if result.audio.source == _SOURCE_YOUTUBE
+            else "Scan incomplete"
+        )
     categories.append(("Authenticity", auth_status[1], auth_status[2], auth_detail))
 
     # ── 2. Arrangement (structural fitness) ──────────────────────────────────
@@ -389,11 +398,18 @@ def _render_structure_card(sr: Optional[StructureResult]) -> None:
 # Authenticity Audit: forensics
 # ---------------------------------------------------------------------------
 
-def _render_forensics_card(fr: Optional[ForensicsResult]) -> None:
+def _render_forensics_card(fr: Optional[ForensicsResult], source: str = "file") -> None:
     if fr is None:
+        msg = (
+            "AI detection signals require a direct file upload. "
+            "YouTube audio is re-encoded before analysis, which masks several key signals. "
+            "Upload the original file for a full forensic scan."
+            if source == _SOURCE_YOUTUBE
+            else "Forensics analysis unavailable."
+        )
         st.markdown(
-            "<div class='sig'><div class='sig-head'>Authenticity Audit</div>"
-            "<div style='color:var(--dim);'>Forensics analysis unavailable.</div></div>",
+            f"<div class='sig'><div class='sig-head'>Authenticity Audit</div>"
+            f"<div style='color:var(--dim);font-size:.84rem;'>{msg}</div></div>",
             unsafe_allow_html=True,
         )
         return
@@ -554,11 +570,15 @@ def _render_forensics_card(fr: Optional[ForensicsResult]) -> None:
 # Production Analysis — sample & loop detection (separate from AI detection)
 # ---------------------------------------------------------------------------
 
-def _render_production_analysis_card(fr: Optional[ForensicsResult]) -> None:
+def _render_production_analysis_card(fr: Optional[ForensicsResult], source: str = "file") -> None:
     if fr is None:
+        msg = (
+            "Structural repetition analysis requires a direct file upload."
+            if source == _SOURCE_YOUTUBE
+            else "Structural repetition analysis unavailable."
+        )
         st.markdown(
-            "<div style='color:var(--dim);font-size:.84rem;padding:8px 0;'>"
-            "Production analysis unavailable.</div>",
+            f"<div style='color:var(--dim);font-size:.84rem;padding:8px 0;'>{msg}</div>",
             unsafe_allow_html=True,
         )
         return
@@ -800,7 +820,7 @@ def _render_authorship_banner(authorship: Optional["AuthorshipResult"]) -> None:
     a_rob    = authorship.roberta_score
     rob_str  = f"Classifier: {a_rob:.0%} AI probability · " if a_rob is not None else ""
     n_sig    = authorship.signal_count
-    sig_str  = f"{n_sig} AI signal{'s' if n_sig != 1 else ''} detected"
+    sig_str  = f"{n_sig} lyric flag{'s' if n_sig != 1 else ''}"
 
     def _note_html(note: str) -> str:
         arrow      = "✓" if "✓" in note else "▲"
@@ -822,9 +842,9 @@ def _render_authorship_banner(authorship: Optional["AuthorshipResult"]) -> None:
         <div>
           <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
                       color:{av_color};letter-spacing:.1em;text-transform:uppercase;">
-            Lyric Authorship — {sig_str}</div>
+            Lyric Writing — {sig_str}</div>
           <div style="font-family:'Figtree',sans-serif;font-size:.74rem;color:var(--muted);margin-top:2px;">
-            {rob_str}Note: short creative text is harder to classify than prose.</div>
+            {rob_str}Detects AI-written lyrics — independent of audio AI detection.</div>
         </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 18px;">{notes_html}</div>

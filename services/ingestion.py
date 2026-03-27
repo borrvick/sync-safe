@@ -231,15 +231,28 @@ def _find_binary(name: str) -> str:
     """
     Resolve a system binary by name.
 
-    Checks PATH first, then the pip --user bin directory (macOS / Linux).
+    Search order:
+      1. The active venv's bin/ directory (sys.executable parent) — preferred
+         so venv-installed binaries take precedence over stale system installs.
+      2. PATH via shutil.which.
+      3. The pip --user bin directory (macOS / Linux fallback).
 
     Raises:
         ConfigurationError: if the binary cannot be found anywhere.
     """
-    found = shutil.which(name)
-    if found:
-        return found
+    import sys
 
+    # 1. Venv bin — most reliable when running inside a virtualenv
+    venv_bin = Path(sys.executable).parent / name
+    if venv_bin.exists():
+        return str(venv_bin)
+
+    # 2. PATH
+    path_bin = shutil.which(name)
+    if path_bin:
+        return path_bin
+
+    # 3. pip --user bin
     import site
     user_bin = Path(site.getuserbase()) / "bin" / name
     if user_bin.exists():
@@ -250,7 +263,7 @@ def _find_binary(name: str) -> str:
         context={
             "binary": name,
             "suggestion": f"pip install {name}",
-            "searched": [shutil.which(name), str(user_bin)],
+            "searched": [str(venv_bin), path_bin, str(user_bin)],
         },
     )
 
