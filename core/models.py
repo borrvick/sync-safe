@@ -31,7 +31,8 @@ Confidence   = Literal["confirmed", "potential"]
 Severity     = Literal["hard", "soft"]
 EndingType   = Literal["sting", "fade", "cut"]
 AIVerdict    = Literal["Likely Human", "Uncertain", "Likely AI", "Insufficient data"]
-ForensicVerdict = Literal["Human", "Human (Sample/Loop)", "Possible Hybrid AI Cover", "Uncertain", "Likely AI", "AI"]
+ForensicVerdict = Literal["AI", "Likely AI", "Likely Not AI", "Not AI", "Insufficient data"]
+AudioSource  = Literal["youtube", "file"]
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +59,7 @@ class AudioBuffer(BaseModel):
     sample_rate: int = Field(default=22_050)
     label: str = Field(default="")                          # display name shown in the UI
     metadata: dict[str, str] = Field(default_factory=dict)  # title, artist from ingestion
+    source: AudioSource = Field(default="file")             # "youtube" = lossy MP3 transcode; "file" = direct upload
 
     def to_bytesio(self) -> io.BytesIO:
         """Return a fresh BytesIO cursor at position 0."""
@@ -146,9 +148,17 @@ class ForensicsResult(BaseModel):
     onset_strength_cv: float = -1.0           # CV of onset strength envelope; low = uniform AI dynamics
     spectral_flatness_var: float = -1.0       # variance of Wiener entropy over time; low = AI synth uniformity
     subbeat_grid_deviation: float = -1.0      # variance of onset-to-nearest-16th-note offset; low = on-grid
+    pitch_quantization_score: float = -1.0    # mean abs cents deviation from 12-TET; near-zero = AI pitch-perfect
+    ultrasonic_noise_ratio: float = -1.0      # energy ratio in 20–22 kHz band; elevated = diffusion residue (-1 = not computed)
+    infrasonic_energy_ratio: float = -1.0     # energy ratio in 1–20 Hz band; elevated = AI math drift / DC bias (-1 = not computed)
+    phase_coherence_differential: float = -1.0  # LF coherence − HF coherence; positive = AI phase pattern (-1 = mono/not computed)
+    plr_std: float = -1.0                        # std of per-window peak-to-loudness ratio; low = frozen density (AI) (-1 = too short)
+    voiced_noise_floor: float = -1.0             # mean spectral flatness in voiced 4–12 kHz frames; low = AI clean synthesis (-1 = non-vocal/not computed)
+    is_vocal: bool = False                       # True → pyin detected vocal content; routes vocal scoring path
 
     flags: list[str]        = Field(default_factory=list)  # human-readable flag labels
-    verdict: ForensicVerdict = "Human"
+    forensic_notes: list[str] = Field(default_factory=list)  # secondary context shown below verdict
+    verdict: ForensicVerdict = "Likely Not AI"
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()

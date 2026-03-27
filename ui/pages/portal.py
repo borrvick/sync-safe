@@ -15,7 +15,7 @@ import streamlit as st
 from ui.components import eq_bars
 from ui.nav import render_site_nav, render_site_footer
 
-_DEBUG_DIR = Path(__file__).parent.parent.parent / "debug"
+_DEBUG_DIR = Path(__file__).parent.parent.parent / "local" / "debug"
 _LABELS_FILE = _DEBUG_DIR / "labels.json"
 _LABEL_OPTIONS = [
     "— unrated —",
