@@ -508,14 +508,19 @@ class SystemConstants:
     # Only meaningful for tracks flagged as vocal (is_vocal=True).
     # Returns -1.0 when is_vocal=False or too few voiced frames detected.
     #
-    # Threshold and weight are sentinel values pending SONICS calibration.
-    # After calibrating against 500 AI vocal + SONICS real_songs human sample,
-    # set VOICED_NOISE_FLOOR_AI_MAX to the value that maximises F1 and
-    # PROB_WEIGHT_VOICED_NOISE_FLOOR to a weight proportional to separation.
+    # FILE-UPLOAD ONLY — gated on compressed_source=False in forensics.py.
+    # Calibrated 2026-03-25:
+    #   AI (native WAV): stable_audio_open mean=0.008, audioldm2 mean=0.008,
+    #                    MusicGen mean=0.013, max across all=0.042
+    #   AI (SONICS MP3): Suno p90=0.005, Udio p90=0.005, max=0.022
+    #   Human (iTunes MP3): p10=0.333, p05=0.293
+    #   Human (debug WAV/YouTube): 0.54–0.69 — NOT used for threshold (codec noise)
+    # YouTube AAC/Opus → WAV decoding floods the between-harmonic band; signal
+    # gated to file-upload path only via compressed_source check.
     VOICED_NOISE_FLOOR_HZ_LOW:  int   = 4_000   # lower bound of analysis band
     VOICED_NOISE_FLOOR_HZ_HIGH: int   = 12_000  # upper bound of analysis band
-    VOICED_NOISE_FLOOR_AI_MAX:  float = 0.0     # DISABLED — pending SONICS calibration
-    PROB_WEIGHT_VOICED_NOISE_FLOOR: float = 0.0 # DISABLED — pending calibration
+    VOICED_NOISE_FLOOR_AI_MAX:  float = 0.10    # fires when flatness ≤ 0.10; AI max=0.042
+    PROB_WEIGHT_VOICED_NOISE_FLOOR: float = 0.15  # same weight as PLR — strong separation
     # STFT parameters for voiced noise floor computation.
     # hop_length must match librosa.pyin default so voiced-frame indices align
     # with STFT frame indices. n_fft=2048 at sr=22050 → ~93 Hz frequency resolution,

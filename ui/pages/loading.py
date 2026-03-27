@@ -388,7 +388,7 @@ def render_loading(source: Any) -> None:
     if os.getenv("DEBUG_ANALYSIS"):
         import re as _re
         from pathlib import Path as _Path
-        _debug_dir = _Path(__file__).parent.parent.parent / "debug"
+        _debug_dir = _Path(__file__).parent.parent.parent / "local" / "debug"
         _debug_dir.mkdir(exist_ok=True)
         _safe = _re.sub(r"[^\w\-]", "_", audio.label)[:60]
         _dest = _debug_dir / f"{_safe}.wav"
@@ -530,7 +530,7 @@ def render_loading(source: Any) -> None:
         import json as _json
         import re as _re
         from pathlib import Path as _Path
-        _debug_dir = _Path(__file__).parent.parent.parent / "debug"
+        _debug_dir = _Path(__file__).parent.parent.parent / "local" / "debug"
         _debug_dir.mkdir(exist_ok=True)
         _safe = _re.sub(r"[^\w\-]", "_", audio.label)[:60]
         if forensics is not None:

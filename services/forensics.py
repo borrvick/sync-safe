@@ -158,7 +158,7 @@ class Forensics:
         phase_coherence_differential        = self._analyse_phase_coherence(raw)
         plr_std                             = self._analyse_plr(raw)
         is_vocal                            = self._analyse_vocal_presence(raw)
-        voiced_noise_floor                  = self._analyse_voiced_noise_floor(raw, is_vocal)
+        voiced_noise_floor                  = self._analyse_voiced_noise_floor(raw, is_vocal, compressed_source)
 
         bundle = _SignalBundle(
             c2pa_flag=c2pa_flag,
@@ -187,10 +187,11 @@ class Forensics:
             voiced_noise_floor=voiced_noise_floor,
             is_vocal=is_vocal,
         )
-        ai_probability  = _compute_ai_probability(bundle)
-        flags           = _build_flags(bundle)
-        verdict         = _compute_verdict(bundle)
-        forensic_notes  = _build_forensic_notes(bundle, verdict)
+        ml_prob        = _classify(bundle)
+        ai_probability = ml_prob if ml_prob is not None else _compute_ai_probability(bundle)
+        flags          = _build_flags(bundle)
+        verdict        = _compute_verdict(bundle, ml_prob)
+        forensic_notes = _build_forensic_notes(bundle, verdict)
 
         result = ForensicsResult(
             c2pa_flag=c2pa_flag,
@@ -309,7 +310,9 @@ class Forensics:
     # ------------------------------------------------------------------
 
     @spaces.GPU
-    def _analyse_voiced_noise_floor(self, raw: bytes, is_vocal: bool) -> float:
+    def _analyse_voiced_noise_floor(
+        self, raw: bytes, is_vocal: bool, compressed_source: bool
+    ) -> float:
         """
         Measure mean spectral flatness in the 4–12 kHz band across voiced frames.
 
@@ -319,12 +322,14 @@ class Forensics:
         produces spectrally clean partials: the energy between harmonics
         approaches digital silence, yielding near-zero spectral flatness.
 
-        Returns -1.0 when is_vocal is False or too few voiced frames are found.
+        Returns -1.0 when is_vocal is False, compressed_source is True (YouTube
+        AAC/Opus codec adds uniform noise that floods the between-harmonic band,
+        making AI and human indistinguishable), or too few voiced frames are found.
 
         Raises:
             ModelInferenceError: on unrecoverable librosa load failure.
         """
-        if not is_vocal:
+        if not is_vocal or compressed_source:
             return -1.0
 
         try:
@@ -2263,13 +2268,100 @@ def _score_organic_signals(bundle: _SignalBundle) -> float:
         score += CONSTANTS.PROB_WEIGHT_PLR_FLATNESS
 
     if (
-        bundle.is_vocal
+        not bundle.compressed_source
+        and bundle.is_vocal
         and CONSTANTS.VOICED_NOISE_FLOOR_AI_MAX > 0.0
         and 0.0 <= bundle.voiced_noise_floor <= CONSTANTS.VOICED_NOISE_FLOOR_AI_MAX
     ):
         score += CONSTANTS.PROB_WEIGHT_VOICED_NOISE_FLOOR
 
     return score
+
+
+# ---------------------------------------------------------------------------
+# ML classifier — trained logistic regression models (preferred over manual scoring)
+# ---------------------------------------------------------------------------
+
+# Module-level cache for trained classifiers.  Populated once on first call to
+# _classify() and never mutated after that — effectively a read-only singleton.
+# A global is acceptable here because (a) the pkl files are large read-only
+# artefacts that are expensive to reload on every call, and (b) the cache
+# carries no mutable state — concurrent reads are safe without locking.
+_CLASSIFIERS: dict[str, object] | None = None   # None = not yet attempted
+
+
+def _load_classifiers() -> dict[str, object] | None:
+    """
+    Load youtube + upload classifier pkls from models/.
+
+    Returns a dict with keys 'youtube' and 'upload', each a joblib dict:
+      {"pipeline": Pipeline, "threshold": float, "features": list[str]}
+
+    Returns None if either file is absent or joblib is unavailable.
+    """
+    import logging
+    import joblib  # type: ignore[import-untyped]
+
+    _models_dir = Path(__file__).parent.parent / "models"
+    yt_path = _models_dir / "youtube_classifier.pkl"
+    up_path = _models_dir / "upload_classifier.pkl"
+    if not yt_path.exists() or not up_path.exists():
+        return None
+    try:
+        return {
+            "youtube": joblib.load(yt_path),
+            "upload":  joblib.load(up_path),
+        }
+    except (OSError, ValueError, RuntimeError) as exc:
+        logging.getLogger(__name__).warning(
+            "Failed to load classifier pkl files: %s", exc
+        )
+        return None
+
+
+def _classify(bundle: _SignalBundle) -> float | None:
+    """
+    Return P(AI) ∈ [0.0, 1.0] from the trained logistic regression classifier.
+
+    Selects the youtube model for compressed (streaming) sources and the upload
+    model for direct file uploads.  Falls back to None when:
+      - pkl files are absent (first run before training)
+      - any required feature is the -1.0 sentinel (not computed for this track)
+    Caller should fall back to _compute_ai_probability() when None is returned.
+
+    Pure in behaviour — the global _CLASSIFIERS is populated once and never mutated.
+    """
+    global _CLASSIFIERS
+    if _CLASSIFIERS is None:
+        _CLASSIFIERS = _load_classifiers()
+    if _CLASSIFIERS is None:
+        return None
+
+    key = "youtube" if bundle.compressed_source else "upload"
+    model_dict = _CLASSIFIERS[key]
+    # Require dict format {"pipeline": ..., "features": ...}; raw Pipeline pkls
+    # (from the pre-retrain run) don't carry feature-name metadata → fall back.
+    if not isinstance(model_dict, dict) or "pipeline" not in model_dict:
+        return None
+    feature_names: list[str] = model_dict["features"]
+    pipeline = model_dict["pipeline"]
+
+    _feature_map: dict[str, float] = {
+        "ci":   bundle.centroid_instability_score,
+        "hnr":  bundle.harmonic_ratio_score,
+        "plr":  bundle.plr_std,
+        "ibi":  bundle.ibi_variance,
+        "cent": bundle.spectral_centroid_mean,
+        "vnf":  bundle.voiced_noise_floor,
+    }
+    values = [_feature_map[f] for f in feature_names]
+    # Any -1.0 sentinel means the signal was not computed for this track.
+    # Return None so the caller falls back to the manual weighted sum.
+    if any(v < 0.0 for v in values):
+        return None
+
+    X = np.array(values, dtype=float).reshape(1, -1)
+    return float(pipeline.predict_proba(X)[0, 1])
 
 
 def _compute_ai_probability(bundle: _SignalBundle) -> float:
@@ -2495,7 +2587,8 @@ def _build_flags(bundle: _SignalBundle) -> list[str]:
         )
 
     if (
-        bundle.is_vocal
+        not bundle.compressed_source
+        and bundle.is_vocal
         and CONSTANTS.VOICED_NOISE_FLOOR_AI_MAX > 0.0
         and 0.0 <= bundle.voiced_noise_floor <= CONSTANTS.VOICED_NOISE_FLOOR_AI_MAX
     ):
@@ -2508,7 +2601,10 @@ def _build_flags(bundle: _SignalBundle) -> list[str]:
     return flags
 
 
-def _compute_verdict(bundle: _SignalBundle) -> ForensicVerdict:
+def _compute_verdict(
+    bundle: _SignalBundle,
+    ml_prob: float | None = None,
+) -> ForensicVerdict:
     """
     Aggregate numeric forensic scores into a four-tier verdict.
 
@@ -2521,7 +2617,11 @@ def _compute_verdict(bundle: _SignalBundle) -> ForensicVerdict:
                        pattern with human-feel timing (organic production).
       "Not AI"       — reserved; no current metric produces absolute human proof.
 
-    Pure function — compares numbers against CONSTANTS, no string matching.
+    ml_prob: P(AI) from the trained logistic regression classifier.  When provided,
+    the probability-weighted verdict uses P(AI) ≥ 0.5 as the "Likely AI" threshold
+    instead of the manual PROB_VERDICT_HYBRID sum.  Pass None (default) to fall back
+    to the manual weighted-sum path (used when pkl files are absent or features
+    are incomplete).
     """
     # ── Hard-evidence overrides → "AI" ────────────────────────────────────────
     if bundle.c2pa_flag:
@@ -2566,10 +2666,12 @@ def _compute_verdict(bundle: _SignalBundle) -> ForensicVerdict:
         return "Likely Not AI"
 
     # ── Probability-weighted verdict ──────────────────────────────────────────
-    # Scores ≥ PROB_VERDICT_HYBRID (0.45) have enough combined signals to say
-    # "Likely AI". Below that threshold we give benefit of the doubt.
-    prob = _compute_ai_probability(bundle)
+    # Preferred path: logistic regression classifier P(AI) ≥ 0.5 → "Likely AI".
+    # Fallback (no pkl / missing features): manual weighted sum ≥ PROB_VERDICT_HYBRID.
+    if ml_prob is not None:
+        return "Likely AI" if ml_prob >= 0.5 else "Likely Not AI"
 
+    prob = _compute_ai_probability(bundle)
     if prob >= CONSTANTS.PROB_VERDICT_HYBRID:
         return "Likely AI"
     return "Likely Not AI"
@@ -2591,6 +2693,15 @@ def _build_forensic_notes(bundle: _SignalBundle, verdict: ForensicVerdict) -> li
         notes.append(
             "This track likely uses Splice or pre-made loops — a common practice in "
             "modern pop and hip-hop production. This alone does not indicate AI generation."
+        )
+
+    # YouTube/streaming sources are AAC/Opus transcoded — several AI signals are masked
+    # by codec noise. Detection is less reliable than for direct file uploads.
+    if bundle.compressed_source:
+        notes.append(
+            "Detection limited for streaming audio — YouTube and streaming sources are "
+            "AAC/Opus transcoded before analysis, which masks several AI signals. "
+            "Upload the original file for more reliable results."
         )
 
     return notes

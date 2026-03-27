@@ -4,15 +4,14 @@
 # They are intentionally excluded from the repository — delete the whole
 # block below to nuke all local testing data when it's no longer needed:
 #
-#   tmp/       — audio + result JSON written by the app during dev runs
-#   debug/     — full pipeline cache written by DEBUG_ANALYSIS=1
-#   scripts/   — one-off batch scanning and debugging scripts (local only)
+#   local/tmp/   — audio + result JSON written by the app during dev runs
+#   local/debug/ — full pipeline cache written by DEBUG_ANALYSIS=1
+#   local/tools/ — one-off calibration and dev scripts (local only)
+#   local/       — all of the above (entire local/ tree is excluded)
 #   tests/fixtures/results/   — captured pipeline results (CAPTURE_RESULTS=1)
 #   tests/fixtures/forensics/ — captured forensics fixtures (CAPTURE_OUTPUTS=1)
 # ---------------------------------------------------------------------------
-tmp/
-debug/
-scripts/
+local/
 tests/fixtures/results/*
 tests/fixtures/forensics/*
 !tests/fixtures/results/.gitkeep
