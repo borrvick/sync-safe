@@ -2443,9 +2443,9 @@ def _build_flags(bundle: _SignalBundle) -> list[str]:
         flags.append(f"Spectral Slop detected ({bundle.spectral_slop:.1%} HF energy)")
 
     if bundle.loop_score > CONSTANTS.LOOP_SCORE_CEILING:
-        flags.append(f"Likely Stock Loop/Sample (score {bundle.loop_score:.3f})")
+        flags.append(f"Highly Repetitive Structure (score {bundle.loop_score:.3f})")
     elif bundle.loop_score > CONSTANTS.LOOP_SCORE_POSSIBLE:
-        flags.append(f"Possible Repetition (score {bundle.loop_score:.3f})")
+        flags.append(f"Moderately Repetitive Structure (score {bundle.loop_score:.3f})")
 
     if bundle.loop_autocorr_score >= CONSTANTS.LOOP_AUTOCORR_VERDICT_THRESHOLD:
         flags.append(
@@ -2642,7 +2642,7 @@ def _compute_verdict(
 
     # ── Sample/loop-heavy + organic timing → "Likely Not AI" ──────────────────
     # High autocorr + human-feel timing + no hard AI evidence = organic sampled
-    # production (e.g. hip-hop, modern pop built on Splice loops).
+    # production (e.g. hip-hop, modern pop built on loops).
     # Two paths: A — no AI vocal signals at all; B — centroid in AI range but
     # very high IBI variance overrides (human rapper over loops).
     hnr_flagged         = bundle.harmonic_ratio_score >= CONSTANTS.HARMONIC_RATIO_AI_MIN
@@ -2691,8 +2691,8 @@ def _build_forensic_notes(bundle: _SignalBundle, verdict: ForensicVerdict) -> li
     # Loop/sample note — shown when the loop pattern is detected regardless of verdict.
     if bundle.loop_autocorr_score >= CONSTANTS.LOOP_AUTOCORR_SAMPLE_VERDICT_THRESHOLD:
         notes.append(
-            "This track likely uses Splice or pre-made loops — a common practice in "
-            "modern pop and hip-hop production. This alone does not indicate AI generation."
+            "This track has a highly regular rhythmic structure consistent with loop-based "
+            "production — common in modern pop and hip-hop. This alone does not indicate AI generation."
         )
 
     # YouTube/streaming sources are AAC/Opus transcoded — several AI signals are masked

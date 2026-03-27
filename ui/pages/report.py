@@ -566,17 +566,17 @@ def _render_production_analysis_card(fr: Optional[ForensicsResult]) -> None:
     loop      = fr.loop_score
     loop_num  = f"{loop:.3f}" if isinstance(loop, float) else "—"
     loop_label = (
-        "Likely Stock Loop" if loop > CONSTANTS.LOOP_SCORE_CEILING
-        else "Possible Repetition" if loop > CONSTANTS.LOOP_SCORE_POSSIBLE
-        else "Organic"
+        "Highly Repetitive" if loop > CONSTANTS.LOOP_SCORE_CEILING
+        else "Moderately Repetitive" if loop > CONSTANTS.LOOP_SCORE_POSSIBLE
+        else "Low Repetition"
     )
     loop_fmt = f"{loop_num} ({loop_label})"
 
     autocorr       = fr.loop_autocorr_score
     autocorr_num   = f"{autocorr:.3f}" if isinstance(autocorr, float) else "—"
     autocorr_label = (
-        "Strong Repetition Detected" if autocorr >= CONSTANTS.LOOP_AUTOCORR_SAMPLE_VERDICT_THRESHOLD
-        else "Repetition Detected" if autocorr >= CONSTANTS.LOOP_AUTOCORR_VERDICT_THRESHOLD
+        "Highly Regular" if autocorr >= CONSTANTS.LOOP_AUTOCORR_SAMPLE_VERDICT_THRESHOLD
+        else "Regular" if autocorr >= CONSTANTS.LOOP_AUTOCORR_VERDICT_THRESHOLD
         else "Moderate" if autocorr >= CONSTANTS.LOOP_AUTOCORR_DISPLAY_MODERATE_MIN
         else "Low"
     )
@@ -584,25 +584,25 @@ def _render_production_analysis_card(fr: Optional[ForensicsResult]) -> None:
 
     st.markdown(f"""
     <div class="sig">
-      <div class="sig-head">Production Analysis</div>
+      <div class="sig-head">Structural Repetition</div>
       <div style="font-family:'Figtree',sans-serif;font-size:.82rem;color:var(--dim);
                   line-height:1.5;margin-bottom:18px;">
-        Detects whether this track is built on loops or pre-made samples.
-        This is independent of AI detection — loop-based production is standard
-        practice in modern pop and hip-hop and does not indicate AI generation.
+        Measures how repetitive this track's structure is. High scores indicate the
+        production relies heavily on looping sections — common in modern pop and hip-hop.
+        This is independent of AI detection and does not indicate AI generation on its own.
       </div>
       <div class="sig-row">
-        <span class="sk">Loop Score
+        <span class="sk">Section Similarity
           <span class="tip-wrap"><span class="tip-icon">?</span>
-            <span class="tip-box">Cross-correlation of 4-bar spectral fingerprints across the track. Score &gt;0.98 means segments are near-identical — a hallmark of stock loops or heavily repeated sections.</span>
+            <span class="tip-box">Compares 4-bar spectral sections across the track. High score means sections sound near-identical — the production leans heavily on a repeating musical phrase.</span>
           </span>
         </span>
         <span class="sv">{loop_fmt}</span>
       </div>
       <div class="sig-row">
-        <span class="sk">Loop Autocorr
+        <span class="sk">Rhythmic Regularity
           <span class="tip-wrap"><span class="tip-icon">?</span>
-            <span class="tip-box">Onset-envelope autocorrelation — detects regular loop repetition independent of BPM. High score = Splice-style loop structure. Common in modern pop (2018–present). Does not alone indicate AI generation.</span>
+            <span class="tip-box">Measures how regularly the beat pattern repeats. High score means the rhythm locks to a tight, consistent cycle — typical of loop-based production.</span>
           </span>
         </span>
         <span class="sv">{autocorr_fmt}</span>

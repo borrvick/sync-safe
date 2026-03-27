@@ -351,7 +351,7 @@ class TestBuildFlags:
 
     def test_loop_ceiling_flag_on_high_loop_score(self):
         flags = _build_flags(dataclasses.replace(self._CLEAN, loop_score=0.99))
-        assert any("Stock Loop" in f or "Likely Stock" in f for f in flags)
+        assert any("Highly Repetitive" in f for f in flags)
 
     def test_formant_drift_flag_on_high_centroid(self):
         flags = _build_flags(dataclasses.replace(
