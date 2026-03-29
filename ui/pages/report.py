@@ -64,7 +64,7 @@ def render_report(
         _render_forensics_card(result.forensics, source=result.audio.source)
 
     with st.expander("Structural Repetition", expanded=True):
-        _render_production_analysis_card(result.forensics, source=result.audio.source)
+        _render_production_analysis_card(result.forensics)
 
     with st.expander("Sync Readiness Checks", expanded=True):
         _render_sync_readiness(result.compliance)
@@ -572,13 +572,9 @@ def _render_forensics_card(fr: Optional[ForensicsResult], source: str = "file") 
 
 def _render_production_analysis_card(fr: Optional[ForensicsResult], source: str = "file") -> None:
     if fr is None:
-        msg = (
-            "Structural repetition analysis requires a direct file upload."
-            if source == _SOURCE_YOUTUBE
-            else "Structural repetition analysis unavailable."
-        )
         st.markdown(
-            f"<div style='color:var(--dim);font-size:.84rem;padding:8px 0;'>{msg}</div>",
+            "<div style='color:var(--dim);font-size:.84rem;padding:8px 0;'>"
+            "Structural repetition analysis unavailable.</div>",
             unsafe_allow_html=True,
         )
         return

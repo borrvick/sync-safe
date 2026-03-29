@@ -7,7 +7,6 @@ on communication and the portal page can focus on the task.
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import streamlit as st
@@ -16,16 +15,6 @@ from ui.components import eq_bars
 from ui.nav import render_site_nav, render_site_footer
 
 _DEBUG_DIR = Path(__file__).parent.parent.parent / "local" / "debug"
-_LABELS_FILE = _DEBUG_DIR / "labels.json"
-_LABEL_OPTIONS = [
-    "— unrated —",
-    "100% AI",
-    "AI Cover",
-    "Heavily Sampled/Loops",
-    "May Contain One-Shot Samples",
-    "Modern Production Practices",
-    "RAW",
-]
 
 
 def render_portal() -> None:
@@ -87,18 +76,10 @@ def render_portal() -> None:
                     placeholder="https://youtube.com/watch?v=...",
                     label_visibility="collapsed",
                 )
-                if os.getenv("DEBUG_ANALYSIS"):
-                    track_label = st.selectbox(
-                        "Track category",
-                        _LABEL_OPTIONS,
-                        key="portal_label_url",
-                    )
-                else:
-                    track_label = None
                 if st.button("Initiate Scan →", type="primary",
                              use_container_width=True, key="run_url"):
                     if url:
-                        _submit_source(url, track_label)
+                        _submit_source(url)
                     else:
                         st.warning("Paste a YouTube URL first.")
             else:
@@ -107,19 +88,11 @@ def render_portal() -> None:
                     type=["mp3", "wav", "flac", "m4a", "ogg"],
                     label_visibility="collapsed",
                 )
-                if os.getenv("DEBUG_ANALYSIS"):
-                    track_label = st.selectbox(
-                        "Track category",
-                        _LABEL_OPTIONS,
-                        key="portal_label_upload",
-                    )
-                else:
-                    track_label = None
                 if st.button("Initiate Scan →", type="primary",
                              use_container_width=True, key="run_upload",
                              disabled=uploaded is None):
                     if uploaded:
-                        _submit_source(uploaded, track_label)
+                        _submit_source(uploaded)
 
         st.markdown("""
         <p style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.54rem;
@@ -133,11 +106,10 @@ def render_portal() -> None:
     render_site_footer()
 
 
-def _submit_source(source: object, track_label: str | None = None) -> None:
+def _submit_source(source: object) -> None:
     """Store source in session state and route to the loading page."""
-    st.session_state.source        = source
-    st.session_state.audio         = None
-    st.session_state.analysis      = None
-    st.session_state.debug_label   = track_label
-    st.session_state.page          = "loading"
+    st.session_state.source   = source
+    st.session_state.audio    = None
+    st.session_state.analysis = None
+    st.session_state.page     = "loading"
     st.rerun()

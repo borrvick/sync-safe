@@ -24,7 +24,7 @@ import streamlit as st
 from core.config import get_settings
 from core.exceptions import SyncSafeError
 from core.logging import DEFAULT_LOG_DIR, PipelineLogger
-from core.models import AudioBuffer
+from core.models import AnalysisResult, AudioBuffer
 from ui.components import eq_bars
 
 # (key, display label, estimated wall-clock seconds on ZeroGPU free tier, tooltip description)
@@ -440,8 +440,10 @@ def render_loading(source: Any) -> None:
         from services.forensics import Forensics
         forensics = Forensics().analyze(audio)
     except SyncSafeError as exc:
+        import traceback; traceback.print_exc()
         _advance("forensics", t0, error=str(exc))
     except Exception as exc:  # noqa: BLE001 — UI boundary
+        import traceback; traceback.print_exc()
         _advance("forensics", t0, error=str(exc))
     else:
         _advance("forensics", t0)
@@ -512,16 +514,22 @@ def render_loading(source: Any) -> None:
     log.pipeline_end(duration_s=time.time() - pipeline_start)
     _draw(header_ph, bar_ph, steps_ph, completed, "", step_durations)
 
-    from core.models import AnalysisResult
-    result = AnalysisResult(
-        audio=audio,
-        structure=structure,
-        forensics=forensics,
-        transcript=transcript,
-        compliance=compliance,
-        authorship=authorship,
-        similar_tracks=similar,
-        legal=legal,
+    # model_validate with from_attributes=True re-parses each field from its
+    # current attribute values, bypassing Pydantic's strict class-identity check.
+    # This prevents ValidationError when Streamlit hot-reloads cause the model
+    # classes used by service modules to diverge from the ones in this module.
+    result = AnalysisResult.model_validate(
+        {
+            "audio":          audio,
+            "structure":      structure,
+            "forensics":      forensics,
+            "transcript":     transcript,
+            "compliance":     compliance,
+            "authorship":     authorship,
+            "similar_tracks": similar,
+            "legal":          legal,
+        },
+        from_attributes=True,
     )
 
     # Debug hook: save forensics scores + full result JSON for offline iteration.
@@ -540,19 +548,6 @@ def render_loading(source: Any) -> None:
         _rdest = _debug_dir / f"{_safe}_result.json"
         _rdest.write_text(result.to_json())
         print(f"[DEBUG_ANALYSIS] Result saved   → {_rdest}")
-        # Save the label the user selected on the portal before scanning
-        _debug_label = st.session_state.pop("debug_label", None)
-        if _debug_label and _debug_label != "— unrated —":
-            _labels_file = _debug_dir / "labels.json"
-            _existing: dict = {}
-            if _labels_file.exists():
-                try:
-                    _existing = _json.loads(_labels_file.read_text())
-                except Exception:
-                    pass
-            _existing[audio.label] = _debug_label
-            _labels_file.write_text(_json.dumps(_existing, indent=2, ensure_ascii=False))
-            print(f"[DEBUG_ANALYSIS] Label saved    → {audio.label}: {_debug_label}")
 
     st.session_state.audio    = audio
     st.session_state.analysis = result
