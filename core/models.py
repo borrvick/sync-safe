@@ -282,6 +282,40 @@ class AuthorshipResult(BaseModel):
 # Discovery & Legal
 # ---------------------------------------------------------------------------
 
+class AudioQualityResult(BaseModel):
+    """
+    Broadcast loudness and dialogue-readiness metrics.
+
+    LUFS figures follow ITU-R BS.1770-4 / EBU R128.
+    Dialogue score measures how much mid-frequency energy (300–3 kHz) the
+    track contributes relative to the full spectrum — higher = sits cleaner
+    under voiceover without competing with spoken dialogue.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    # LUFS / broadcast loudness
+    integrated_lufs: float      # integrated programme loudness (LUFS)
+    true_peak_dbfs: float       # highest inter-sample peak (dBFS)
+    loudness_range_lu: float    # LRA — dynamic range in Loudness Units
+
+    # Platform deltas (positive = louder than target, negative = quieter)
+    delta_spotify: float
+    delta_apple_music: float
+    delta_youtube: float
+    delta_broadcast: float
+
+    # True peak warning
+    true_peak_warning: bool     # True if true peak > TRUE_PEAK_WARN_DBFS
+
+    # Dialogue-readiness
+    dialogue_score: float       # 0.0–1.0; fraction of energy outside 300–3 kHz band
+    dialogue_label: str         # "Dialogue-Ready" | "Mixed" | "Dialogue-Heavy"
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.model_dump()
+
+
 class PopularityResult(BaseModel):
     """Last.fm popularity data for the scanned track."""
 
@@ -346,6 +380,7 @@ class AnalysisResult(BaseModel):
     similar_tracks: list[TrackCandidate]                    = Field(default_factory=list)
     legal: Optional[LegalLinks]                             = None
     popularity: Optional[PopularityResult]                  = None
+    audio_quality: Optional[AudioQualityResult]             = None
 
     def to_dict(self) -> dict[str, Any]:
         """

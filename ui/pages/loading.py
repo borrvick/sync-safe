@@ -557,17 +557,20 @@ def render_loading(source: Any) -> None:
     else:
         _advance("discovery", t0)
 
-    # ── Step 8: Legal links + popularity ─────────────────────────────────
+    # ── Step 8: Legal links, popularity, loudness & dialogue ─────────────
     _tick("Legal Links", "legal")
     t0 = time.time()
-    legal      = None
-    popularity = None
+    legal         = None
+    popularity    = None
+    audio_quality = None
     log.step_start("legal")
     try:
         from services.discovery import Discovery
         from services.legal import Legal
-        legal      = Legal().get_links(title, artist)
-        popularity = Discovery().get_track_popularity(title, artist)
+        from services.loudness import AudioQualityAnalyzer
+        legal         = Legal().get_links(title, artist)
+        popularity    = Discovery().get_track_popularity(title, artist)
+        audio_quality = AudioQualityAnalyzer().analyze(audio)
     except SyncSafeError as exc:
         _advance("legal", t0, error=str(exc))
     except Exception as exc:  # noqa: BLE001 — UI boundary
@@ -595,6 +598,7 @@ def render_loading(source: Any) -> None:
             "similar_tracks": similar,
             "legal":          legal,
             "popularity":     popularity,
+            "audio_quality":  audio_quality,
         },
         from_attributes=True,
     )
