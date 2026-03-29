@@ -68,6 +68,7 @@ def render_report(
 
     with st.expander("Sync Readiness Checks", expanded=True):
         _render_sync_readiness(result.compliance)
+        _render_audio_quality_card(result.audio_quality)
 
     with st.expander("Discovery & Licensing", expanded=True):
         _render_legal_and_discovery(result)
@@ -642,6 +643,97 @@ def _render_production_analysis_card(fr: Optional[ForensicsResult], source: str 
             unsafe_allow_html=True,
         )
 
+
+
+_DIALOGUE_LABEL_COLORS: dict[str, str] = {
+    "Dialogue-Ready": "var(--ok)",
+    "Mixed":          "var(--grade-c)",
+    "Dialogue-Heavy": "var(--danger)",
+}
+
+_LUFS_PLATFORMS: list[tuple[str, str]] = [
+    ("Spotify",      "delta_spotify"),
+    ("Apple Music",  "delta_apple_music"),
+    ("YouTube",      "delta_youtube"),
+    ("Broadcast",    "delta_broadcast"),
+]
+
+
+def _render_audio_quality_card(aq: Optional["AudioQualityResult"]) -> None:
+    """Render LUFS broadcast loudness and dialogue-readiness metrics."""
+    st.markdown("""
+    <div style="font-family:'Chakra Petch',monospace;font-size:.58rem;font-weight:600;
+                letter-spacing:.18em;text-transform:uppercase;color:var(--dim);
+                display:flex;align-items:center;gap:10px;margin:20px 0 14px;">
+      <span>◈ Loudness & Dialogue</span>
+      <div style="flex:1;height:1px;background:var(--border-hr);"></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if aq is None:
+        st.markdown(
+            "<div style='color:var(--dim);font-size:.84rem;font-family:Figtree,sans-serif;'>"
+            "Loudness data unavailable.</div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    # ── LUFS row ──────────────────────────────────────────────────────────
+    peak_color  = "var(--danger)" if aq.true_peak_warning else "var(--ok)"
+    peak_label  = f"{aq.true_peak_dbfs:+.1f} dBFS"
+    peak_warn   = " ⚠ Clipping risk" if aq.true_peak_warning else ""
+
+    platform_cells = ""
+    for name, attr in _LUFS_PLATFORMS:
+        delta = getattr(aq, attr)
+        color = "var(--danger)" if delta > 1.0 else ("var(--ok)" if delta < -0.5 else "var(--muted)")
+        sign  = "+" if delta > 0 else ""
+        platform_cells += (
+            f'<div style="text-align:center;min-width:70px;">'
+            f'<div style="font-family:\'JetBrains Mono\',monospace;font-size:.6rem;'
+            f'color:var(--dim);margin-bottom:3px;">{html_mod.escape(name)}</div>'
+            f'<div style="font-family:\'Chakra Petch\',monospace;font-size:.8rem;'
+            f'font-weight:600;color:{color};">{sign}{delta:.1f} LU</div>'
+            f'</div>'
+        )
+
+    st.markdown(f"""
+    <div class="sig" style="padding:14px 16px;margin-bottom:10px;">
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:12px;">
+        <div style="font-family:'Chakra Petch',monospace;font-size:1.6rem;
+                    font-weight:700;color:var(--text);">{aq.integrated_lufs:.1f}</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:.65rem;
+                    color:var(--dim);">LUFS integrated</div>
+        <div style="margin-left:auto;font-family:'JetBrains Mono',monospace;
+                    font-size:.65rem;color:{peak_color};">
+          {html_mod.escape(peak_label)}{html_mod.escape(peak_warn)}
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">{platform_cells}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Dialogue-ready row ────────────────────────────────────────────────
+    dial_color = _DIALOGUE_LABEL_COLORS.get(aq.dialogue_label, "var(--muted)")
+    dial_pct   = int(aq.dialogue_score * 100)
+
+    st.markdown(f"""
+    <div class="sig" style="padding:14px 16px;display:flex;align-items:center;gap:16px;">
+      <div>
+        <div style="font-family:'Chakra Petch',monospace;font-size:.5rem;font-weight:600;
+                    letter-spacing:.18em;text-transform:uppercase;color:var(--dim);
+                    margin-bottom:4px;">Dialogue Compatibility</div>
+        <div style="font-family:'Chakra Petch',monospace;font-size:1.1rem;font-weight:700;
+                    color:{dial_color};">{html_mod.escape(aq.dialogue_label)}</div>
+      </div>
+      <div style="margin-left:auto;text-align:right;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:1.2rem;
+                    font-weight:700;color:{dial_color};">{dial_pct}%</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:.6rem;
+                    color:var(--dim);">outside dialogue band</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 def _render_sync_readiness(compliance: Optional[ComplianceReport]) -> None:

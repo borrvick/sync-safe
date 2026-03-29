@@ -107,6 +107,25 @@ class SystemConstants:
     # ---- Discovery ------------------------------------------------------------
     MAX_SIMILAR_TRACKS: int = 5
 
+    # ---- Loudness & Dialogue (LUFS / ITU-R BS.1770-4) ------------------------
+    # Target integrated loudness per platform (LUFS)
+    LUFS_SPOTIFY: float       = -14.0
+    LUFS_APPLE_MUSIC: float   = -16.0
+    LUFS_YOUTUBE: float       = -14.0
+    LUFS_BROADCAST: float     = -23.0   # ATSC A/85 (US) / EBU R128 (EU)
+
+    # Minimum track duration for pyloudnorm integrated LUFS (gating requires several 400ms blocks)
+    LUFS_MIN_DURATION_S: float = 3.0
+
+    # True peak warning threshold — exceeding causes clipping on loudness-normalised playback
+    TRUE_PEAK_WARN_DBFS: float = -1.0
+
+    # Dialogue-ready score thresholds (0.0–1.0)
+    # Score = fraction of energy OUTSIDE the 300–3000 Hz dialogue competition band.
+    # Higher = sits more cleanly under voiceover.
+    DIALOGUE_READY_HIGH: float = 0.70   # ≥ this → "Dialogue-Ready"
+    DIALOGUE_READY_LOW: float  = 0.40   # < this → "Dialogue-Heavy"; between → "Mixed"
+
     # ---- Track Popularity (Last.fm listener counts) ---------------------------
     # Tier boundaries based on Last.fm unique listener counts.
     # Tiers: Emerging < Regional < Mainstream < Global
