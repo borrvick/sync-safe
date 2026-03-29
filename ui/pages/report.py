@@ -736,7 +736,66 @@ def _sync_readiness_row(icon: str, label: str, value: str, ok: bool,
 # Discovery & Licensing
 # ---------------------------------------------------------------------------
 
+_POPULARITY_TIER_COLORS: dict[str, str] = {
+    "Emerging":   "var(--dim)",
+    "Regional":   "var(--issue-location)",  # blue — defined in styles.py
+    "Mainstream": "var(--grade-c)",          # amber — defined in styles.py
+    "Global":     "var(--accent)",           # orange — defined in styles.py
+}
+
+
+def _render_popularity_card(result: AnalysisResult) -> None:
+    """Render track popularity tier and estimated sync cost from Last.fm data."""
+    pop = result.popularity
+    if pop is None:
+        st.markdown(
+            "<div style='color:var(--dim);font-size:.84rem;font-family:Figtree,sans-serif;'>"
+            "Popularity data unavailable — track not found on Last.fm.</div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    tier_color = _POPULARITY_TIER_COLORS.get(pop.tier, "var(--dim)")
+    listeners_fmt = f"{pop.listeners:,}"
+    cost_fmt      = f"${pop.sync_cost_low:,} – ${pop.sync_cost_high:,}"
+
+    st.markdown(f"""
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
+      <div class="sig" style="flex:1;min-width:120px;padding:14px 16px;text-align:center;">
+        <div style="font-family:'Chakra Petch',monospace;font-size:.5rem;font-weight:600;
+                    letter-spacing:.18em;text-transform:uppercase;color:var(--dim);
+                    margin-bottom:6px;">Popularity</div>
+        <div style="font-family:'Chakra Petch',monospace;font-size:1.2rem;font-weight:700;
+                    color:{tier_color};">{pop.tier}</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:.6rem;
+                    color:var(--muted);margin-top:4px;">{listeners_fmt} listeners</div>
+      </div>
+      <div class="sig" style="flex:2;min-width:180px;padding:14px 16px;">
+        <div style="font-family:'Chakra Petch',monospace;font-size:.5rem;font-weight:600;
+                    letter-spacing:.18em;text-transform:uppercase;color:var(--dim);
+                    margin-bottom:6px;">Est. Sync Fee</div>
+        <div style="font-family:'Chakra Petch',monospace;font-size:.95rem;font-weight:700;
+                    color:var(--text);">{cost_fmt}</div>
+        <div style="font-family:'Figtree',sans-serif;font-size:.7rem;color:var(--muted);
+                    margin-top:4px;">Varies by usage, territory, and negotiation.
+                    Source: Last.fm · Industry estimates 2024–2026.</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
 def _render_legal_and_discovery(result: AnalysisResult) -> None:
+    _render_popularity_card(result)
+
+    st.markdown("""
+    <div style="font-family:'Chakra Petch',monospace;font-size:.58rem;font-weight:600;
+                letter-spacing:.18em;text-transform:uppercase;color:var(--dim);
+                display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+      <span>◈ Rights Lookup</span>
+      <div style="flex:1;height:1px;background:var(--border-hr);"></div>
+    </div>
+    """, unsafe_allow_html=True)
+
     if result.legal:
         for name, url in [("ASCAP", result.legal.ascap), ("BMI", result.legal.bmi), ("SESAC", result.legal.sesac)]:
             if url:

@@ -8,11 +8,53 @@ import pytest
 
 from services.discovery import (
     Discovery,
+    _classify_popularity,
     _find_binary,
     _parse_track_list,
     _resolve_youtube_url,
 )
+from core.config import CONSTANTS
 from core.exceptions import ConfigurationError
+
+
+# ---------------------------------------------------------------------------
+# _classify_popularity (pure helper — no mocks needed)
+# ---------------------------------------------------------------------------
+
+class TestClassifyPopularity:
+    """Tests for _classify_popularity — uses CONSTANTS directly so tier boundaries
+    come from config, not magic numbers in tests."""
+
+    def test_emerging_tier(self) -> None:
+        result = _classify_popularity(5_000, 50_000, CONSTANTS)
+        assert result.tier == "Emerging"
+        assert result.listeners == 5_000
+        assert result.playcount == 50_000
+        assert result.sync_cost_low  == CONSTANTS.SYNC_COST_EMERGING[0]
+        assert result.sync_cost_high == CONSTANTS.SYNC_COST_EMERGING[1]
+
+    def test_regional_tier_at_boundary(self) -> None:
+        result = _classify_popularity(CONSTANTS.POPULARITY_REGIONAL_MIN, 0, CONSTANTS)
+        assert result.tier == "Regional"
+
+    def test_mainstream_tier_at_boundary(self) -> None:
+        result = _classify_popularity(CONSTANTS.POPULARITY_MAINSTREAM_MIN, 0, CONSTANTS)
+        assert result.tier == "Mainstream"
+
+    def test_global_tier_at_boundary(self) -> None:
+        result = _classify_popularity(CONSTANTS.POPULARITY_GLOBAL_MIN, 0, CONSTANTS)
+        assert result.tier == "Global"
+        assert result.sync_cost_low  == CONSTANTS.SYNC_COST_GLOBAL[0]
+        assert result.sync_cost_high == CONSTANTS.SYNC_COST_GLOBAL[1]
+
+    def test_zero_listeners(self) -> None:
+        result = _classify_popularity(0, 0, CONSTANTS)
+        assert result.tier == "Emerging"
+        assert result.listeners == 0
+
+    def test_just_below_regional(self) -> None:
+        result = _classify_popularity(CONSTANTS.POPULARITY_REGIONAL_MIN - 1, 0, CONSTANTS)
+        assert result.tier == "Emerging"
 
 
 # ---------------------------------------------------------------------------
