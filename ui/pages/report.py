@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 import html as html_mod
 import io
+import json as _json
 import re
 from collections import Counter, OrderedDict
 from datetime import datetime, timezone
@@ -40,6 +41,56 @@ _SOURCE_YOUTUBE: str = "youtube"
 
 
 # ---------------------------------------------------------------------------
+# OpenGraph + JSON-LD meta tags
+# ---------------------------------------------------------------------------
+
+def _inject_og_tags(result: AnalysisResult) -> None:
+    """
+    Inject OpenGraph meta tags and a JSON-LD MusicRecording schema into the page.
+
+    Note: Streamlit renders these into the document body, not <head>, so social
+    crawlers (Twitter, Slack) may not pick them up. They are included as
+    best-effort for sharing previews; a proper implementation would require a
+    custom Streamlit index.html template.
+    """
+    raw_title   = result.audio.metadata.get("title", "") or result.audio.label or ""
+    raw_artist  = result.audio.metadata.get("artist", "") or ""
+    raw_grade   = result.compliance.grade if result.compliance else "N/A"
+    raw_verdict = result.forensics.verdict if result.forensics else ""
+
+    og_title = html_mod.escape(
+        f"{raw_artist} \u2014 {raw_title} | Sync-Safe" if raw_artist else f"{raw_title} | Sync-Safe"
+    )
+    og_desc = html_mod.escape(
+        f"Sync compliance report \u00b7 Grade: {raw_grade}"
+        + (f" \u00b7 Authenticity: {raw_verdict}" if raw_verdict else "")
+    )
+
+    # JSON-LD via json.dumps — ensure_ascii=True escapes all non-ASCII.
+    # Replace '</' with '<\/' to prevent </script> injection inside ld+json block.
+    ld_data = {
+        "@context": "https://schema.org",
+        "@type": "MusicRecording",
+        "name": raw_title,
+        "byArtist": {"@type": "MusicGroup", "name": raw_artist},
+        "additionalProperty": [
+            {"@type": "PropertyValue", "name": "SyncSafeGrade", "value": raw_grade},
+        ],
+    }
+    ld_json = _json.dumps(ld_data, ensure_ascii=True).replace("</", "<\\/")
+
+    st.markdown(f"""
+<meta property="og:title" content="{og_title}" />
+<meta property="og:description" content="{og_desc}" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="{og_title}" />
+<meta name="twitter:description" content="{og_desc}" />
+<script type="application/ld+json">{ld_json}</script>
+""", unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
@@ -48,6 +99,7 @@ def render_report(
     result: AnalysisResult,
 ) -> None:
     """Render the full analysis report for a completed pipeline run."""
+    _inject_og_tags(result)
     st.markdown(
         '<a href="#main-content" class="skip-link">Skip to main content</a>',
         unsafe_allow_html=True,
