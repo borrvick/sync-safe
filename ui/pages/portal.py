@@ -94,14 +94,25 @@ def render_portal() -> None:
                     if uploaded:
                         _submit_source(uploaded)
 
-        st.markdown("""
-        <p style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:.54rem;
-                  color:var(--dim);font-weight:500;letter-spacing:.12em;text-transform:uppercase;
-                  margin-top:10px;">
-          No audio stored · Ephemeral ZeroGPU processing
-        </p>
-        <br>
-        """, unsafe_allow_html=True)
+            st.markdown("""
+            <div style="display:flex;align-items:center;justify-content:center;gap:8px;
+                        margin-top:16px;padding:8px 12px;border-radius:6px;
+                        background:var(--surface-raised, rgba(255,255,255,.04));
+                        border:1px solid var(--border-hr);">
+              <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none"
+                   stroke="var(--dim)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:.52rem;
+                           color:var(--dim);font-weight:500;letter-spacing:.1em;
+                           text-transform:uppercase;">
+                Ephemeral processing &mdash; no audio stored &middot; not used for training &middot; deleted after scan
+              </span>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
 
     render_site_footer()
 
