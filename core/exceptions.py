@@ -72,6 +72,17 @@ class ValidationError(SyncSafeError):
     """
 
 
+class StepTimeoutError(SyncSafeError):
+    """
+    Raised when a pipeline step exceeds its wall-clock timeout budget.
+
+    The step is abandoned and the pipeline continues — result for the timed-out
+    step is left as None (graceful degradation).
+
+    Example context keys: step_key, timeout_s, elapsed_s
+    """
+
+
 class ConfigurationError(SyncSafeError):
     """
     Raised when the runtime environment is misconfigured.

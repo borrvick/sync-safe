@@ -21,10 +21,11 @@ from typing import Any
 
 import streamlit as st
 
-from core.config import get_settings
-from core.exceptions import SyncSafeError
+from core.config import CONSTANTS, get_settings
+from core.exceptions import StepTimeoutError, SyncSafeError
 from core.logging import DEFAULT_LOG_DIR, PipelineLogger
 from core.models import AnalysisResult, AudioBuffer
+from core.timeout import step_timeout
 from ui.components import eq_bars
 
 # (key, display label, estimated wall-clock seconds on ZeroGPU free tier, tooltip description)
@@ -56,6 +57,19 @@ _STEPS: list[tuple[str, str, int, str]] = [
 ]
 
 _TOTAL_EST: int = sum(s[2] for s in _STEPS)
+
+# Wall-clock timeout budget per step (seconds). Referenced via CONSTANTS so
+# values stay in one place; defined here as a lookup dict for fast access.
+_STEP_TIMEOUT_S: dict[str, int] = {
+    "ingestion":     CONSTANTS.STEP_TIMEOUT_INGESTION_S,
+    "structure":     CONSTANTS.STEP_TIMEOUT_STRUCTURE_S,
+    "transcription": CONSTANTS.STEP_TIMEOUT_TRANSCRIPTION_S,
+    "forensics":     CONSTANTS.STEP_TIMEOUT_FORENSICS_S,
+    "compliance":    CONSTANTS.STEP_TIMEOUT_COMPLIANCE_S,
+    "authorship":    CONSTANTS.STEP_TIMEOUT_AUTHORSHIP_S,
+    "discovery":     CONSTANTS.STEP_TIMEOUT_DISCOVERY_S,
+    "legal":         CONSTANTS.STEP_TIMEOUT_LEGAL_S,
+}
 
 # ---------------------------------------------------------------------------
 # Skeleton card definitions — shown below the step checklist while pipeline
@@ -397,7 +411,7 @@ def render_loading(source: Any) -> None:
     # JS setInterval runs for the full pipeline duration on its own.
     _start_timer()
     skeleton_ph = st.empty()
-    error_ph    = st.empty()
+    error_ph    = st.empty()   # fatal ingestion errors only
 
     completed      = 0
     step_durations: list[float] = []
@@ -431,8 +445,15 @@ def render_loading(source: Any) -> None:
     t0 = time.time()
     log.step_start("ingestion")
     try:
-        from services.ingestion import Ingestion
-        audio: AudioBuffer = Ingestion().load(source)
+        with step_timeout(_STEP_TIMEOUT_S["ingestion"], "ingestion"):
+            from services.ingestion import Ingestion
+            audio: AudioBuffer = Ingestion().load(source)
+    except StepTimeoutError as exc:
+        log.step_error("ingestion", error=str(exc))
+        log.pipeline_error(error=str(exc))
+        error_ph.error(f"Could not load audio: timed out after {CONSTANTS.STEP_TIMEOUT_INGESTION_S}s. "
+                       "Try a shorter track or check your connection.")
+        return
     except SyncSafeError as exc:
         log.step_error("ingestion", error=str(exc))
         log.pipeline_error(error=str(exc))
@@ -463,8 +484,12 @@ def render_loading(source: Any) -> None:
     structure = None
     log.step_start("structure")
     try:
-        from services.analysis import Analysis
-        structure = Analysis().analyze(audio)
+        with step_timeout(_STEP_TIMEOUT_S["structure"], "structure"):
+            from services.analysis import Analysis
+            structure = Analysis().analyze(audio)
+    except StepTimeoutError as exc:
+        st.toast(f"⏱ Structure analysis timed out — BPM/key/sections unavailable.", icon="⚠️")
+        _advance("structure", t0, error=str(exc))
     except SyncSafeError as exc:
         _advance("structure", t0, error=str(exc), context=getattr(exc, "context", None))
     except Exception as exc:  # noqa: BLE001 — UI boundary; unexpected errors degrade gracefully
@@ -484,8 +509,12 @@ def render_loading(source: Any) -> None:
     transcript = []
     log.step_start("transcription")
     try:
-        from services.transcription import LyricsOrchestrator
-        transcript = LyricsOrchestrator().transcribe(audio, title=title, artist=artist)
+        with step_timeout(_STEP_TIMEOUT_S["transcription"], "transcription"):
+            from services.transcription import LyricsOrchestrator
+            transcript = LyricsOrchestrator().transcribe(audio, title=title, artist=artist)
+    except StepTimeoutError as exc:
+        st.toast("⏱ Transcription timed out — lyric audit skipped.", icon="⚠️")
+        _advance("transcription", t0, error=str(exc))
     except SyncSafeError as exc:
         _advance("transcription", t0, error=str(exc))
     except Exception as exc:  # noqa: BLE001 — UI boundary
@@ -499,13 +528,15 @@ def render_loading(source: Any) -> None:
     forensics = None
     log.step_start("forensics")
     try:
-        from services.forensics import Forensics
-        forensics = Forensics().analyze(audio)
+        with step_timeout(_STEP_TIMEOUT_S["forensics"], "forensics"):
+            from services.forensics import Forensics
+            forensics = Forensics().analyze(audio)
+    except StepTimeoutError as exc:
+        st.toast("⏱ Forensic scan timed out — AI-detection unavailable.", icon="⚠️")
+        _advance("forensics", t0, error=str(exc))
     except SyncSafeError as exc:
-        import traceback; traceback.print_exc()
         _advance("forensics", t0, error=str(exc))
     except Exception as exc:  # noqa: BLE001 — UI boundary
-        import traceback; traceback.print_exc()
         _advance("forensics", t0, error=str(exc))
     else:
         _advance("forensics", t0)
@@ -516,10 +547,14 @@ def render_loading(source: Any) -> None:
     compliance = None
     log.step_start("compliance")
     try:
-        from services.compliance import Compliance
-        sections = structure.sections if structure else []
-        beats    = structure.beats    if structure else []
-        compliance = Compliance().check(audio, transcript, sections, beats)
+        with step_timeout(_STEP_TIMEOUT_S["compliance"], "compliance"):
+            from services.compliance import Compliance
+            sections = structure.sections if structure else []
+            beats    = structure.beats    if structure else []
+            compliance = Compliance().check(audio, transcript, sections, beats)
+    except StepTimeoutError as exc:
+        st.toast("⏱ Compliance audit timed out — sync checks unavailable.", icon="⚠️")
+        _advance("compliance", t0, error=str(exc))
     except SyncSafeError as exc:
         _advance("compliance", t0, error=str(exc))
     except Exception as exc:  # noqa: BLE001 — UI boundary
@@ -533,8 +568,12 @@ def render_loading(source: Any) -> None:
     authorship = None
     log.step_start("authorship")
     try:
-        from services.authorship import Authorship
-        authorship = Authorship().analyze(transcript)
+        with step_timeout(_STEP_TIMEOUT_S["authorship"], "authorship"):
+            from services.authorship import Authorship
+            authorship = Authorship().analyze(transcript)
+    except StepTimeoutError as exc:
+        st.toast("⏱ Authorship check timed out — AI-lyric detection skipped.", icon="⚠️")
+        _advance("authorship", t0, error=str(exc))
     except SyncSafeError as exc:
         _advance("authorship", t0, error=str(exc))
     except Exception as exc:  # noqa: BLE001 — UI boundary
@@ -548,8 +587,12 @@ def render_loading(source: Any) -> None:
     similar = []
     log.step_start("discovery")
     try:
-        from services.discovery import Discovery
-        similar = Discovery().find_similar(title, artist) or []
+        with step_timeout(_STEP_TIMEOUT_S["discovery"], "discovery"):
+            from services.discovery import Discovery
+            similar = Discovery().find_similar(title, artist) or []
+    except StepTimeoutError as exc:
+        st.toast("⏱ Track discovery timed out — similar tracks unavailable.", icon="⚠️")
+        _advance("discovery", t0, error=str(exc))
     except SyncSafeError as exc:
         _advance("discovery", t0, error=str(exc))
     except Exception as exc:  # noqa: BLE001 — UI boundary
@@ -565,12 +608,16 @@ def render_loading(source: Any) -> None:
     audio_quality = None
     log.step_start("legal")
     try:
-        from services.discovery import Discovery
-        from services.legal import Legal
-        from services.loudness import AudioQualityAnalyzer
-        legal         = Legal().get_links(title, artist)
-        popularity    = Discovery().get_track_popularity(title, artist)
-        audio_quality = AudioQualityAnalyzer().analyze(audio)
+        with step_timeout(_STEP_TIMEOUT_S["legal"], "legal"):
+            from services.discovery import Discovery
+            from services.legal import Legal
+            from services.loudness import AudioQualityAnalyzer
+            legal         = Legal().get_links(title, artist)
+            popularity    = Discovery().get_track_popularity(title, artist)
+            audio_quality = AudioQualityAnalyzer().analyze(audio)
+    except StepTimeoutError as exc:
+        st.toast("⏱ Legal/loudness step timed out — PRO links and loudness data unavailable.", icon="⚠️")
+        _advance("legal", t0, error=str(exc))
     except SyncSafeError as exc:
         _advance("legal", t0, error=str(exc))
     except Exception as exc:  # noqa: BLE001 — UI boundary
