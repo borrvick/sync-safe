@@ -107,6 +107,20 @@ class SystemConstants:
     # ---- Discovery ------------------------------------------------------------
     MAX_SIMILAR_TRACKS: int = 5
 
+    # ---- Track Popularity (Last.fm listener counts) ---------------------------
+    # Tier boundaries based on Last.fm unique listener counts.
+    # Tiers: Emerging < Regional < Mainstream < Global
+    POPULARITY_REGIONAL_MIN: int    = 10_000
+    POPULARITY_MAINSTREAM_MIN: int  = 100_000
+    POPULARITY_GLOBAL_MIN: int      = 1_000_000
+
+    # Estimated sync fee ranges (USD) per popularity tier — shown as guidance only.
+    # Source: industry averages 2024-2026; highly variable by usage and territory.
+    SYNC_COST_EMERGING: tuple[int, int]    = (500,    5_000)
+    SYNC_COST_REGIONAL: tuple[int, int]    = (2_000,  25_000)
+    SYNC_COST_MAINSTREAM: tuple[int, int]  = (15_000, 100_000)
+    SYNC_COST_GLOBAL: tuple[int, int]      = (50_000, 500_000)
+
     # ---- Forensics: IBI / Groove ----------------------------------------------
     # IBI variance below this → "Perfect Quantization" AI signal.
     # FakeMusicCaps calibration 2026-03-23: AI median IBI variance (621) is

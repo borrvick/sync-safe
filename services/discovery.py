@@ -31,7 +31,7 @@ import requests
 
 from core.config import CONSTANTS, get_settings
 from core.exceptions import AudioSourceError, ConfigurationError
-from core.models import TrackCandidate
+from core.models import PopularityResult, TrackCandidate
 
 
 # ---------------------------------------------------------------------------
@@ -101,6 +101,42 @@ class Discovery:
             ))
 
         return candidates
+
+    def get_track_popularity(self, title: str, artist: str) -> Optional[PopularityResult]:
+        """
+        Fetch listener count and playcount from Last.fm track.getInfo.
+
+        Returns a PopularityResult with tier classification and estimated sync
+        cost range, or None when the track is not found or the API key is missing.
+
+        Never raises — popularity is supplementary metadata.
+        """
+        api_key = get_settings().lastfm_api_key
+        if not api_key or (not title and not artist):
+            return None
+
+        params = {
+            "method":      "track.getInfo",
+            "track":       title,
+            "artist":      artist,
+            "api_key":     api_key,
+            "format":      "json",
+            "autocorrect": 1,
+        }
+
+        try:
+            resp = requests.get(_LASTFM_BASE, params=params, timeout=10)
+            resp.raise_for_status()
+            track_data = resp.json().get("track", {})
+            if not track_data:
+                return None
+
+            listeners = int(track_data.get("listeners", 0))
+            playcount = int(track_data.get("playcount", 0))
+            return _classify_popularity(listeners, playcount)
+
+        except Exception:  # noqa: BLE001 — popularity is always best-effort
+            return None
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +295,48 @@ def _resolve_youtube_url(artist: str, title: str) -> Optional[str]:
         pass
 
     return None
+
+
+def _classify_popularity(
+    listeners: int,
+    playcount: int,
+    constants: object | None = None,
+) -> PopularityResult:
+    """
+    Classify a track's popularity tier and estimate sync cost range.
+
+    Tier boundaries and cost ranges come from SystemConstants — no magic numbers.
+    Accepts an optional constants override for unit testing without env deps.
+
+    Args:
+        listeners:  Last.fm unique listener count.
+        playcount:  Last.fm total scrobble count.
+        constants:  Optional SystemConstants instance; defaults to CONSTANTS.
+
+    Returns:
+        PopularityResult with tier and estimated sync cost range.
+    """
+    cfg = constants or CONSTANTS
+    if listeners >= cfg.POPULARITY_GLOBAL_MIN:
+        tier                = "Global"
+        cost_low, cost_high = cfg.SYNC_COST_GLOBAL
+    elif listeners >= cfg.POPULARITY_MAINSTREAM_MIN:
+        tier                = "Mainstream"
+        cost_low, cost_high = cfg.SYNC_COST_MAINSTREAM
+    elif listeners >= cfg.POPULARITY_REGIONAL_MIN:
+        tier                = "Regional"
+        cost_low, cost_high = cfg.SYNC_COST_REGIONAL
+    else:
+        tier                = "Emerging"
+        cost_low, cost_high = cfg.SYNC_COST_EMERGING
+
+    return PopularityResult(
+        listeners=listeners,
+        playcount=playcount,
+        tier=tier,
+        sync_cost_low=cost_low,
+        sync_cost_high=cost_high,
+    )
 
 
 def _find_binary(name: str) -> Optional[str]:

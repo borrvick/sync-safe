@@ -282,6 +282,21 @@ class AuthorshipResult(BaseModel):
 # Discovery & Legal
 # ---------------------------------------------------------------------------
 
+class PopularityResult(BaseModel):
+    """Last.fm popularity data for the scanned track."""
+
+    model_config = ConfigDict(frozen=True)
+
+    listeners: int           # unique listeners on Last.fm
+    playcount: int           # total scrobbles on Last.fm
+    tier: str                # "Emerging" | "Regional" | "Mainstream" | "Global"
+    sync_cost_low: int       # estimated sync fee lower bound (USD)
+    sync_cost_high: int      # estimated sync fee upper bound (USD)
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.model_dump()
+
+
 class TrackCandidate(BaseModel):
     """A similar track returned by the discovery service."""
 
@@ -330,6 +345,7 @@ class AnalysisResult(BaseModel):
     authorship: Optional[AuthorshipResult]                  = None
     similar_tracks: list[TrackCandidate]                    = Field(default_factory=list)
     legal: Optional[LegalLinks]                             = None
+    popularity: Optional[PopularityResult]                  = None
 
     def to_dict(self) -> dict[str, Any]:
         """

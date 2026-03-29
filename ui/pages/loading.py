@@ -557,14 +557,17 @@ def render_loading(source: Any) -> None:
     else:
         _advance("discovery", t0)
 
-    # ── Step 8: Legal links ───────────────────────────────────────────────
+    # ── Step 8: Legal links + popularity ─────────────────────────────────
     _tick("Legal Links", "legal")
     t0 = time.time()
-    legal = None
+    legal      = None
+    popularity = None
     log.step_start("legal")
     try:
+        from services.discovery import Discovery
         from services.legal import Legal
-        legal = Legal().get_links(title, artist)
+        legal      = Legal().get_links(title, artist)
+        popularity = Discovery().get_track_popularity(title, artist)
     except SyncSafeError as exc:
         _advance("legal", t0, error=str(exc))
     except Exception as exc:  # noqa: BLE001 — UI boundary
@@ -591,6 +594,7 @@ def render_loading(source: Any) -> None:
             "authorship":     authorship,
             "similar_tracks": similar,
             "legal":          legal,
+            "popularity":     popularity,
         },
         from_attributes=True,
     )
