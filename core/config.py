@@ -107,6 +107,18 @@ class SystemConstants:
     # ---- Discovery ------------------------------------------------------------
     MAX_SIMILAR_TRACKS: int = 5
 
+    # ---- Pipeline step timeout budgets (seconds) ------------------------------
+    # Generous walls to prevent hung subprocesses (yt-dlp, Whisper, allin1)
+    # from blocking the UI indefinitely on ZeroGPU.
+    STEP_TIMEOUT_INGESTION_S: int     = 120
+    STEP_TIMEOUT_STRUCTURE_S: int     = 90
+    STEP_TIMEOUT_TRANSCRIPTION_S: int = 180   # Whisper on cold GPU is slow
+    STEP_TIMEOUT_FORENSICS_S: int     = 60
+    STEP_TIMEOUT_COMPLIANCE_S: int    = 60
+    STEP_TIMEOUT_AUTHORSHIP_S: int    = 30
+    STEP_TIMEOUT_DISCOVERY_S: int     = 30
+    STEP_TIMEOUT_LEGAL_S: int         = 30
+
     # ---- Loudness & Dialogue (LUFS / ITU-R BS.1770-4) ------------------------
     # Target integrated loudness per platform (LUFS)
     LUFS_SPOTIFY: float       = -14.0
