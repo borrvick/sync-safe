@@ -58,6 +58,18 @@ _STEPS: list[tuple[str, str, int, str]] = [
 _TOTAL_EST: int = sum(s[2] for s in _STEPS)
 
 # ---------------------------------------------------------------------------
+# Skeleton card definitions — shown below the step checklist while pipeline
+# runs to preview the shape of the report sections being built.
+# Label text chosen to match the analysis step currently doing the work.
+# ---------------------------------------------------------------------------
+
+_SKELETON_CARDS: list[tuple[str, str]] = [
+    ("forensics",     "Analyzing Spectral Fingerprints…"),
+    ("compliance",    "Running Compliance Checks…"),
+    ("transcription", "Reading Lyrics…"),
+]
+
+# ---------------------------------------------------------------------------
 # Loading page CSS — injected once at the start of render_loading.
 # Makes the main block fill the full viewport and center content vertically.
 # Safe to inject here: when the pipeline finishes and st.rerun() transitions
@@ -85,6 +97,13 @@ _LOADING_CSS = """
   margin: 0 auto !important;
   width: 100% !important;
 }
+/* Skeleton loader pulse — opacity only, no layout thrash */
+@keyframes sk-pulse {
+  0%, 100% { opacity: 0.25; }
+  50%       { opacity: 0.55; }
+}
+.sk-pulse { animation: sk-pulse 1.6s ease-in-out infinite; }
+
 /* Slim accent progress bar */
 [data-testid="stProgress"] > div {
   background: rgba(245,100,10,.12) !important;
@@ -109,6 +128,42 @@ def _fmt(secs: float) -> str:
     """Format seconds as M:SS."""
     s = max(0, int(secs))
     return f"{s // 60}:{s % 60:02d}"
+
+
+def _skeleton_html(active_step_key: str) -> str:
+    """
+    Return animated skeleton placeholder cards for the three main report sections.
+
+    Cards are shown for steps that have not yet completed. Once a step finishes
+    its card disappears, giving a sense of the report assembling in real time.
+    active_step_key is the key of the currently-running step.
+    """
+    # Steps before the active one are complete; their skeleton cards are hidden.
+    # If active_step_key is unrecognised or empty, treat all as pending (show all cards).
+    active_idx = next(
+        (i for i, (k, *_) in enumerate(_STEPS) if k == active_step_key),
+        0,
+    )
+    completed_keys = {key for key, *_ in _STEPS[:active_idx]}
+    cards = ""
+    for step_key, label in _SKELETON_CARDS:
+        if step_key in completed_keys:
+            continue
+        cards += (
+            f'<div class="sk-pulse" aria-hidden="true"'
+            f' style="border:1px solid var(--border);border-radius:10px;'
+            f'padding:14px 16px;margin-bottom:8px;background:var(--s1);">'
+            f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">'
+            f'<div style="width:6px;height:6px;border-radius:50%;'
+            f'background:var(--dim);flex-shrink:0;"></div>'
+            f'<div style="font-family:\'JetBrains Mono\',monospace;font-size:.58rem;'
+            f'color:var(--dim);letter-spacing:.1em;text-transform:uppercase;">{label}</div>'
+            f'</div>'
+            f'<div style="height:8px;border-radius:4px;background:var(--border);width:85%;margin-bottom:6px;"></div>'
+            f'<div style="height:8px;border-radius:4px;background:var(--border);width:60%;"></div>'
+            f'</div>'
+        )
+    return cards
 
 
 # Tooltip + progress bar CSS injected once per _draw() call.
@@ -334,14 +389,15 @@ def render_loading(source: Any) -> None:
     st.markdown(_LOADING_CSS, unsafe_allow_html=True)
     _render_brand()
 
-    header_ph = st.empty()
-    bar_ph    = st.empty()
-    steps_ph  = st.empty()
+    header_ph   = st.empty()
+    bar_ph      = st.empty()
+    steps_ph    = st.empty()
     # Timer uses st.components.v1.html() (real iframe, JS executes).
     # Placed here in layout order before error_ph. Never updated — the
     # JS setInterval runs for the full pipeline duration on its own.
     _start_timer()
-    error_ph  = st.empty()
+    skeleton_ph = st.empty()
+    error_ph    = st.empty()
 
     completed      = 0
     step_durations: list[float] = []
@@ -350,8 +406,14 @@ def render_loading(source: Any) -> None:
 
     log.pipeline_start(source=str(source))
 
-    def _tick(label: str) -> None:
+    def _tick(label: str, step_key: str = "") -> None:
         _draw(header_ph, bar_ph, steps_ph, completed, label, step_durations)
+        if step_key:
+            html = _skeleton_html(step_key)
+            if html:
+                skeleton_ph.markdown(html, unsafe_allow_html=True)
+            else:
+                skeleton_ph.empty()
 
     def _advance(key: str, step_start: float, error: str | None = None,
                  context: dict | None = None) -> None:
@@ -365,7 +427,7 @@ def render_loading(source: Any) -> None:
             log.step_end(key, duration_s=duration)
 
     # ── Step 1: Ingestion (fatal on failure) ──────────────────────────────
-    _tick("Fetching Audio")
+    _tick("Fetching Audio", "ingestion")
     t0 = time.time()
     log.step_start("ingestion")
     try:
@@ -396,7 +458,7 @@ def render_loading(source: Any) -> None:
         print(f"[DEBUG_ANALYSIS] Audio saved → {_dest}")
 
     # ── Step 2: Structure analysis (title/artist needed for lyrics lookup) ──
-    _tick("Analysing Structure")
+    _tick("Analysing Structure", "structure")
     t0 = time.time()
     structure = None
     log.step_start("structure")
@@ -417,7 +479,7 @@ def render_loading(source: Any) -> None:
     artist = (structure.metadata.get("artist", "") if structure else "") or audio.metadata.get("artist", "")
 
     # ── Step 3: Transcription (LRCLib first, then Demucs+Whisper fallback) ─
-    _tick("Transcribing Lyrics")
+    _tick("Transcribing Lyrics", "transcription")
     t0 = time.time()
     transcript = []
     log.step_start("transcription")
@@ -432,7 +494,7 @@ def render_loading(source: Any) -> None:
         _advance("transcription", t0)
 
     # ── Step 4: Forensics ─────────────────────────────────────────────────
-    _tick("Forensic Scan")
+    _tick("Forensic Scan", "forensics")
     t0 = time.time()
     forensics = None
     log.step_start("forensics")
@@ -449,7 +511,7 @@ def render_loading(source: Any) -> None:
         _advance("forensics", t0)
 
     # ── Step 5: Compliance ────────────────────────────────────────────────
-    _tick("Compliance Audit")
+    _tick("Compliance Audit", "compliance")
     t0 = time.time()
     compliance = None
     log.step_start("compliance")
@@ -466,7 +528,7 @@ def render_loading(source: Any) -> None:
         _advance("compliance", t0)
 
     # ── Step 6: Authorship ────────────────────────────────────────────────
-    _tick("Authorship Check")
+    _tick("Authorship Check", "authorship")
     t0 = time.time()
     authorship = None
     log.step_start("authorship")
@@ -481,7 +543,7 @@ def render_loading(source: Any) -> None:
         _advance("authorship", t0)
 
     # ── Step 7: Track discovery ───────────────────────────────────────────
-    _tick("Track Discovery")
+    _tick("Track Discovery", "discovery")
     t0 = time.time()
     similar = []
     log.step_start("discovery")
@@ -496,7 +558,7 @@ def render_loading(source: Any) -> None:
         _advance("discovery", t0)
 
     # ── Step 8: Legal links ───────────────────────────────────────────────
-    _tick("Legal Links")
+    _tick("Legal Links", "legal")
     t0 = time.time()
     legal = None
     log.step_start("legal")
@@ -513,6 +575,7 @@ def render_loading(source: Any) -> None:
     # ── All done — render final state then transition ─────────────────────
     log.pipeline_end(duration_s=time.time() - pipeline_start)
     _draw(header_ph, bar_ph, steps_ph, completed, "", step_durations)
+    skeleton_ph.empty()
 
     # model_validate with from_attributes=True re-parses each field from its
     # current attribute values, bypassing Pydantic's strict class-identity check.
