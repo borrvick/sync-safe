@@ -6,15 +6,10 @@ on communication and the portal page can focus on the task.
 """
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import streamlit as st
 
 from ui.components import eq_bars
 from ui.nav import render_site_nav, render_site_footer
-
-_DEBUG_DIR = Path(__file__).parent.parent.parent / "local" / "debug"
 
 
 def render_portal() -> None:
@@ -75,6 +70,11 @@ def render_portal() -> None:
                     "url",
                     placeholder="https://youtube.com/watch?v=...",
                     label_visibility="collapsed",
+                )
+                st.caption(
+                    "⚠️ YouTube audio is compressed (~128 kbps AAC) and may reduce "
+                    "accuracy of spectral and AI detection signals. "
+                    "For best results, upload a WAV or FLAC file directly."
                 )
                 if st.button("Initiate Scan →", type="primary",
                              use_container_width=True, key="run_url"):
