@@ -346,13 +346,17 @@ class TrackCandidate(BaseModel):
 
 
 class LegalLinks(BaseModel):
-    """PRO repertory search URLs for a given track."""
+    """PRO repertory search URLs and inferred PRO match for a given track."""
 
     model_config = ConfigDict(frozen=True)
 
     ascap: str  = ""
     bmi: str    = ""
     sesac: str  = ""
+
+    # Populated by services/pro_lookup.py — None when MusicBrainz returns no hit
+    isrc: Optional[str]      = None  # e.g. "US-ABC-23-12345"
+    pro_match: Optional[str] = None  # e.g. "ASCAP/BMI (US)", "PRS (UK)"
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
