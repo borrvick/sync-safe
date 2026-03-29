@@ -6,8 +6,12 @@ All functions accept typed domain models from core.models; no raw dict access.
 """
 from __future__ import annotations
 
+import csv
 import html as html_mod
+import io
+import re
 from collections import Counter, OrderedDict
+from datetime import datetime, timezone
 from typing import Optional
 
 import streamlit as st
@@ -76,6 +80,7 @@ def render_report(
     with st.expander("Lyrics & Content Audit", expanded=True):
         _render_lyric_section(result)
 
+    _render_export_buttons(result)
     _render_footer()
 
 
@@ -1251,6 +1256,214 @@ def _render_flag_rows(flag_list: list[ComplianceFlag], prefix: str) -> None:
 # ---------------------------------------------------------------------------
 # Footer
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Export — pure serialisation helpers
+# ---------------------------------------------------------------------------
+
+def _to_latin1(text: str) -> str:
+    """
+    Sanitise a string for the Helvetica built-in PDF font (latin-1 only).
+    Replaces characters outside latin-1 with '?' to avoid FPDFUnicodeEncodingException.
+    Pure function — no I/O.
+    """
+    return text.encode("latin-1", errors="replace").decode("latin-1")
+
+
+def _compliance_flags_to_csv(result: AnalysisResult) -> bytes:
+    """
+    Serialise all compliance flags + structural checks to CSV bytes.
+
+    Pure function — no I/O, no Streamlit calls.
+    Columns: section, check, status, confidence, severity, timestamp_s, text, recommendation
+    """
+    buf = io.StringIO()
+    writer = csv.DictWriter(
+        buf,
+        fieldnames=["section", "check", "status", "confidence", "severity",
+                    "timestamp_s", "text", "recommendation"],
+        extrasaction="ignore",
+    )
+    writer.writeheader()
+
+    # Compliance flags from lyric audit
+    if result.compliance:
+        for flag in result.compliance.flags:
+            writer.writerow({
+                "section":        "Lyric Audit",
+                "check":          flag.issue_type,
+                "status":         "FLAG",
+                "confidence":     flag.confidence,
+                "severity":       flag.severity,
+                "timestamp_s":    flag.timestamp_s,
+                "text":           flag.text,
+                "recommendation": flag.recommendation,
+            })
+        # Structural checks
+        for check, status, detail in [
+            ("Sting / Ending",    "FLAG" if result.compliance.sting.flag else "PASS",
+             result.compliance.sting.ending_type),
+            ("Energy Evolution",  "FLAG" if result.compliance.evolution.flag else "PASS",
+             result.compliance.evolution.detail),
+            ("Intro Length",      "FLAG" if result.compliance.intro.flag else "PASS",
+             f"{result.compliance.intro.intro_seconds:.1f}s"),
+        ]:
+            writer.writerow({
+                "section":    "Structural",
+                "check":      check,
+                "status":     status,
+                "confidence": "confirmed",
+                "severity":   "soft",
+                "text":       detail,
+            })
+
+    return buf.getvalue().encode("utf-8-sig")  # BOM for Excel compatibility
+
+
+def _analysis_to_pdf(result: AnalysisResult) -> bytes:
+    """
+    Generate a minimal compliance certificate PDF using fpdf2.
+
+    Pure function — no I/O, no Streamlit calls.
+    Returns raw PDF bytes.
+    """
+    from fpdf import FPDF  # deferred — not all deployments need it
+
+    title   = _to_latin1(result.audio.metadata.get("title", "") or result.audio.label or "Unknown Track")
+    artist  = _to_latin1(result.audio.metadata.get("artist", "") or "Unknown Artist")
+    grade   = result.compliance.grade if result.compliance else "N/A"
+    scan_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
+
+    # Header
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.set_text_color(30, 30, 30)
+    pdf.cell(0, 10, "SYNC-SAFE COMPLIANCE CERTIFICATE", new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(120, 120, 120)
+    pdf.cell(0, 6, f"Generated {scan_ts}", new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.ln(4)
+
+    # Track metadata
+    pdf.set_fill_color(240, 240, 240)
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(30, 30, 30)
+    pdf.cell(0, 8, f"{title}  /  {artist}", new_x="LMARGIN", new_y="NEXT", fill=True)
+    pdf.ln(4)
+
+    # Compliance grade
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 10, f"Compliance Grade: {grade}", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+
+    # Forensics verdict
+    if result.forensics:
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 8, "AI / Authenticity Verdict", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 10)
+        # verdict is an ASCII Literal — _to_latin1 is a no-op but applied for consistency
+        pdf.cell(0, 6, _to_latin1(result.forensics.verdict), new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(2)
+
+    # Compliance flags table
+    _pdf_flags_table(pdf, result)
+
+    # ISRC / PRO
+    if result.legal and (result.legal.isrc or result.legal.pro_match):
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 8, "Rights Information", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 10)
+        if result.legal.isrc:
+            pdf.cell(0, 6, _to_latin1(f"ISRC: {result.legal.isrc}"), new_x="LMARGIN", new_y="NEXT")
+        if result.legal.pro_match:
+            pdf.cell(0, 6, _to_latin1(f"Inferred PRO: {result.legal.pro_match}"), new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(2)
+
+    # Footer disclaimer
+    pdf.ln(8)
+    pdf.set_font("Helvetica", "I", 7)
+    pdf.set_text_color(150, 150, 150)
+    pdf.multi_cell(0, 4, "This certificate is generated by Sync-Safe and is for informational "
+                         "purposes only. It does not constitute legal advice. Verify all rights "
+                         "information with the relevant PRO before licensing.")
+
+    return pdf.output()
+
+
+def _pdf_flags_table(pdf: "FPDF", result: AnalysisResult) -> None:
+    """Render the compliance flags table into an existing FPDF document."""
+    if not (result.compliance and result.compliance.flags):
+        return
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, "Compliance Flags", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_fill_color(200, 200, 200)
+    col_w = [18, 28, 80, 60]
+    for header, w in zip(["Time", "Type", "Excerpt", "Recommendation"], col_w):
+        pdf.cell(w, 7, header, border=1, fill=True)
+    pdf.ln()
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_fill_color(255, 255, 255)
+    for flag in result.compliance.flags:
+        cells = [
+            f"{flag.timestamp_s}s",
+            flag.issue_type,
+            _to_latin1(flag.text[:60]),
+            _to_latin1(flag.recommendation[:40]),
+        ]
+        for text, w in zip(cells, col_w):
+            pdf.cell(w, 6, text, border=1)
+        pdf.ln()
+    pdf.ln(4)
+
+
+def _render_export_buttons(result: AnalysisResult) -> None:
+    """Render CSV and PDF export download buttons."""
+    st.markdown("""
+    <div style="font-family:'Chakra Petch',monospace;font-size:.58rem;font-weight:600;
+                letter-spacing:.18em;text-transform:uppercase;color:var(--dim);
+                display:flex;align-items:center;gap:10px;margin:28px 0 14px;">
+      <span>◈ Export Report</span>
+      <div style="flex:1;height:1px;background:var(--border-hr);"></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Sanitise for safe filenames across all OS: keep alphanumeric, dash, dot only
+    raw_slug   = result.audio.metadata.get("title", "") or result.audio.label or "sync-safe-report"
+    track_slug = re.sub(r"[^\w\-.]", "-", raw_slug).strip("-")[:40].lower() or "sync-safe-report"
+
+    c_csv, c_pdf = st.columns(2, gap="medium")
+
+    with c_csv:
+        csv_bytes = _compliance_flags_to_csv(result)
+        st.download_button(
+            label="⬇ Download CSV",
+            data=csv_bytes,
+            file_name=f"{track_slug}-compliance.csv",
+            mime="text/csv",
+            use_container_width=True,
+            help="Compliance flags and structural checks as a spreadsheet",
+        )
+
+    with c_pdf:
+        try:
+            pdf_bytes = _analysis_to_pdf(result)
+            st.download_button(
+                label="⬇ Download PDF",
+                data=bytes(pdf_bytes),
+                file_name=f"{track_slug}-certificate.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                help="Compliance certificate with grade, flags, and rights info",
+            )
+        except ImportError:
+            st.caption("PDF export requires fpdf2 — install with `pip install fpdf2`.")
+        except Exception as exc:  # noqa: BLE001 — UI boundary; PDF errors must not crash the report
+            st.error(f"PDF generation failed: {exc}")
+
 
 def _render_footer() -> None:
     st.markdown("""
