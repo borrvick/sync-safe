@@ -107,6 +107,10 @@ class SystemConstants:
     # ---- Discovery ------------------------------------------------------------
     MAX_SIMILAR_TRACKS: int = 5
 
+    # ---- MusicBrainz API --------------------------------------------------------
+    # Per-request HTTP timeout for MusicBrainz recordings API calls.
+    MB_TIMEOUT_S: int = 8
+
     # ---- Pipeline step timeout budgets (seconds) ------------------------------
     # Generous walls to prevent hung subprocesses (yt-dlp, Whisper, allin1)
     # from blocking the UI indefinitely on ZeroGPU.
@@ -663,6 +667,15 @@ class Settings(BaseSettings):
     hf_token: Optional[str] = Field(
         default=None,
         description="HuggingFace token for private model access (optional).",
+    )
+
+    # ---- MusicBrainz API (PRO lookup) -----------------------------------------
+    # MusicBrainz requires a descriptive User-Agent for all API requests.
+    # Format: "AppName/Version (contact_url_or_email)"
+    musicbrainz_app: str = Field(
+        default="sync-safe-forensic-portal/1.0 (https://github.com/borrvick/sync-safe)",
+        description="User-Agent string sent to MusicBrainz API. "
+                    "Set to your app name, version, and contact URL/email.",
     )
 
     # ---- Model selection ------------------------------------------------------

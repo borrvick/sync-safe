@@ -22,6 +22,7 @@ Swap guide:
   AuthorshipAnalyzer → swap RoBERTa for GPTZero API or a fine-tuned model
   TrackDiscovery     → swap Last.fm for Spotify, Soundcharts, or internal DB
   LegalLinksProvider → swap static URL templates for a live licensing API
+  ProLookupProvider  → swap MusicBrainz for a paid metadata provider
 """
 from __future__ import annotations
 
@@ -307,5 +308,29 @@ class LegalLinksProvider(Protocol):
 
         Returns:
             LegalLinks with ASCAP, BMI, and SESAC search URLs.
+        """
+        ...
+
+
+class ProLookupProvider(Protocol):
+    """
+    Best-effort ISRC and PRO affiliation lookup from an external metadata source.
+
+    Implementations: services/pro_lookup.py (MusicBrainz recordings API)
+    Swap candidates:  Songkick, AcousticBrainz, or a paid licensing data provider.
+    """
+
+    def lookup(
+        self,
+        title: str,
+        artist: str,
+    ) -> tuple[Optional[str], Optional[str]]:
+        """
+        Args:
+            title:  Track title.
+            artist: Artist name.
+
+        Returns:
+            (isrc, pro_match) tuple — both None when no match found or on error.
         """
         ...

@@ -889,6 +889,27 @@ def _render_legal_and_discovery(result: AnalysisResult) -> None:
     """, unsafe_allow_html=True)
 
     if result.legal:
+        # ISRC + inferred PRO badge (only shown when MusicBrainz returned a hit)
+        if result.legal.isrc or result.legal.pro_match:
+            isrc_text = html_mod.escape(result.legal.isrc or "—")
+            pro_text  = html_mod.escape(result.legal.pro_match or "Unknown")
+            st.markdown(f"""
+            <div class="sig" style="padding:14px 18px;margin-bottom:12px;display:flex;
+                         flex-wrap:wrap;gap:18px;align-items:center;">
+              <div>
+                <div style="font-size:.58rem;font-weight:600;letter-spacing:.14em;
+                            text-transform:uppercase;color:var(--dim);margin-bottom:4px;">ISRC</div>
+                <div style="font-family:'Chakra Petch',monospace;font-size:.9rem;
+                            color:var(--text);">{isrc_text}</div>
+              </div>
+              <div>
+                <div style="font-size:.58rem;font-weight:600;letter-spacing:.14em;
+                            text-transform:uppercase;color:var(--dim);margin-bottom:4px;">Inferred PRO</div>
+                <div style="font-family:'Chakra Petch',monospace;font-size:.9rem;
+                            color:var(--accent);">{pro_text}</div>
+              </div>
+            </div>""", unsafe_allow_html=True)
+
         for name, url in [("ASCAP", result.legal.ascap), ("BMI", result.legal.bmi), ("SESAC", result.legal.sesac)]:
             if url:
                 st.link_button(f"Search {name} →", url, use_container_width=True)

@@ -612,7 +612,10 @@ def render_loading(source: Any) -> None:
             from services.discovery import Discovery
             from services.legal import Legal
             from services.loudness import AudioQualityAnalyzer
-            legal         = Legal().get_links(title, artist)
+            from services.pro_lookup import ProLookup
+            base_links    = Legal().get_links(title, artist)
+            isrc, pro     = ProLookup().lookup(title, artist)
+            legal         = base_links.model_copy(update={"isrc": isrc, "pro_match": pro})
             popularity    = Discovery().get_track_popularity(title, artist)
             audio_quality = AudioQualityAnalyzer().analyze(audio)
     except StepTimeoutError as exc:
