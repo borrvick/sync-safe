@@ -22,6 +22,7 @@ Swap guide:
   AuthorshipAnalyzer → swap RoBERTa for GPTZero API or a fine-tuned model
   TrackDiscovery     → swap Last.fm for Spotify, Soundcharts, or internal DB
   LegalLinksProvider → swap static URL templates for a live licensing API
+  TagInjectorProvider       → swap mutagen for a cloud tagging API or a different tag schema
   PlatformExportProvider    → swap built-in CSV templates for a paid sync API (Songtradr, etc.)
   MetadataValidatorProvider → swap local rules for AllTrack, DDEX, or SoundExchange
   ProLookupProvider  → swap MusicBrainz for a paid metadata provider
@@ -311,6 +312,27 @@ class LegalLinksProvider(Protocol):
 
         Returns:
             LegalLinks with ASCAP, BMI, and SESAC search URLs.
+        """
+        ...
+
+
+class TagInjectorProvider(Protocol):
+    """
+    Embed audit results into audio file tags.
+
+    Implementations: services/tag_injector.py (TagInjector)
+    Swap candidates:  Cloud-based tag writing service, BWF metadata standard
+    """
+
+    def inject(self, audio_bytes: bytes, result: AnalysisResult) -> bytes:
+        """
+        Args:
+            audio_bytes: Raw audio bytes (MP3, FLAC, OGG, M4A).
+            result:      Complete AnalysisResult to embed as SYNC_SAFE_* tags.
+
+        Returns:
+            Audio bytes with tags injected; returns *audio_bytes* unchanged
+            if the format is unsupported or tagging fails (non-fatal).
         """
         ...
 
