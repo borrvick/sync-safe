@@ -107,6 +107,11 @@ class SystemConstants:
     # ---- Discovery ------------------------------------------------------------
     MAX_SIMILAR_TRACKS: int = 5
 
+    # ---- Metadata / Split Sheet Validation ------------------------------------
+    # Writer/publisher splits must sum to 100 % within this tolerance.
+    # Allows for standard 2-decimal-place rounding (e.g. 33.33 + 33.33 + 33.34).
+    SPLIT_TOLERANCE: float = 0.01
+
     # ---- MusicBrainz API --------------------------------------------------------
     # Per-request HTTP timeout for MusicBrainz recordings API calls.
     MB_TIMEOUT_S: int = 8

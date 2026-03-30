@@ -633,22 +633,41 @@ def render_loading(source: Any) -> None:
     _draw(header_ph, bar_ph, steps_ph, completed, "", step_durations)
     skeleton_ph.empty()
 
+    # ── Metadata pre-flight validation ───────────────────────────────────────
+    # Reads intake_metadata stored by portal.py.  Non-fatal: always produces a
+    # result (valid or invalid) — never blocks or raises here.
+    metadata_validation = None
+    intake = st.session_state.get("intake_metadata") or {}
+    if intake:
+        from services.metadata_validator import MetadataValidator
+        metadata_validation = MetadataValidator().validate(
+            fields={
+                "title":     intake.get("title", ""),
+                "artist":    intake.get("artist", ""),
+                "pro":       intake.get("pro", ""),
+                "publisher": intake.get("publisher", ""),
+            },
+            splits=intake.get("splits", []),
+            isrc=intake.get("isrc", ""),
+        )
+
     # model_validate with from_attributes=True re-parses each field from its
     # current attribute values, bypassing Pydantic's strict class-identity check.
     # This prevents ValidationError when Streamlit hot-reloads cause the model
     # classes used by service modules to diverge from the ones in this module.
     result = AnalysisResult.model_validate(
         {
-            "audio":          audio,
-            "structure":      structure,
-            "forensics":      forensics,
-            "transcript":     transcript,
-            "compliance":     compliance,
-            "authorship":     authorship,
-            "similar_tracks": similar,
-            "legal":          legal,
-            "popularity":     popularity,
-            "audio_quality":  audio_quality,
+            "audio":               audio,
+            "structure":           structure,
+            "forensics":           forensics,
+            "transcript":          transcript,
+            "compliance":          compliance,
+            "authorship":          authorship,
+            "similar_tracks":      similar,
+            "legal":               legal,
+            "popularity":          popularity,
+            "audio_quality":       audio_quality,
+            "metadata_validation": metadata_validation,
         },
         from_attributes=True,
     )

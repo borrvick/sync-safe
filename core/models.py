@@ -345,6 +345,27 @@ class TrackCandidate(BaseModel):
         return self.model_dump()
 
 
+class MetadataValidationResult(BaseModel):
+    """
+    Result of pre-flight track rights metadata validation.
+
+    Produced by services/metadata_validator.py before the scan pipeline runs.
+    Stored in AnalysisResult so the compliance report can surface intake issues.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    valid: bool                         # True when all checks pass
+    missing_fields: list[str]           = Field(default_factory=list)
+    split_total: float                  = 0.0   # sum of supplied writer splits
+    split_error: Optional[float]        = None  # abs deviation from 100.0, or None if not supplied
+    isrc_valid: bool                    = True  # True when ISRC matches ISO 3901 or was not provided
+    rejection_reason: Optional[str]     = None  # human-readable summary; None when valid
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.model_dump()
+
+
 class LegalLinks(BaseModel):
     """PRO repertory search URLs and inferred PRO match for a given track."""
 
@@ -385,6 +406,7 @@ class AnalysisResult(BaseModel):
     legal: Optional[LegalLinks]                             = None
     popularity: Optional[PopularityResult]                  = None
     audio_quality: Optional[AudioQualityResult]             = None
+    metadata_validation: Optional[MetadataValidationResult] = None
 
     def to_dict(self) -> dict[str, Any]:
         """

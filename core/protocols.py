@@ -22,6 +22,7 @@ Swap guide:
   AuthorshipAnalyzer → swap RoBERTa for GPTZero API or a fine-tuned model
   TrackDiscovery     → swap Last.fm for Spotify, Soundcharts, or internal DB
   LegalLinksProvider → swap static URL templates for a live licensing API
+  MetadataValidatorProvider → swap local rules for AllTrack, DDEX, or SoundExchange
   ProLookupProvider  → swap MusicBrainz for a paid metadata provider
 """
 from __future__ import annotations
@@ -39,6 +40,7 @@ from core.models import (
     ComplianceReport,
     ForensicsResult,
     LegalLinks,
+    MetadataValidationResult,
     StructureResult,
     TrackCandidate,
     TranscriptSegment,
@@ -308,6 +310,33 @@ class LegalLinksProvider(Protocol):
 
         Returns:
             LegalLinks with ASCAP, BMI, and SESAC search URLs.
+        """
+        ...
+
+
+class MetadataValidatorProvider(Protocol):
+    """
+    Validate pre-flight track rights metadata at sync intake.
+
+    Implementations: services/metadata_validator.py (MetadataValidator)
+    Swap candidates:  A paid metadata registry (AllTrack, DDEX, SoundExchange)
+    """
+
+    def validate(
+        self,
+        fields: dict[str, str],
+        splits: list[float],
+        isrc: str = "",
+    ) -> MetadataValidationResult:
+        """
+        Args:
+            fields: Mapping of required intake field names to values.
+                    Expected keys: "title", "artist", "pro", "publisher".
+            splits: List of writer/publisher percentage splits (must sum to 100).
+            isrc:   ISRC string; empty means not yet known.
+
+        Returns:
+            MetadataValidationResult with per-field detail and rejection reason.
         """
         ...
 
