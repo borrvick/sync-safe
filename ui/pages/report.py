@@ -58,6 +58,16 @@ _TAGGED_MIME_MAP: dict[str, str] = {
     ".ogg": "audio/ogg",  ".m4a": "audio/mp4", ".wav": "audio/wav",
 }
 
+# Display-only threshold for infrasonic ⚠ icon (human FMC p95 × 10).
+# Does NOT affect the verdict — infrasonic is in monitoring mode.
+# Verdict threshold is CONSTANTS.INFRASONIC_ENERGY_RATIO_AI_MIN (currently 0.0 / DISABLED).
+_INFRASONIC_WARN_DISPLAY: float = 0.005
+
+
+def _boundary_val(v: float, fmt: str = ".5f", unavail: str = "N/A") -> str:
+    """Format a spectral boundary signal score; return 'N/A' for the -1.0 sentinel."""
+    return unavail if v < 0.0 else format(v, fmt)
+
 
 # ---------------------------------------------------------------------------
 # OpenGraph + JSON-LD meta tags
@@ -703,6 +713,52 @@ def _render_production_analysis_card(fr: Optional[ForensicsResult], source: str 
           </span>
         </span>
         <span class="sv">{autocorr_fmt}</span>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Spectral boundary signals (monitoring mode — not yet in verdict) ─────
+    infra  = fr.infrasonic_energy_ratio
+    ultra  = fr.ultrasonic_noise_ratio
+    phase  = fr.phase_coherence_differential
+
+    # Infrasonic warning uses the FMC human-p95 (0.000467) × 10 as a display
+    # floor — not the disabled CONSTANTS threshold which is 0.0.
+    # Shown as informational only; does not affect verdict.
+    infra_note = " ⚠" if (infra >= 0.0 and infra >= _INFRASONIC_WARN_DISPLAY) else ""
+    st.markdown(f"""
+    <div class="sig">
+      <div class="sig-head">Spectral Boundary Signals</div>
+      <div style="font-family:'Figtree',sans-serif;font-size:.82rem;color:var(--dim);
+                  line-height:1.5;margin-bottom:18px;">
+        Energy in normally-silent spectral zones. Real recordings have none;
+        AI diffusion math can leave measurable residue. These signals are in
+        <em>monitoring mode</em> — they are computed and stored but do not yet
+        contribute to the verdict (pending cross-dataset calibration).
+      </div>
+      <div class="sig-row">
+        <span class="sk">Infrasonic Ratio (&lt;20 Hz)
+          <span class="tip-wrap"><span class="tip-icon">?</span>
+            <span class="tip-box">Energy fraction in 1–20 Hz. Real microphones cannot capture sub-sonic frequencies. AI diffusion can leave DC bias or rumble here. Values above ~0.5% are elevated.</span>
+          </span>
+        </span>
+        <span class="sv">{_boundary_val(infra)}{infra_note}</span>
+      </div>
+      <div class="sig-row">
+        <span class="sk">Ultrasonic Ratio (20–22 kHz)
+          <span class="tip-wrap"><span class="tip-icon">?</span>
+            <span class="tip-box">Energy fraction in 20–22 kHz band. Only computed for uploads with native SR ≥ 40 kHz. Human masters are shelf-filtered above 18–20 kHz. N/A for YouTube or low-SR files.</span>
+          </span>
+        </span>
+        <span class="sv">{_boundary_val(ultra, ".6f")}</span>
+      </div>
+      <div class="sig-row">
+        <span class="sk">Phase Coherence Δ (LF−HF)
+          <span class="tip-wrap"><span class="tip-icon">?</span>
+            <span class="tip-box">LF inter-channel coherence minus HF coherence. AI diffusion can generate low and high frequencies as separate events, making HF phase incoherent while LF stays stable. Positive = AI pattern; N/A for mono sources.</span>
+          </span>
+        </span>
+        <span class="sv">{_boundary_val(phase, ".3f")}</span>
       </div>
     </div>
     """, unsafe_allow_html=True)
