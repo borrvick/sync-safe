@@ -15,16 +15,19 @@ Design rules:
 """
 from __future__ import annotations
 
+import logging
 import os
 import time
 from typing import Any
+
+_log = logging.getLogger(__name__)
 
 import streamlit as st
 
 from core.config import CONSTANTS, get_settings
 from core.exceptions import StepTimeoutError, SyncSafeError
 from core.logging import DEFAULT_LOG_DIR, PipelineLogger
-from core.models import AnalysisResult, AudioBuffer
+from core.models import AnalysisResult, AudioBuffer, SyncCut
 from core.timeout import step_timeout
 from ui.components import eq_bars
 
@@ -503,6 +506,21 @@ def render_loading(source: Any) -> None:
     title  = (structure.metadata.get("title", "") if structure else "") or audio.metadata.get("title", "")
     artist = (structure.metadata.get("artist", "") if structure else "") or audio.metadata.get("artist", "")
 
+    # ── Sync-cut detection (pure, fast — no GPU, no UI step) ─────────────────
+    # Runs immediately after structure so sections/beats are available.
+    # Non-fatal: degrades to [] on any failure.
+    sync_cuts: list[SyncCut] = []
+    if structure:
+        try:
+            from services.sync_cut import SyncCutAnalyzer
+            sync_cuts = SyncCutAnalyzer().suggest(
+                sections         = list(structure.sections),
+                beats            = list(structure.beats),
+                target_durations = list(CONSTANTS.SYNC_CUT_TARGET_DURATIONS),
+            )
+        except Exception as exc:  # noqa: BLE001 — non-fatal, no UI step to mark failed
+            _log.warning("sync_cut: failed — %s", exc)
+
     # ── Step 3: Transcription (LRCLib first, then Demucs+Whisper fallback) ─
     _tick("Transcribing Lyrics", "transcription")
     t0 = time.time()
@@ -668,6 +686,7 @@ def render_loading(source: Any) -> None:
             "popularity":          popularity,
             "audio_quality":       audio_quality,
             "metadata_validation": metadata_validation,
+            "sync_cuts":           sync_cuts,
         },
         from_attributes=True,
     )

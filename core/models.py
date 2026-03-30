@@ -345,6 +345,26 @@ class TrackCandidate(BaseModel):
         return self.model_dump()
 
 
+class SyncCut(BaseModel):
+    """
+    A suggested edit point for a standard ad/TV format duration.
+
+    Produced by services/sync_cut.py from allin1 structure + beat grid.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    duration_s: int             # target format duration (15 / 30 / 60)
+    start_s: float              # recommended cut-in point (seconds from track start)
+    end_s: float                # recommended cut-out point (seconds from track start)
+    actual_duration_s: float    # actual edit length (end_s − start_s)
+    confidence: float           # 0.0–1.0; higher = better section-boundary alignment
+    note: str                   # e.g. "Chorus at 0:32 → natural ending at 1:00"
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.model_dump()
+
+
 class MetadataValidationResult(BaseModel):
     """
     Result of pre-flight track rights metadata validation.
@@ -407,6 +427,7 @@ class AnalysisResult(BaseModel):
     popularity: Optional[PopularityResult]                  = None
     audio_quality: Optional[AudioQualityResult]             = None
     metadata_validation: Optional[MetadataValidationResult] = None
+    sync_cuts: list[SyncCut]                                = Field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """
