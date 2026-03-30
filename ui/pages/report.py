@@ -151,6 +151,10 @@ def render_report(
     with st.expander("Lyrics & Content Audit", expanded=True):
         _render_lyric_section(result)
 
+    if result.sync_cuts:
+        with st.expander("Sync Edit Points", expanded=False):
+            _render_sync_cuts(result)
+
     _render_export_buttons(result)
     _render_footer()
 
@@ -1489,6 +1493,68 @@ def _pdf_flags_table(pdf: "FPDF", result: AnalysisResult) -> None:
             pdf.cell(w, 6, text, border=1)
         pdf.ln()
     pdf.ln(4)
+
+
+def _sync_cut_ts(t: float) -> str:
+    """Format a float timestamp as M:SS for sync-cut display."""
+    m, s = divmod(int(t), 60)
+    return f"{m}:{s:02d}"
+
+
+def _sync_cut_conf_bar(conf: float) -> str:
+    """Return a block-character progress bar HTML span for a confidence score."""
+    filled = round(conf * 10)
+    bar    = "█" * filled + "░" * (10 - filled)
+    pct    = int(conf * 100)
+    color  = "#10B981" if conf >= 0.6 else ("#F5640A" if conf >= 0.4 else "var(--dim)")
+    return (
+        f'<span style="font-family:JetBrains Mono,monospace;font-size:.75rem;'
+        f'color:{color};" aria-label="Confidence {pct} percent">'
+        f'{bar} {pct}%</span>'
+    )
+
+
+def _render_sync_cuts(result: AnalysisResult) -> None:
+    """Render the Sync Edit Points table — one row per target duration."""
+    rows_html = ""
+    for cut in result.sync_cuts:
+        rows_html += (
+            f'<tr>'
+            f'<td style="padding:8px 12px;font-family:JetBrains Mono,monospace;font-size:.78rem;'
+            f'color:var(--text);font-weight:600;">{cut.duration_s}s</td>'
+            f'<td style="padding:8px 12px;font-family:JetBrains Mono,monospace;font-size:.78rem;'
+            f'color:var(--muted);">{_sync_cut_ts(cut.start_s)}</td>'
+            f'<td style="padding:8px 12px;font-family:JetBrains Mono,monospace;font-size:.78rem;'
+            f'color:var(--muted);">{_sync_cut_ts(cut.end_s)}</td>'
+            f'<td style="padding:8px 12px;font-family:JetBrains Mono,monospace;font-size:.78rem;'
+            f'color:var(--muted);">{cut.actual_duration_s:.1f}s</td>'
+            f'<td style="padding:8px 12px;">{_sync_cut_conf_bar(cut.confidence)}</td>'
+            f'<td style="padding:8px 12px;font-family:Figtree,sans-serif;font-size:.78rem;'
+            f'color:var(--muted);">{html_mod.escape(cut.note)}</td>'
+            f'</tr>'
+        )
+
+    header_cells = ""
+    for col in ("Target", "Start", "End", "Actual", "Confidence", "Note"):
+        header_cells += (
+            f'<th style="padding:8px 12px;text-align:left;font-family:JetBrains Mono,monospace;'
+            f'font-size:.6rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;'
+            f'color:var(--dim);border-bottom:1px solid var(--border);">{col}</th>'
+        )
+
+    st.markdown(
+        f'<div style="overflow-x:auto;">'
+        f'<table style="width:100%;border-collapse:collapse;background:var(--s1);'
+        f'border:1px solid var(--border);border-radius:10px;">'
+        f'<thead><tr>{header_cells}</tr></thead>'
+        f'<tbody>{rows_html}</tbody>'
+        f'</table></div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Edit windows are beat-aligned and scored on: post-intro start, section-boundary "
+        "entry/exit, chorus presence, and bar-grid snap. Confidence = composite score (0–100%)."
+    )
 
 
 def _render_export_buttons(result: AnalysisResult) -> None:

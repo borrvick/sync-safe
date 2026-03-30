@@ -22,6 +22,7 @@ Swap guide:
   AuthorshipAnalyzer → swap RoBERTa for GPTZero API or a fine-tuned model
   TrackDiscovery     → swap Last.fm for Spotify, Soundcharts, or internal DB
   LegalLinksProvider → swap static URL templates for a live licensing API
+  SyncCutProvider           → swap heuristic scorer for an ML-based edit point detector
   TagInjectorProvider       → swap mutagen for a cloud tagging API or a different tag schema
   PlatformExportProvider    → swap built-in CSV templates for a paid sync API (Songtradr, etc.)
   MetadataValidatorProvider → swap local rules for AllTrack, DDEX, or SoundExchange
@@ -44,6 +45,7 @@ from core.models import (
     LegalLinks,
     MetadataValidationResult,
     StructureResult,
+    SyncCut,
     TrackCandidate,
     TranscriptSegment,
 )
@@ -312,6 +314,32 @@ class LegalLinksProvider(Protocol):
 
         Returns:
             LegalLinks with ASCAP, BMI, and SESAC search URLs.
+        """
+        ...
+
+
+class SyncCutProvider(Protocol):
+    """
+    Suggest edit-point windows for standard ad/TV format durations.
+
+    Implementations: services/sync_cut.py (SyncCutAnalyzer)
+    Swap candidates:  An ML-based edit detector, a manual cue-sheet override
+    """
+
+    def suggest(
+        self,
+        sections: list[Section],
+        beats: list[float],
+        target_durations: "list[int]",
+    ) -> list[SyncCut]:
+        """
+        Args:
+            sections:          allin1 structural sections (label, start, end).
+            beats:             Beat grid as seconds-from-track-start.
+            target_durations:  Format lengths to target (e.g. [15, 30, 60]).
+
+        Returns:
+            One SyncCut per target duration (fewer if the track is too short).
         """
         ...
 

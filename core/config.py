@@ -107,6 +107,22 @@ class SystemConstants:
     # ---- Discovery ------------------------------------------------------------
     MAX_SIMILAR_TRACKS: int = 5
 
+    # ---- Sync-Cut Detection ---------------------------------------------------
+    # Standard ad/TV edit durations (seconds) to find edit points for.
+    SYNC_CUT_TARGET_DURATIONS: tuple[int, ...] = (15, 30, 60)
+
+    # Beat snap granularity: prefer windows that start on a bar boundary (every
+    # SYNC_CUT_SNAP_BARS beats). 4 = 1 bar in 4/4 time.
+    SYNC_CUT_SNAP_BARS: int = 4
+
+    # How close (seconds) a beat must be to a section boundary to count as
+    # "starts/ends at section boundary" for scoring.
+    SYNC_CUT_BOUNDARY_TOLERANCE_S: float = 0.5
+
+    # Duration tolerance: candidate window must be within ±this many seconds
+    # of the target duration to be considered.
+    SYNC_CUT_DURATION_TOLERANCE_S: float = 3.0
+
     # ---- Metadata / Split Sheet Validation ------------------------------------
     # Writer/publisher splits must sum to 100 % within this tolerance.
     # Allows for standard 2-decimal-place rounding (e.g. 33.33 + 33.33 + 33.34).
