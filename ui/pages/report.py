@@ -33,6 +33,7 @@ from core.models import (
     TranscriptSegment,
 )
 from services.platform_export import PLATFORM_SCHEMAS, to_platform_csv
+from services.tag_injector import TagInjector
 from ui.components import ISSUE_META, authorship_color, eq_bars, fmt_ts, issue_pill
 
 
@@ -45,6 +46,16 @@ _PLATFORM_LABELS: dict[str, str] = {
     "generic":   "Generic CSV",
     "disco":     "DISCO",
     "synchtank": "Synchtank",
+}
+
+# Extension → file suffix and MIME type maps for tagged file download.
+# Defined at module level to avoid re-creation on every report render.
+_TAGGED_EXT_MAP: dict[str, str] = {
+    "mp3": ".mp3", "flac": ".flac", "ogg": ".ogg", "m4a": ".m4a", "wav": ".wav",
+}
+_TAGGED_MIME_MAP: dict[str, str] = {
+    ".mp3": "audio/mpeg", ".flac": "audio/flac",
+    ".ogg": "audio/ogg",  ".m4a": "audio/mp4", ".wav": "audio/wav",
 }
 
 
@@ -1527,6 +1538,11 @@ def _render_export_buttons(result: AnalysisResult) -> None:
         except Exception as exc:  # noqa: BLE001 — UI boundary; PDF errors must not crash the report
             st.error(f"PDF generation failed: {exc}")
 
+    # Tagged file download — only available for direct uploads (not YouTube, which
+    # produces a lossy MP3 transcode that is not re-exportable as a deliverable).
+    if result.audio.source != _SOURCE_YOUTUBE:
+        _render_tagged_download(result, track_slug)
+
 
 def _render_platform_export(result: AnalysisResult, track_slug: str) -> None:
     """Render the 'Export for...' platform catalog dropdown + download button."""
@@ -1550,6 +1566,38 @@ def _render_platform_export(result: AnalysisResult, track_slug: str) -> None:
         )
     except Exception as exc:  # noqa: BLE001 — UI boundary
         st.error(f"Platform export failed: {exc}")
+
+
+def _render_tagged_download(result: AnalysisResult, track_slug: str) -> None:
+    """
+    Render a 'Download Tagged File' button that embeds audit results in ID3/Vorbis/MP4 tags.
+
+    Only shown for direct file uploads — YouTube sources produce lossy re-encodes.
+    Tag injection is performed lazily on button click (st.download_button pre-computes data).
+    """
+    label_ext = result.audio.label.rsplit(".", 1)[-1].lower() if "." in result.audio.label else "mp3"
+    suffix    = _TAGGED_EXT_MAP.get(label_ext, ".mp3")
+    mime      = _TAGGED_MIME_MAP.get(suffix, "audio/mpeg")
+
+    try:
+        # Tag injection is synchronous — writes/reads a TemporaryDirectory file.
+        # For typical uploads (< 10 MB) this completes in < 200 ms.
+        # If this becomes a bottleneck at higher file sizes, cache via
+        # @st.cache_data(hash_funcs={bytes: id}) keyed on audio.raw identity.
+        tagged_bytes = TagInjector().inject(result.audio.raw, result)
+        st.download_button(
+            label="⬇ Download Tagged File",
+            data=tagged_bytes,
+            file_name=f"{track_slug}-tagged{suffix}",
+            mime=mime,
+            use_container_width=False,
+            help=(
+                "Your audio file with Sync-Safe audit results embedded in the tags. "
+                "Open in any ID3-aware player or DAW to see the compliance metadata."
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001 — UI boundary
+        st.error(f"Tag injection failed: {exc}")
 
 
 def _render_footer() -> None:
