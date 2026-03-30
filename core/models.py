@@ -155,6 +155,7 @@ class ForensicsResult(BaseModel):
     plr_std: float = -1.0                        # std of per-window peak-to-loudness ratio; low = frozen density (AI) (-1 = too short)
     voiced_noise_floor: float = -1.0             # mean spectral flatness in voiced 4–12 kHz frames; low = AI clean synthesis (-1 = non-vocal/not computed)
     is_vocal: bool = False                       # True → pyin detected vocal content; routes vocal scoring path
+    c2pa_origin: str = ""                        # "ai" | "daw" | "unknown" | "" (no manifest)
 
     flags: list[str]        = Field(default_factory=list)  # human-readable flag labels
     forensic_notes: list[str] = Field(default_factory=list)  # secondary context shown below verdict
@@ -404,6 +405,25 @@ class LegalLinks(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Stem / alternate mix validation
+# ---------------------------------------------------------------------------
+
+class StemValidationResult(BaseModel):
+    """Output of stereo/mono compatibility and phase alignment analysis."""
+
+    model_config = ConfigDict(frozen=True)
+
+    mono_compatible: bool        # True if cancellation < MONO_CANCELLATION_DB_WARN
+    phase_correlation: float     # Pearson L/R correlation [-1, 1]
+    cancellation_db: float       # dB loss in mono sum vs stereo RMS; negative = cancellation
+    mid_side_ratio: float        # Side/Mid energy ratio; -1.0 if mono or undefined
+    flags: list[str]             = Field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.model_dump()
+
+
+# ---------------------------------------------------------------------------
 # Top-level pipeline result
 # ---------------------------------------------------------------------------
 
@@ -428,6 +448,7 @@ class AnalysisResult(BaseModel):
     audio_quality: Optional[AudioQualityResult]             = None
     metadata_validation: Optional[MetadataValidationResult] = None
     sync_cuts: list[SyncCut]                                = Field(default_factory=list)
+    stem_validation: Optional[StemValidationResult]         = None
 
     def to_dict(self) -> dict[str, Any]:
         """
