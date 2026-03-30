@@ -32,12 +32,20 @@ from core.models import (
     StructureResult,
     TranscriptSegment,
 )
+from services.platform_export import PLATFORM_SCHEMAS, to_platform_csv
 from ui.components import ISSUE_META, authorship_color, eq_bars, fmt_ts, issue_pill
 
 
 # AudioSource literal value for YouTube — matches core/models.py AudioSource type.
 # Defined here to avoid repeating the string across multiple render functions.
 _SOURCE_YOUTUBE: str = "youtube"
+
+# Human-readable labels for platform catalog export targets.
+_PLATFORM_LABELS: dict[str, str] = {
+    "generic":   "Generic CSV",
+    "disco":     "DISCO",
+    "synchtank": "Synchtank",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -1473,7 +1481,7 @@ def _pdf_flags_table(pdf: "FPDF", result: AnalysisResult) -> None:
 
 
 def _render_export_buttons(result: AnalysisResult) -> None:
-    """Render CSV and PDF export download buttons."""
+    """Render CSV, platform catalog, and PDF export download buttons."""
     st.markdown("""
     <div style="font-family:'Chakra Petch',monospace;font-size:.58rem;font-weight:600;
                 letter-spacing:.18em;text-transform:uppercase;color:var(--dim);
@@ -1487,12 +1495,12 @@ def _render_export_buttons(result: AnalysisResult) -> None:
     raw_slug   = result.audio.metadata.get("title", "") or result.audio.label or "sync-safe-report"
     track_slug = re.sub(r"[^\w\-.]", "-", raw_slug).strip("-")[:40].lower() or "sync-safe-report"
 
-    c_csv, c_pdf = st.columns(2, gap="medium")
+    c_csv, c_platform, c_pdf = st.columns(3, gap="medium")
 
     with c_csv:
         csv_bytes = _compliance_flags_to_csv(result)
         st.download_button(
-            label="⬇ Download CSV",
+            label="⬇ Compliance CSV",
             data=csv_bytes,
             file_name=f"{track_slug}-compliance.csv",
             mime="text/csv",
@@ -1500,11 +1508,14 @@ def _render_export_buttons(result: AnalysisResult) -> None:
             help="Compliance flags and structural checks as a spreadsheet",
         )
 
+    with c_platform:
+        _render_platform_export(result, track_slug)
+
     with c_pdf:
         try:
             pdf_bytes = _analysis_to_pdf(result)
             st.download_button(
-                label="⬇ Download PDF",
+                label="⬇ Certificate PDF",
                 data=bytes(pdf_bytes),
                 file_name=f"{track_slug}-certificate.pdf",
                 mime="application/pdf",
@@ -1515,6 +1526,30 @@ def _render_export_buttons(result: AnalysisResult) -> None:
             st.caption("PDF export requires fpdf2 — install with `pip install fpdf2`.")
         except Exception as exc:  # noqa: BLE001 — UI boundary; PDF errors must not crash the report
             st.error(f"PDF generation failed: {exc}")
+
+
+def _render_platform_export(result: AnalysisResult, track_slug: str) -> None:
+    """Render the 'Export for...' platform catalog dropdown + download button."""
+    platform_key = st.selectbox(
+        "Export for",
+        options=list(PLATFORM_SCHEMAS.keys()),
+        format_func=lambda k: _PLATFORM_LABELS.get(k, k),
+        key="export_platform_select",
+        label_visibility="collapsed",
+    )
+    try:
+        platform_bytes = to_platform_csv(result, platform_key)
+        label = _PLATFORM_LABELS.get(platform_key, platform_key)
+        st.download_button(
+            label=f"⬇ Export for {label}",
+            data=platform_bytes,
+            file_name=f"{track_slug}-{platform_key}.csv",
+            mime="text/csv",
+            use_container_width=True,
+            help=f"Single-row catalog CSV formatted for {label} import",
+        )
+    except Exception as exc:  # noqa: BLE001 — UI boundary
+        st.error(f"Platform export failed: {exc}")
 
 
 def _render_footer() -> None:

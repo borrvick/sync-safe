@@ -22,6 +22,7 @@ Swap guide:
   AuthorshipAnalyzer → swap RoBERTa for GPTZero API or a fine-tuned model
   TrackDiscovery     → swap Last.fm for Spotify, Soundcharts, or internal DB
   LegalLinksProvider → swap static URL templates for a live licensing API
+  PlatformExportProvider    → swap built-in CSV templates for a paid sync API (Songtradr, etc.)
   MetadataValidatorProvider → swap local rules for AllTrack, DDEX, or SoundExchange
   ProLookupProvider  → swap MusicBrainz for a paid metadata provider
 """
@@ -310,6 +311,29 @@ class LegalLinksProvider(Protocol):
 
         Returns:
             LegalLinks with ASCAP, BMI, and SESAC search URLs.
+        """
+        ...
+
+
+class PlatformExportProvider(Protocol):
+    """
+    Generate platform-specific catalog CSV bytes for a sync licensing portal.
+
+    Implementations: services/platform_export.py (to_platform_csv)
+    Swap candidates:  Songtradr API, Musicstax, or a custom DAM integration
+    """
+
+    def export(self, result: AnalysisResult, platform: str) -> bytes:
+        """
+        Args:
+            result:   Complete pipeline AnalysisResult.
+            platform: Target schema name (e.g. "generic", "disco", "synchtank").
+
+        Returns:
+            UTF-8-with-BOM CSV bytes ready for download or API upload.
+
+        Raises:
+            ValueError: if *platform* is not a recognised schema name.
         """
         ...
 
