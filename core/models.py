@@ -26,7 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field
 # Type aliases — used as Literal constraints throughout
 # ---------------------------------------------------------------------------
 
-IssueType    = Literal["EXPLICIT", "BRAND", "VIOLENCE", "DRUGS"]
+IssueType    = Literal["EXPLICIT", "BRAND", "LOCATION", "VIOLENCE", "DRUGS"]
 Confidence   = Literal["confirmed", "potential"]
 Severity     = Literal["hard", "soft"]
 EndingType   = Literal["sting", "fade", "cut"]
