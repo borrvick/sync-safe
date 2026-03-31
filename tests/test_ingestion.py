@@ -231,3 +231,84 @@ class TestClassifyUrl:
     def test_malformed_url_returns_unknown(self):
         from services.ingestion import _classify_url
         assert _classify_url("not-a-url") == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# _clean_title / _split_artist_title
+# ---------------------------------------------------------------------------
+
+class TestCleanTitle:
+    def _clean(self, title: str) -> str:
+        from services.ingestion import _clean_title
+        return _clean_title(title)
+
+    def test_lyrics_suffix_stripped(self):
+        assert self._clean("24K Magic (Lyrics)") == "24K Magic"
+
+    def test_lyric_video_stripped(self):
+        assert self._clean("Blinding Lights (Lyric Video)") == "Blinding Lights"
+
+    def test_official_video_stripped(self):
+        assert self._clean("Shape of You (Official Video)") == "Shape of You"
+
+    def test_official_music_video_stripped(self):
+        assert self._clean("Stay (Official Music Video)") == "Stay"
+
+    def test_official_audio_stripped(self):
+        assert self._clean("Levitating (Official Audio)") == "Levitating"
+
+    def test_hq_stripped(self):
+        assert self._clean("Bohemian Rhapsody (HQ)") == "Bohemian Rhapsody"
+
+    def test_hd_stripped(self):
+        assert self._clean("Purple Rain (HD)") == "Purple Rain"
+
+    def test_clean_version_stripped(self):
+        assert self._clean("WAP (Clean)") == "WAP"
+
+    def test_explicit_stripped(self):
+        assert self._clean("WAP (Explicit)") == "WAP"
+
+    def test_extended_version_stripped(self):
+        assert self._clean("Blue (Extended Version)") == "Blue"
+
+    def test_slowed_reverb_stripped(self):
+        assert self._clean("drivers license (Slowed + Reverb)") == "drivers license"
+
+    def test_sped_up_stripped(self):
+        assert self._clean("As It Was (Sped Up)") == "As It Was"
+
+    def test_nightcore_stripped(self):
+        assert self._clean("Fireflies (Nightcore)") == "Fireflies"
+
+    def test_remastered_stripped(self):
+        assert self._clean("Hotel California (Remastered)") == "Hotel California"
+
+    def test_clean_title_unchanged(self):
+        assert self._clean("24K Magic") == "24K Magic"
+
+    def test_bracket_variant_stripped(self):
+        assert self._clean("Mr. Brightside [Official Video]") == "Mr. Brightside"
+
+
+class TestSplitArtistTitle:
+    def _split(self, title: str) -> tuple:
+        from services.ingestion import _split_artist_title
+        return _split_artist_title(title)
+
+    def test_standard_dash_split(self):
+        artist, title = self._split("Bruno Mars - 24K Magic (Lyrics)")
+        assert artist == "Bruno Mars"
+        assert title == "24K Magic"
+
+    def test_lyrics_stripped_before_split(self):
+        _, title = self._split("The Weeknd - Blinding Lights (Lyrics)")
+        assert title == "Blinding Lights"
+
+    def test_no_dash_returns_empty_artist(self):
+        artist, title = self._split("24K Magic (Lyrics)")
+        assert artist == ""
+
+    def test_official_video_stripped(self):
+        _, title = self._split("Adele - Hello (Official Video)")
+        assert title == "Hello"
