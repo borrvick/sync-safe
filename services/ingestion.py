@@ -463,7 +463,11 @@ def _split_artist_title(video_title: str) -> tuple[str, str]:
     clean = re.sub(
         r"\s*[\(\[]"
         r"(Official\s*(Music\s*|Lyric\s*|Audio\s*)?Video"
-        r"|Lyric\s*Video|Audio|Live( Version)?|Visualizer)"
+        r"|Official\s*Audio"
+        r"|Lyric\s*Video|Lyrics?|Audio|Live( Version)?"
+        r"|Visualizer|HQ|HD|Full\s*Song|Clean|Explicit"
+        r"|Extended(\s*Version)?|Slowed(\s*\+?\s*Reverb)?"
+        r"|Sped\s*Up|Nightcore|Remaster(ed)?)"
         r"[^\)\]]*[\)\]]\s*$",
         "",
         video_title,
@@ -491,8 +495,11 @@ def _clean_title(title: str) -> str:
         r"\s*[\(\[]"
         r"(Official\s*(Music\s*|Lyric\s*|Audio\s*)?Video"
         r"|Official\s*Audio"
-        r"|Lyric\s*Video|Audio|Live( Version)?|Visualizer"
-        r"|Radio\s*Edit|Remaster(ed)?|feat\.[^\)\]]*)"
+        r"|Lyric\s*Video|Lyrics?|Audio|Live( Version)?"
+        r"|Visualizer|HQ|HD|Full\s*Song|Clean|Explicit"
+        r"|Extended(\s*Version)?|Slowed(\s*\+?\s*Reverb)?"
+        r"|Sped\s*Up|Nightcore|Remaster(ed)?"
+        r"|Radio\s*Edit|feat\.[^\)\]]*)"
         r"[^\)\]]*[\)\]]\s*$",
         "",
         title,
