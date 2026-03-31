@@ -534,10 +534,13 @@ def _render_forensics_card(fr: Optional[ForensicsResult], source: str = "file") 
     verdict_message = _VERDICT_MESSAGES.get(verdict, "")
 
     # C2PA
-    c2pa_fmt  = (
-        "⚠ Born-AI (Certified)" if fr.c2pa_flag
-        else "✓ No C2PA Manifest"
-    )
+    _C2PA_ORIGIN_FMT: dict[str, str] = {
+        "ai":      "⚠ Born-AI (Certified)",
+        "daw":     "✓ DAW Origin (Verified)",
+        "unknown": "◈ Manifest Present (Unknown Origin)",
+        "":        "✓ No C2PA Manifest",
+    }
+    c2pa_fmt = _C2PA_ORIGIN_FMT.get(fr.c2pa_origin, "✓ No C2PA Manifest")
 
     # IBI / groove
     ibi       = fr.ibi_variance
@@ -593,7 +596,7 @@ def _render_forensics_card(fr: Optional[ForensicsResult], source: str = "file") 
       <div class="sig-row">
         <span class="sk">C2PA Manifest
           <span class="tip-wrap"><span class="tip-icon">?</span>
-            <span class="tip-box">Content Credentials standard (C2PA) — a cryptographic signature embedded by some DAWs and AI tools. A "Born-AI" assertion is a hard certified signal the track was machine-generated. "No Manifest" is neutral — most files have none.</span>
+            <span class="tip-box">Content Credentials standard (C2PA) — a cryptographic signature embedded by some DAWs and AI tools. "Born-AI (Certified)": a hard certified signal the track was machine-generated. "DAW Origin (Verified)": manifest confirms creation in a known DAW (Logic Pro, Ableton, Pro Tools, etc.) — strong human-origin signal. "Manifest Present (Unknown Origin)": credentials exist but the software agent is unrecognised. "No C2PA Manifest": neutral — most files have none.</span>
           </span>
         </span>
         <span class="sv">{c2pa_fmt}</span>

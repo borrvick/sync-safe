@@ -137,7 +137,7 @@ class Forensics:
         raw               = audio.raw
         compressed_source = audio.source == "youtube"
 
-        c2pa_flag, c2pa_label              = self._check_c2pa(raw)
+        c2pa_flag, c2pa_origin             = self._check_c2pa(raw)
         ibi_variance, spectral_slop        = self._analyse_groove(raw)
         loop_score                          = self._detect_loops(raw)
         loop_autocorr_score                 = self._detect_loops_autocorr(raw)
@@ -162,7 +162,7 @@ class Forensics:
 
         bundle = _SignalBundle(
             c2pa_flag=c2pa_flag,
-            c2pa_label=c2pa_label,
+            c2pa_label=c2pa_origin,
             compressed_source=compressed_source,
             ibi_variance=ibi_variance,
             loop_score=loop_score,
@@ -195,6 +195,7 @@ class Forensics:
 
         result = ForensicsResult(
             c2pa_flag=c2pa_flag,
+            c2pa_origin=c2pa_origin,
             ibi_variance=ibi_variance,
             loop_score=loop_score,
             loop_autocorr_score=loop_autocorr_score,
@@ -234,41 +235,33 @@ class Forensics:
         Read C2PA Content Credentials from raw bytes.
 
         Returns:
-            (born_ai, label) where born_ai is True only when a certified
-            AI-generation assertion is found in the manifest.
-            Gracefully returns (False, description) on any error — a missing
-            manifest is normal, not an exception.
+            (born_ai, origin) where born_ai is True only when a certified
+            AI-generation assertion is found in the manifest, and origin is
+            one of "ai", "daw", "unknown", or "" (no manifest / unavailable).
+            Gracefully returns (False, "") on any error — a missing manifest
+            is normal, not an exception.
         """
         try:
             import c2pa
         except ImportError:
-            return False, "c2pa-python not installed"
+            return False, ""
 
         try:
             reader = c2pa.Reader.try_create("audio/mpeg", io.BytesIO(raw))
             if reader is None:
-                return False, "No C2PA Manifest"
+                return False, ""
 
             data = reader.json()
             if isinstance(data, str):
                 data = json.loads(data)
 
-            for manifest in (data.get("manifests") or {}).values():
-                for assertion in manifest.get("assertions", []):
-                    label = assertion.get("label", "")
-                    if label in (
-                        "c2pa.assertions.ai-generated",
-                        "c2pa.assertions.training-mining",
-                    ):
-                        return True, "Born-AI (Certified)"
-
-            return False, "C2PA Present — No AI Assertion"
+            return _classify_c2pa_origin(data)
 
         except Exception as exc:
             err = str(exc).lower()
             if any(k in err for k in ("no active manifest", "not found", "jumbf")):
-                return False, "No C2PA Manifest"
-            return False, f"C2PA read error: {exc}"
+                return False, ""
+            return False, ""
 
     # ------------------------------------------------------------------
     # Private: Vocal presence detection  (GPU)
@@ -1101,6 +1094,55 @@ class Forensics:
 # ---------------------------------------------------------------------------
 # Module-level pure functions — independently testable
 # ---------------------------------------------------------------------------
+
+def _classify_c2pa_origin(manifest_data: dict) -> tuple[bool, str]:
+    """
+    Classify the C2PA origin from a parsed manifest JSON dict.
+
+    Pure function — no I/O, no side effects; independently testable.
+
+    Logic:
+      - Assertions labelled "ai.generated" or "c2pa.ai_generated" → (True, "ai")
+      - Assertions labelled "c2pa.created" or "c2pa.edited":
+          check data.softwareAgent (case-insensitive) against
+          CONSTANTS.C2PA_DAW_SOFTWARE_AGENTS → (False, "daw")
+          no DAW match found → (False, "unknown")
+      - Manifest present but no recognised assertion → (False, "unknown")
+
+    Args:
+        manifest_data: Parsed manifest JSON as a dict (from c2pa reader.json()).
+
+    Returns:
+        (born_ai, origin) where origin is "ai" | "daw" | "unknown".
+    """
+    _AI_LABELS = ("ai.generated", "c2pa.ai_generated")
+    _DAW_LABELS = ("c2pa.created", "c2pa.edited")
+
+    has_daw_label = False
+    daw_agent: str = ""
+
+    for manifest in (manifest_data.get("manifests") or {}).values():
+        for assertion in manifest.get("assertions", []):
+            label: str = assertion.get("label", "")
+
+            if any(ai_lbl in label for ai_lbl in _AI_LABELS):
+                return True, "ai"
+
+            if any(daw_lbl in label for daw_lbl in _DAW_LABELS):
+                has_daw_label = True
+                data_block = assertion.get("data") or {}
+                agent = (data_block.get("softwareAgent") or "").lower()
+                if agent:
+                    daw_agent = agent
+
+    if has_daw_label:
+        for known_daw in CONSTANTS.C2PA_DAW_SOFTWARE_AGENTS:
+            if known_daw in daw_agent:
+                return False, "daw"
+        return False, "unknown"
+
+    return False, "unknown"
+
 
 def _check_spectral_slop(
     audio: np.ndarray,

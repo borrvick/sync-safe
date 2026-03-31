@@ -25,6 +25,7 @@ from services.forensics import (
     _SignalBundle,
     _build_flags,
     _check_spectral_slop,
+    _classify_c2pa_origin,
     _compute_ai_probability,
     _compute_verdict,
     _cross_correlate,
@@ -712,3 +713,78 @@ def test_fixture_verdict_stable(stem: str, data: dict) -> None:
         f"hnr={data.get('harmonic_ratio_score')}, autocorr={data.get('loop_autocorr_score')}\n"
         f"\n  → Update _EXPECTED_VERDICTS if this change is intentional."
     )
+
+
+# ---------------------------------------------------------------------------
+# _classify_c2pa_origin
+# ---------------------------------------------------------------------------
+
+class TestC2paOrigin:
+    """Tests for C2PA origin classification logic."""
+
+    def _make_manifest(self, assertions: list[dict]) -> dict:
+        return {"manifests": {"active": {"assertions": assertions}}}
+
+    def test_ai_generated_label_returns_ai_origin(self) -> None:
+        data = self._make_manifest([{"label": "ai.generated", "data": {}}])
+        born_ai, origin = _classify_c2pa_origin(data)
+        assert born_ai is True
+        assert origin == "ai"
+
+    def test_c2pa_ai_generated_label_returns_ai_origin(self) -> None:
+        data = self._make_manifest([{"label": "c2pa.ai_generated", "data": {}}])
+        born_ai, origin = _classify_c2pa_origin(data)
+        assert born_ai is True
+        assert origin == "ai"
+
+    def test_c2pa_created_with_known_daw_returns_daw_origin(self) -> None:
+        data = self._make_manifest([
+            {"label": "c2pa.created", "data": {"softwareAgent": "Logic Pro 11.1"}}
+        ])
+        born_ai, origin = _classify_c2pa_origin(data)
+        assert born_ai is False
+        assert origin == "daw"
+
+    def test_c2pa_edited_with_known_daw_returns_daw_origin(self) -> None:
+        data = self._make_manifest([
+            {"label": "c2pa.edited", "data": {"softwareAgent": "Ableton Live 12"}}
+        ])
+        born_ai, origin = _classify_c2pa_origin(data)
+        assert born_ai is False
+        assert origin == "daw"
+
+    def test_c2pa_created_with_unknown_software_returns_unknown(self) -> None:
+        data = self._make_manifest([
+            {"label": "c2pa.created", "data": {"softwareAgent": "MyCustomDAW 2.0"}}
+        ])
+        born_ai, origin = _classify_c2pa_origin(data)
+        assert born_ai is False
+        assert origin == "unknown"
+
+    def test_empty_manifest_returns_unknown(self) -> None:
+        born_ai, origin = _classify_c2pa_origin({})
+        assert born_ai is False
+        assert origin == "unknown"
+
+    def test_no_assertions_returns_unknown(self) -> None:
+        data = self._make_manifest([])
+        born_ai, origin = _classify_c2pa_origin(data)
+        assert born_ai is False
+        assert origin == "unknown"
+
+    def test_ai_assertion_takes_priority_over_daw(self) -> None:
+        # If both AI and DAW labels are present, AI wins
+        data = self._make_manifest([
+            {"label": "c2pa.created", "data": {"softwareAgent": "Logic Pro"}},
+            {"label": "ai.generated", "data": {}},
+        ])
+        born_ai, origin = _classify_c2pa_origin(data)
+        assert born_ai is True
+        assert origin == "ai"
+
+    def test_daw_match_is_case_insensitive(self) -> None:
+        data = self._make_manifest([
+            {"label": "c2pa.created", "data": {"softwareAgent": "REAPER v7.0"}}
+        ])
+        _, origin = _classify_c2pa_origin(data)
+        assert origin == "daw"

@@ -68,6 +68,15 @@ class SystemConstants:
     SYNTHID_BAND_LOW_HZ: int = 18_000
     SYNTHID_BAND_HIGH_HZ: int = 22_000
 
+    # ---- C2PA: DAW software agent strings -----------------------------------------
+    # Case-insensitive substrings matched against c2pa.created/edited softwareAgent field.
+    # Presence → c2pa_origin = "daw"; absence with manifest → "unknown".
+    C2PA_DAW_SOFTWARE_AGENTS: tuple[str, ...] = (
+        "adobe audition", "logic pro", "garageband", "pro tools",
+        "ableton", "fl studio", "reaper", "cubase", "studio one",
+        "nuendo", "reason", "bitwig",
+    )
+
     # ---- Compliance: Sting / Ending -------------------------------------------
     # Tail energy / mean energy ratio below this → ending qualifies as a fade
     STING_TAIL_RATIO: float = 0.05
@@ -122,6 +131,16 @@ class SystemConstants:
     # Duration tolerance: candidate window must be within ±this many seconds
     # of the target duration to be considered.
     SYNC_CUT_DURATION_TOLERANCE_S: float = 3.0
+
+    # ---- Stem validation: mono compatibility / phase alignment ----------------
+    # Pearson L/R correlation below this → warn about phase issues
+    PHASE_CORRELATION_WARN: float = 0.0
+    # Pearson L/R correlation below this → flag as likely anti-phase
+    PHASE_CORRELATION_FAIL: float = -0.3
+    # Mono sum dB loss below this (negative) → warn
+    MONO_CANCELLATION_DB_WARN: float = -3.0
+    # Mono sum dB loss below this (negative) → significant cancellation flag
+    MONO_CANCELLATION_DB_FAIL: float = -6.0
 
     # ---- Metadata / Split Sheet Validation ------------------------------------
     # Writer/publisher splits must sum to 100 % within this tolerance.
