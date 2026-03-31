@@ -32,6 +32,21 @@ from core.exceptions import AudioSourceError, ConfigurationError, ValidationErro
 from core.models import AudioBuffer
 from utils.security import validate_url
 
+# ---------------------------------------------------------------------------
+# URL classification constants (module-level for testability)
+# ---------------------------------------------------------------------------
+
+_YOUTUBE_HOSTS: frozenset[str] = frozenset({
+    "youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be",
+})
+_BANDCAMP_HOSTS: frozenset[str] = frozenset({"bandcamp.com"})
+_SOUNDCLOUD_HOSTS: frozenset[str] = frozenset({
+    "soundcloud.com", "www.soundcloud.com", "on.soundcloud.com",
+})
+_DIRECT_AUDIO_EXTENSIONS: frozenset[str] = frozenset({
+    ".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac",
+})
+
 
 class Ingestion:
     """
@@ -75,14 +90,23 @@ class Ingestion:
             ConfigurationError:  yt-dlp or ffmpeg binary not found.
         """
         if isinstance(source, str):
-            return self._load_youtube(source)
+            kind = _classify_url(source)
+            if kind == "unknown":
+                raise ValidationError(
+                    "Unsupported URL — only YouTube, Bandcamp, SoundCloud, "
+                    "and direct audio links (.mp3/.wav/.flac/.ogg/.m4a/.aac) are supported.",
+                    context={"url": source},
+                )
+            if kind == "direct":
+                return self._load_direct(source)
+            return self._load_ytdlp(source, source_label=kind)
         return self._load_upload(source)
 
     # ------------------------------------------------------------------
-    # Private: YouTube path
+    # Private: yt-dlp path (YouTube, Bandcamp, SoundCloud)
     # ------------------------------------------------------------------
 
-    def _load_youtube(self, url: str) -> AudioBuffer:
+    def _load_ytdlp(self, url: str, source_label: str = "youtube") -> AudioBuffer:
         try:
             validate_url(url)
         except ValueError as exc:
@@ -179,13 +203,61 @@ class Ingestion:
                 sample_rate=CONSTANTS.SAMPLE_RATE,
                 label=_label_from_url(url),
                 metadata=track_metadata,
-                source="youtube",
+                source=source_label,  # type: ignore[arg-type]
             )
 
         finally:
             for proc in (ytdlp_proc, ffmpeg_proc):
                 if proc and proc.poll() is None:
                     proc.kill()
+
+    # ------------------------------------------------------------------
+    # Private: direct HTTP audio download
+    # ------------------------------------------------------------------
+
+    def _load_direct(self, url: str) -> AudioBuffer:
+        """Download a direct audio URL into an AudioBuffer."""
+        import urllib.error
+        max_bytes = CONSTANTS.MAX_UPLOAD_BYTES
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "sync-safe/1.0"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                chunks: list[bytes] = []
+                total = 0
+                while True:
+                    chunk = resp.read(65536)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise AudioSourceError(
+                            f"Direct download exceeds {max_bytes} byte limit.",
+                            context={"url": url},
+                        )
+                    chunks.append(chunk)
+                raw = b"".join(chunks)
+        except AudioSourceError:
+            raise
+        except urllib.error.URLError as exc:
+            raise AudioSourceError(
+                "Direct audio download failed.",
+                context={"url": url, "error": str(exc)},
+            ) from exc
+
+        if not raw:
+            raise AudioSourceError("Direct download produced empty bytes.", context={"url": url})
+
+        _check_size(len(raw), self._settings.max_upload_mb)
+
+        from pathlib import PurePosixPath
+        from urllib.parse import urlparse as _urlparse
+        label = PurePosixPath(_urlparse(url).path).name or url
+        return AudioBuffer(
+            raw=raw,
+            sample_rate=CONSTANTS.SAMPLE_RATE,
+            label=label,
+            source="direct",
+        )
 
     # ------------------------------------------------------------------
     # Private: file-upload path
@@ -226,6 +298,31 @@ class Ingestion:
 # ---------------------------------------------------------------------------
 # Module-level pure functions (testable without instantiating the service)
 # ---------------------------------------------------------------------------
+
+def _classify_url(url: str) -> str:
+    """
+    Classify a URL as one of: youtube / bandcamp / soundcloud / direct / unknown.
+
+    Pure function — no I/O, no side effects, deterministic.
+    Returns "unknown" on any parse error rather than raising.
+    """
+    try:
+        parsed = urlparse(url.strip())
+        host   = parsed.netloc.lower().removeprefix("www.")
+        if host in _YOUTUBE_HOSTS or host == "youtu.be":
+            return "youtube"
+        if host in _BANDCAMP_HOSTS or host.endswith(".bandcamp.com"):
+            return "bandcamp"
+        if host in _SOUNDCLOUD_HOSTS:
+            return "soundcloud"
+        from pathlib import PurePosixPath
+        ext = PurePosixPath(parsed.path).suffix.lower()
+        if ext in _DIRECT_AUDIO_EXTENSIONS:
+            return "direct"
+        return "unknown"
+    except Exception:   # noqa: BLE001 — pure parse helper; never fatal
+        return "unknown"
+
 
 def _find_binary(name: str) -> str:
     """

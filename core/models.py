@@ -32,7 +32,7 @@ Severity     = Literal["hard", "soft"]
 EndingType   = Literal["sting", "fade", "cut"]
 AIVerdict    = Literal["Likely Human", "Uncertain", "Likely AI", "Insufficient data"]
 ForensicVerdict = Literal["AI", "Likely AI", "Likely Not AI", "Not AI", "Insufficient data"]
-AudioSource  = Literal["youtube", "file"]
+AudioSource  = Literal["youtube", "file", "bandcamp", "soundcloud", "direct"]
 
 
 # ---------------------------------------------------------------------------
