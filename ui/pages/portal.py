@@ -74,7 +74,7 @@ def render_portal() -> None:
           </div>
           <div style="font-family:'Figtree',sans-serif;font-size:.88rem;color:var(--muted);
                       margin-top:12px;line-height:1.55;">
-            Paste a YouTube URL or upload an audio file. Analysis takes 60–90 seconds.
+            Paste a YouTube, Bandcamp, or SoundCloud URL — or upload an audio file. Analysis takes 60–90 seconds.
           </div>
         </div>
         """, unsafe_allow_html=True)
@@ -95,17 +95,40 @@ def render_portal() -> None:
 
             mode = st.radio(
                 "mode",
-                ["🔗  YouTube URL", "📁  Upload File"],
+                ["🔗  Stream URL", "📁  Upload File"],
                 horizontal=True,
                 label_visibility="collapsed",
             )
 
-            if mode == "🔗  YouTube URL":
+            if mode == "🔗  Stream URL":
                 url = st.text_input(
                     "url",
-                    placeholder="https://youtube.com/watch?v=...",
+                    placeholder="YouTube, Bandcamp, SoundCloud, or direct audio URL",
                     label_visibility="collapsed",
                 )
+                st.markdown("""
+                <div style="display:flex;align-items:center;gap:6px;margin:6px 0 10px;flex-wrap:wrap;">
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:.5rem;
+                               color:var(--dim);letter-spacing:.08em;text-transform:uppercase;
+                               margin-right:2px;">Accepts</span>
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:.52rem;font-weight:600;
+                               padding:2px 7px;border-radius:3px;
+                               background:rgba(255,0,0,.08);color:#FF4444;
+                               border:1px solid rgba(255,0,0,.18);">YouTube</span>
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:.52rem;font-weight:600;
+                               padding:2px 7px;border-radius:3px;
+                               background:rgba(29,129,96,.1);color:#1DB954;
+                               border:1px solid rgba(29,129,96,.25);">Bandcamp</span>
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:.52rem;font-weight:600;
+                               padding:2px 7px;border-radius:3px;
+                               background:rgba(255,85,0,.08);color:#FF5500;
+                               border:1px solid rgba(255,85,0,.2);">SoundCloud</span>
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:.52rem;font-weight:600;
+                               padding:2px 7px;border-radius:3px;
+                               background:rgba(245,100,10,.08);color:var(--dim);
+                               border:1px solid var(--border-hr);">.mp3 .wav .flac</span>
+                </div>
+                """, unsafe_allow_html=True)
                 st.caption(
                     "⚠️ YouTube audio is compressed (~128 kbps AAC) and may reduce "
                     "accuracy of spectral and AI detection signals. "
@@ -116,7 +139,7 @@ def render_portal() -> None:
                     if url:
                         _submit_source(url)
                     else:
-                        st.warning("Paste a YouTube URL first.")
+                        st.warning("Paste a URL first.")
             else:
                 uploaded = st.file_uploader(
                     "file",

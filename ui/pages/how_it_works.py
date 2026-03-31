@@ -53,7 +53,7 @@ def render_how_it_works() -> None:
               <div style="font-family:'Chakra Petch',monospace;font-size:.6rem;font-weight:700;
                           color:var(--text);letter-spacing:.06em;">INPUT</div>
               <div style="font-family:'Figtree',sans-serif;font-size:.66rem;color:var(--muted);
-                          margin-top:4px;line-height:1.4;">YouTube URL or audio file</div>
+                          margin-top:4px;line-height:1.4;">YouTube, Bandcamp, SoundCloud, or audio file</div>
             </div>
             <div style="display:flex;align-items:center;padding:0 4px;color:var(--dim);
                         font-size:.9rem;">→</div>
