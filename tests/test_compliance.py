@@ -29,6 +29,8 @@ from core.models import (
 )
 from services.compliance import (
     Compliance,
+    _NER_ISSUE_MAP,
+    _NER_RECOMMENDATIONS,
     _build_windows,
     _check_brand_keywords,
     _compute_grade,
@@ -328,3 +330,89 @@ class TestCheckIntro:
         result = self.svc._check_intro(sections=[], transcript=[])
         assert result.flag is False
         assert result.source == "none"
+
+
+# ---------------------------------------------------------------------------
+# NER issue map — GPE → LOCATION, ORG → BRAND
+# ---------------------------------------------------------------------------
+
+class TestNerIssueMap:
+    def test_org_maps_to_brand(self):
+        assert _NER_ISSUE_MAP["ORG"] == "BRAND"
+
+    def test_gpe_maps_to_location(self):
+        assert _NER_ISSUE_MAP["GPE"] == "LOCATION"
+
+    def test_no_unexpected_keys(self):
+        # Only ORG and GPE should be mapped — other spaCy labels are ignored
+        assert set(_NER_ISSUE_MAP.keys()) == {"ORG", "GPE"}
+
+    def test_brand_recommendation_present(self):
+        assert "BRAND" in _NER_RECOMMENDATIONS
+        assert len(_NER_RECOMMENDATIONS["BRAND"]) > 0
+
+    def test_location_recommendation_present(self):
+        assert "LOCATION" in _NER_RECOMMENDATIONS
+        assert len(_NER_RECOMMENDATIONS["LOCATION"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# _audit_lyrics — pure paths that don't require Detoxify/spaCy/GPU
+# ---------------------------------------------------------------------------
+
+class TestAuditLyricsGuards:
+    """Tests for _audit_lyrics guard clauses and empty-segment handling."""
+
+    def setup_method(self):
+        self.svc = Compliance()
+
+    def test_empty_transcript_returns_empty(self):
+        # Whisper empty segments must not raise — this is the primary guard
+        result = self.svc._audit_lyrics([])
+        assert result == []
+
+    def test_all_short_segments_skipped_for_detoxify(self):
+        # Segments shorter than _MIN_SEGMENT_CHARS bypass Pass 2 (Detoxify)
+        # but are still checked by Pass 1 (profanity) if profanity filter loads.
+        # Without real models this just confirms no crash.
+        short_segs = [_segment("ok", start=float(i)) for i in range(5)]
+        # Should complete without raising even if models are unavailable
+        try:
+            self.svc._audit_lyrics(short_segs)
+        except Exception as exc:  # noqa: BLE001
+            # ModelInferenceError is acceptable (Detoxify not installed in test env)
+            from core.exceptions import ModelInferenceError
+            assert isinstance(exc, ModelInferenceError), f"Unexpected: {exc}"
+
+
+# ---------------------------------------------------------------------------
+# LOCATION IssueType — round-trip through ComplianceFlag model
+# ---------------------------------------------------------------------------
+
+class TestLocationIssueType:
+    def test_compliance_flag_accepts_location_issue_type(self):
+        flag = ComplianceFlag(
+            timestamp_s=30,
+            issue_type="LOCATION",
+            text="New York",
+            recommendation="Geographic reference — verify placement restrictions.",
+            confidence="potential",
+            severity="soft",
+        )
+        assert flag.issue_type == "LOCATION"
+
+    def test_location_flag_excluded_from_grade_computation(self):
+        # LOCATION flags do not lower grade below B (same as BRAND) — confirmed soft
+        # flags of any type trigger B, but LOCATION never escalates to C/D/F.
+        flags = [
+            ComplianceFlag(
+                timestamp_s=i * 10,
+                issue_type="LOCATION",
+                text=f"city{i}",
+                recommendation="check markets",
+                confidence="confirmed",
+                severity="soft",
+            )
+            for i in range(5)
+        ]
+        assert _compute_grade(flags) == "B"

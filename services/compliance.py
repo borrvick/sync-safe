@@ -77,13 +77,18 @@ _MIN_SEGMENT_CHARS: int = 20
 # Only these issue types count toward the A–F content grade
 _GRADE_ISSUE_TYPES: frozenset[str] = frozenset({"EXPLICIT", "VIOLENCE", "DRUGS"})
 
-# NER entity labels mapped to our issue types
+# NER entity labels mapped to our issue types.
+# ORG → BRAND: trademarked company/product names (Nike, Spotify, etc.)
+# GPE → LOCATION: geo-political entities (countries, cities, regions) that may
+#   create placement restrictions in international licensing contexts.
 _NER_ISSUE_MAP: dict[str, IssueType] = {
-    "ORG": "BRAND",
+    "ORG":  "BRAND",
+    "GPE":  "LOCATION",
 }
 
 _NER_RECOMMENDATIONS: dict[IssueType, str] = {
-    "BRAND": "Confirm explicit brand clearance with rights holder.",
+    "BRAND":    "Confirm explicit brand clearance with rights holder.",
+    "LOCATION": "Geographic reference — verify placement restrictions for international markets.",
 }
 
 
@@ -408,7 +413,9 @@ class Compliance:
                 if pf.contains_profanity(seg.text):
                     try:
                         obs = float(detector.predict(seg.text).get("obscene", 0.0))
-                    except Exception:  # noqa: BLE001 — Detoxify predict is best-effort; fall back to potential
+                    except (RuntimeError, ValueError, TypeError, KeyError):
+                        # Detoxify predict is best-effort; treat as potential on any
+                        # numeric/runtime failure rather than dropping the profanity hit.
                         obs = _EXPLICIT_POTENTIAL
 
                     if obs >= _EXPLICIT_CONFIRMED:
@@ -450,9 +457,9 @@ class Compliance:
             # Curated brand keywords → BRAND (potential)
             raw_flags.extend(_check_brand_keywords(seg.text, ts, self._brand_patterns))
 
-            # spaCy NER → BRAND (ORG, potential) — downgraded to potential
-            # because NER in song lyrics produces too many false positives
-            # (e.g. terms of endearment and common nouns mis-classified as ORG).
+            # spaCy NER → BRAND (ORG) / LOCATION (GPE) — both downgraded to
+            # potential because NER in song lyrics produces many false positives
+            # (terms of endearment mis-classified as ORG, etc.).
             if nlp is not None:
                 try:
                     doc = nlp(seg.text)
@@ -466,7 +473,9 @@ class Compliance:
                                 recommendation=_NER_RECOMMENDATIONS[issue_type],
                                 confidence="potential",
                             ))
-                except Exception:  # noqa: BLE001 — NER is supplementary
+                except (OSError, RuntimeError, ValueError):
+                    # spaCy model load errors or tokenizer failures are non-fatal;
+                    # NER is supplementary — pipeline continues without it.
                     pass
 
         return _deduplicate_flags(raw_flags)
