@@ -47,7 +47,7 @@ import numpy as np
 
 from core.config import CONSTANTS
 from core.exceptions import ModelInferenceError
-from core.models import AudioBuffer, ForensicVerdict, ForensicsResult
+from core.models import AiSegment, AudioBuffer, ForensicVerdict, ForensicsResult
 
 try:
     import spaces
@@ -192,6 +192,7 @@ class Forensics:
         flags          = _build_flags(bundle)
         verdict        = _compute_verdict(bundle, ml_prob)
         forensic_notes = _build_forensic_notes(bundle, verdict)
+        ai_segments    = self._compute_ai_segments(raw)
 
         result = ForensicsResult(
             c2pa_flag=c2pa_flag,
@@ -206,6 +207,7 @@ class Forensics:
             kurtosis_variability=kurtosis_variability,
             decoder_peak_score=decoder_peak_score,
             spectral_centroid_mean=spectral_centroid_mean,
+            ai_segments=ai_segments,
             ai_probability=ai_probability,
             flags=flags,
             forensic_notes=forensic_notes,
@@ -225,6 +227,33 @@ class Forensics:
         )
 
         return result
+
+    # ------------------------------------------------------------------
+    # Private: per-segment AI probability (heatmap)
+    # ------------------------------------------------------------------
+
+    def _compute_ai_segments(self, raw: bytes) -> list[AiSegment]:
+        """
+        Decode audio and delegate to the pure segment_ai_probabilities function.
+
+        Returns empty list on any error — heatmap is non-fatal.
+        """
+        try:
+            import librosa
+            import io
+
+            audio, sr = librosa.load(
+                io.BytesIO(raw), sr=CONSTANTS.SAMPLE_RATE, mono=True
+            )
+            return segment_ai_probabilities(
+                y=audio,
+                sr=sr,
+                window_s=CONSTANTS.AI_HEATMAP_WINDOW_S,
+                hop_s=CONSTANTS.AI_HEATMAP_HOP_S,
+            )
+        except (ModelInferenceError, OSError, RuntimeError, ValueError) as exc:
+            _log.warning("ai_segments: skipped — %s", exc)
+            return []
 
     # ------------------------------------------------------------------
     # Private: C2PA manifest check  (CPU — no librosa)
@@ -1591,6 +1620,121 @@ def compute_spectral_flatness_variance(audio: np.ndarray) -> float:
     except Exception as exc:
         raise ModelInferenceError(
             "Spectral flatness variance computation failed.",
+            context={"original_error": str(exc)},
+        ) from exc
+
+
+def segment_ai_probabilities(
+    y: np.ndarray,
+    sr: int,
+    window_s: int = 10,
+    hop_s: int = 5,
+) -> list[AiSegment]:
+    """
+    Compute per-window AI probability estimates for timeline heatmap display.
+
+    Divides the waveform into overlapping windows and scores each using a fast
+    subset of the aggregate signals: noise floor ratio, spectral flatness
+    variance, spectral centroid mean, and harmonic ratio. Signals that require
+    full-track context (loop correlation, IBI variance, beat tracking) are
+    intentionally omitted — they are not meaningful on 10s clips.
+
+    Probability mapping:
+      Each signal contributes +0.25 if it crosses the CONSTANTS threshold.
+      Sum is clamped to [0.0, 1.0]. This mirrors the aggregate scoring logic.
+
+    Args:
+        y:        Mono waveform at any sample rate.
+        sr:       Sample rate of *y* in Hz.
+        window_s: Window length in seconds (default: CONSTANTS.AI_HEATMAP_WINDOW_S).
+        hop_s:    Hop between windows in seconds (default: CONSTANTS.AI_HEATMAP_HOP_S).
+
+    Returns:
+        List of AiSegment, one per window.  Empty list if track is shorter than
+        one window or if any librosa call raises.
+
+    Pure function — no I/O, no side effects, deterministic.
+
+    Raises:
+        ModelInferenceError: if a lower-level computation fails unexpectedly.
+    """
+    try:
+        import librosa
+
+        window_samples = window_s * sr
+        hop_samples    = hop_s * sr
+        total_samples  = len(y)
+
+        if total_samples < window_samples:
+            return []
+
+        segments: list[AiSegment] = []
+        start = 0
+
+        while start + window_samples <= total_samples:
+            end      = start + window_samples
+            window   = y[start:end]
+            start_s  = start / sr
+            end_s    = end / sr
+            score    = 0.0
+
+            # -- Noise floor ratio: near-zero = VST render (no room noise)
+            nfr = compute_noise_floor_ratio(window)
+            if (
+                nfr >= 0.0
+                and CONSTANTS.NOISE_FLOOR_RATIO_AI_MAX > 0.0
+                and nfr <= CONSTANTS.NOISE_FLOOR_RATIO_AI_MAX
+            ):
+                score += 0.25
+
+            # -- Spectral flatness variance: low = AI synthesizer uniformity
+            sfv = compute_spectral_flatness_variance(window)
+            if (
+                sfv >= 0.0
+                and CONSTANTS.SPECTRAL_FLATNESS_VAR_AI_MAX > 0.0
+                and sfv <= CONSTANTS.SPECTRAL_FLATNESS_VAR_AI_MAX
+            ):
+                score += 0.25
+
+            # -- Spectral centroid mean: AI concentrates energy in low-mid range
+            centroid_frames = librosa.feature.spectral_centroid(y=window, sr=sr)[0]
+            centroid_mean   = float(np.mean(centroid_frames)) if len(centroid_frames) > 0 else -1.0
+            if (
+                centroid_mean >= 0.0
+                and CONSTANTS.SPECTRAL_CENTROID_MEAN_AI_MAX > 0.0
+                and centroid_mean <= CONSTANTS.SPECTRAL_CENTROID_MEAN_AI_MAX
+            ):
+                score += 0.25
+
+            # -- Harmonic ratio: unnaturally clean harmonics in sustained notes
+            # Use full-track threshold; vocal routing not available per-window.
+            hr = compute_harmonic_ratio_score(
+                window, sr,
+                top_db=CONSTANTS.CENTROID_TOP_DB,
+                min_interval_s=CONSTANTS.CENTROID_MIN_INTERVAL_S,
+            )
+            if (
+                hr >= 0.0
+                and hr >= CONSTANTS.HARMONIC_RATIO_AI_MIN
+            ):
+                score += 0.25
+
+            segments.append(
+                AiSegment(
+                    start_s=round(start_s, 2),
+                    end_s=round(end_s, 2),
+                    probability=round(min(score, 1.0), 4),
+                )
+            )
+            start += hop_samples
+
+        return segments
+
+    except ModelInferenceError:
+        raise
+    except Exception as exc:
+        raise ModelInferenceError(
+            "Per-segment AI probability computation failed.",
             context={"original_error": str(exc)},
         ) from exc
 

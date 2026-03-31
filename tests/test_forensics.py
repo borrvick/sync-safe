@@ -36,6 +36,7 @@ from services.forensics import (
     compute_plr_std,
     compute_ultrasonic_noise_ratio,
     compute_voiced_noise_floor,
+    segment_ai_probabilities,
 )
 from tests.conftest import all_forensics_fixtures
 
@@ -788,3 +789,65 @@ class TestC2paOrigin:
         ])
         _, origin = _classify_c2pa_origin(data)
         assert origin == "daw"
+
+
+# ---------------------------------------------------------------------------
+# segment_ai_probabilities
+# ---------------------------------------------------------------------------
+
+class TestSegmentAiProbabilities:
+    """Tests for the per-window heatmap segmentation function."""
+
+    SR = 22_050  # matches CONSTANTS.SAMPLE_RATE
+
+    def _silence(self, seconds: float) -> np.ndarray:
+        return np.zeros(int(seconds * self.SR), dtype=np.float32)
+
+    def _sine(self, seconds: float, freq: float = 440.0) -> np.ndarray:
+        t = np.linspace(0, seconds, int(seconds * self.SR), endpoint=False)
+        return np.sin(2 * np.pi * freq * t).astype(np.float32)
+
+    def test_returns_empty_when_audio_shorter_than_window(self):
+        y = self._silence(5.0)   # < 10s default window
+        result = segment_ai_probabilities(y, self.SR, window_s=10, hop_s=5)
+        assert result == []
+
+    def test_single_window_for_exact_length(self):
+        y = self._silence(10.0)  # exactly one window
+        result = segment_ai_probabilities(y, self.SR, window_s=10, hop_s=5)
+        assert len(result) == 1
+
+    def test_segment_count_is_correct(self):
+        # 30s audio, 10s window, 5s hop → windows at 0, 5, 10, 15, 20 → 5 windows
+        y = self._silence(30.0)
+        result = segment_ai_probabilities(y, self.SR, window_s=10, hop_s=5)
+        assert len(result) == 5
+
+    def test_segment_timestamps_are_monotonic(self):
+        y = self._sine(20.0)
+        result = segment_ai_probabilities(y, self.SR, window_s=10, hop_s=5)
+        for i in range(1, len(result)):
+            assert result[i].start_s > result[i - 1].start_s
+
+    def test_segment_timestamps_do_not_overlap(self):
+        y = self._sine(20.0)
+        result = segment_ai_probabilities(y, self.SR, window_s=10, hop_s=5)
+        for seg in result:
+            assert seg.end_s > seg.start_s
+
+    def test_probability_clamped_to_unit_interval(self):
+        y = self._sine(15.0)
+        for seg in segment_ai_probabilities(y, self.SR, window_s=10, hop_s=5):
+            assert 0.0 <= seg.probability <= 1.0
+
+    def test_returns_ai_segments_instances(self):
+        from core.models import AiSegment
+        y = self._silence(10.0)
+        result = segment_ai_probabilities(y, self.SR, window_s=10, hop_s=5)
+        assert all(isinstance(s, AiSegment) for s in result)
+
+    def test_custom_window_and_hop(self):
+        # 60s audio, 20s window, 10s hop → windows at 0, 10, 20, 30, 40 → 5 windows
+        y = self._sine(60.0)
+        result = segment_ai_probabilities(y, self.SR, window_s=20, hop_s=10)
+        assert len(result) == 5
