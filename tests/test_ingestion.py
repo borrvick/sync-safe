@@ -165,9 +165,10 @@ class TestFetchYoutubeAudio:
             with pytest.raises(AudioSourceError, match="empty"):
                 self.svc.load(self.VALID_URL)
 
-    def test_raises_validation_error_for_non_youtube_url(self):
+    def test_raises_validation_error_for_unsupported_url(self):
+        # Spotify is not in the supported source list; "unknown" classification → ValidationError
         with pytest.raises(ValidationError) as exc_info:
-            self.svc.load("https://evil.com/audio.mp3")
+            self.svc.load("https://open.spotify.com/track/abc123")
         assert "url" in exc_info.value.context
 
     def test_raises_validation_error_for_http_url(self):
@@ -190,3 +191,43 @@ class TestFetchYoutubeAudio:
     def test_satisfies_audio_provider_protocol(self):
         from core.protocols import AudioProvider
         assert isinstance(self.svc, AudioProvider)
+
+
+# ---------------------------------------------------------------------------
+# _classify_url
+# ---------------------------------------------------------------------------
+
+class TestClassifyUrl:
+    """Tests for the pure URL classification function."""
+
+    def test_youtube_dot_com(self):
+        from services.ingestion import _classify_url
+        assert _classify_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ") == "youtube"
+
+    def test_youtu_be_short(self):
+        from services.ingestion import _classify_url
+        assert _classify_url("https://youtu.be/dQw4w9WgXcQ") == "youtube"
+
+    def test_bandcamp_subdomain(self):
+        from services.ingestion import _classify_url
+        assert _classify_url("https://artist.bandcamp.com/track/song-name") == "bandcamp"
+
+    def test_soundcloud(self):
+        from services.ingestion import _classify_url
+        assert _classify_url("https://soundcloud.com/artist/track") == "soundcloud"
+
+    def test_direct_mp3(self):
+        from services.ingestion import _classify_url
+        assert _classify_url("https://example.com/audio/track.mp3") == "direct"
+
+    def test_direct_wav(self):
+        from services.ingestion import _classify_url
+        assert _classify_url("https://cdn.example.com/files/track.wav") == "direct"
+
+    def test_unknown_url(self):
+        from services.ingestion import _classify_url
+        assert _classify_url("https://spotify.com/track/abc") == "unknown"
+
+    def test_malformed_url_returns_unknown(self):
+        from services.ingestion import _classify_url
+        assert _classify_url("not-a-url") == "unknown"
