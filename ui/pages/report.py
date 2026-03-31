@@ -19,6 +19,7 @@ import streamlit as st
 
 from core.config import CONSTANTS
 from core.models import (
+    AiSegment,
     AnalysisResult,
     AudioBuffer,
     AuthorshipResult,
@@ -486,6 +487,82 @@ def _render_structure_card(sr: Optional[StructureResult]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# AI probability heatmap helpers
+# ---------------------------------------------------------------------------
+
+# Semantic grade colors for A–F display — intentionally outside the CSS variable
+# system because these map to a universal academic grading convention (green=good,
+# red=fail) rather than the Sync-Safe brand palette.
+_GRADE_COLORS: dict[str, str] = {
+    "A": "#22c55e",
+    "B": "#84cc16",
+    "C": "#eab308",
+    "D": "#f97316",
+    "F": "#ef4444",
+}
+
+
+def _ai_grade(mean_prob: float) -> str:
+    """Return A/B/C/D/F grade letter for a mean AI probability in [0, 1]."""
+    thresholds = CONSTANTS.AI_GRADE_THRESHOLDS  # (0.20, 0.40, 0.60, 0.80)
+    for threshold, letter in zip(thresholds, ("A", "B", "C", "D")):
+        if mean_prob < threshold:
+            return letter
+    return "F"
+
+
+def _render_ai_heatmap(segments: list[AiSegment]) -> None:
+    """Render an AI probability timeline heatmap with an A–F grade badge."""
+    if not segments:
+        return
+
+    probs     = [s.probability for s in segments]
+    mean_prob = sum(probs) / len(probs)
+    grade     = _ai_grade(mean_prob)
+    grade_color = _GRADE_COLORS.get(grade, "#94a3b8")
+
+    total_dur = segments[-1].end_s
+    bar_parts: list[str] = []
+    for seg in segments:
+        width_pct = (seg.end_s - seg.start_s) / total_dur * 100 if total_dur > 0 else 0
+        # HSL: hue 142 (green) at 0% AI → hue 0 (red) at 100% AI
+        hue   = int(142 * (1.0 - seg.probability))
+        color = f"hsl({hue},75%,45%)"
+        s_m, s_s = int(seg.start_s) // 60, int(seg.start_s) % 60
+        label = f"{s_m}:{s_s:02d} — {seg.probability:.0%} AI"
+        bar_parts.append(
+            f"<div title='{label}' "
+            f"style='flex:{width_pct:.2f};background:{color};height:20px;'></div>"
+        )
+    bar_html = "".join(bar_parts)
+
+    end_m, end_s = int(total_dur) // 60, int(total_dur) % 60
+    st.markdown(f"""
+    <div style="margin-top:20px;">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
+        <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
+                    letter-spacing:.14em;text-transform:uppercase;color:var(--dim);">
+          AI Probability Timeline
+        </div>
+        <div style="font-family:'Chakra Petch',monospace;font-size:1.1rem;font-weight:700;
+                    color:{grade_color};letter-spacing:.05em;">Grade {grade}</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:.68rem;color:var(--dim);">
+          avg {mean_prob:.0%}
+        </div>
+      </div>
+      <div role="img" aria-label="AI probability timeline: average {mean_prob:.0%}, grade {grade}"
+           style="display:flex;border-radius:4px;overflow:hidden;gap:1px;background:var(--border);">
+        {bar_html}
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:4px;">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:.58rem;color:var(--dim);">0:00</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:.58rem;color:var(--dim);">{end_m}:{end_s:02d}</span>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
 # Authenticity Audit: forensics
 # ---------------------------------------------------------------------------
 
@@ -659,6 +736,9 @@ def _render_forensics_card(fr: Optional[ForensicsResult], source: str = "file") 
             f"{flags_html}</div>",
             unsafe_allow_html=True,
         )
+
+    _render_ai_heatmap(fr.ai_segments)
+
 
 # ---------------------------------------------------------------------------
 # Production Analysis — sample & loop detection (separate from AI detection)

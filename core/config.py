@@ -142,6 +142,15 @@ class SystemConstants:
     # Mono sum dB loss below this (negative) → significant cancellation flag
     MONO_CANCELLATION_DB_FAIL: float = -6.0
 
+    # ---- AI Probability Heatmap -----------------------------------------------
+    # Window and hop size (seconds) for per-segment AI probability analysis.
+    AI_HEATMAP_WINDOW_S: int = 10
+    AI_HEATMAP_HOP_S: int    = 5
+
+    # Grade thresholds: probability below each value earns the corresponding grade.
+    # A: [0, 0.20)  B: [0.20, 0.40)  C: [0.40, 0.60)  D: [0.60, 0.80)  F: [0.80, 1.0]
+    AI_GRADE_THRESHOLDS: tuple[float, ...] = (0.20, 0.40, 0.60, 0.80)
+
     # ---- Metadata / Split Sheet Validation ------------------------------------
     # Writer/publisher splits must sum to 100 % within this tolerance.
     # Allows for standard 2-decimal-place rounding (e.g. 33.33 + 33.33 + 33.34).

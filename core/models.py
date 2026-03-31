@@ -123,6 +123,19 @@ class StructureResult(BaseModel):
 # Forensics
 # ---------------------------------------------------------------------------
 
+class AiSegment(BaseModel):
+    """One time-windowed AI-probability estimate within a track."""
+
+    model_config = ConfigDict(frozen=True)
+
+    start_s: float      # window start (seconds from track start)
+    end_s: float        # window end
+    probability: float  # [0.0, 1.0]; higher = more AI-like
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.model_dump()
+
+
 class ForensicsResult(BaseModel):
     """Output of the AI-humanity forensics stage."""
 
@@ -156,6 +169,8 @@ class ForensicsResult(BaseModel):
     voiced_noise_floor: float = -1.0             # mean spectral flatness in voiced 4–12 kHz frames; low = AI clean synthesis (-1 = non-vocal/not computed)
     is_vocal: bool = False                       # True → pyin detected vocal content; routes vocal scoring path
     c2pa_origin: str = ""                        # "ai" | "daw" | "unknown" | "" (no manifest)
+
+    ai_segments: list[AiSegment] = Field(default_factory=list)  # per-window heatmap data
 
     flags: list[str]        = Field(default_factory=list)  # human-readable flag labels
     forensic_notes: list[str] = Field(default_factory=list)  # secondary context shown below verdict
