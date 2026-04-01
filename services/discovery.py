@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import base64
 import math
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -150,6 +151,27 @@ class Discovery:
                 if track_data:
                     listeners = int(track_data.get("listeners", 0))
                     playcount = int(track_data.get("playcount", 0))
+
+                # ── Fuzzy retry (#89) ─────────────────────────────────────
+                # If the first lookup returns suspiciously few listeners
+                # (e.g. Bruno Mars / 24K Magic showing 13 due to decorated
+                # title mismatch), strip feat./parentheticals and retry once.
+                if listeners < CONSTANTS.LASTFM_LOW_LISTENER_THRESHOLD:
+                    clean_title = _clean_title_for_lastfm(title)
+                    if clean_title and clean_title != title:
+                        retry_params = {**params, "track": clean_title}
+                        retry_resp = requests.get(
+                            _LASTFM_BASE, params=retry_params, timeout=10
+                        )
+                        retry_resp.raise_for_status()
+                        retry_data = retry_resp.json().get("track", {})
+                        if retry_data:
+                            retry_listeners = int(retry_data.get("listeners", 0))
+                            retry_playcount = int(retry_data.get("playcount", 0))
+                            # Only upgrade — never downgrade to the cleaned result
+                            if retry_listeners > listeners:
+                                listeners = retry_listeners
+                                playcount = max(playcount, retry_playcount)
             except Exception:  # noqa: BLE001 — popularity is always best-effort
                 pass
 
@@ -393,6 +415,37 @@ def _normalise_views(view_count: int, constants: object) -> int:
     )
 
 
+def _clean_title_for_lastfm(title: str) -> str:
+    """
+    Strip common title decorations that cause Last.fm lookup mismatches.
+
+    Removes:
+      - Featured artist credits: "feat. X", "ft. X", "featuring X"
+      - Parenthetical / bracket suffixes: "(Official Video)", "[Lyrics]", etc.
+      - Leading/trailing whitespace
+
+    Designed for use as a fuzzy retry when the first lookup returns
+    suspiciously low listener counts (< LASTFM_LOW_LISTENER_THRESHOLD).
+
+    Pure function — no I/O.
+
+    >>> _clean_title_for_lastfm("24K Magic (feat. Bruno Mars) [Lyrics]")
+    '24K Magic'
+    >>> _clean_title_for_lastfm("Blinding Lights")
+    'Blinding Lights'
+    """
+    # Strip "feat." / "ft." / "featuring" blocks (with optional parentheses)
+    cleaned = re.sub(
+        r"\s*[\(\[]?\s*(?:feat\.?|ft\.?|featuring)\s+[^\)\]]+[\)\]]?",
+        "",
+        title,
+        flags=re.IGNORECASE,
+    )
+    # Strip any remaining trailing parenthetical / bracket suffixes
+    cleaned = re.sub(r"\s*[\(\[][^\)\]]+[\)\]]\s*$", "", cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()
+
+
 def _classify_popularity(
     listeners: int,
     playcount: int,
@@ -403,10 +456,17 @@ def _classify_popularity(
     """
     Derive a blended popularity_score and tier from all available signals.
 
-    Strategy: normalise each signal independently to 0–100, then take the
-    maximum.  This means a strong signal on any single platform cannot be
-    suppressed by a weak or missing one — a track with 200M YouTube views
-    will not show as "Emerging" just because Last.fm has a bad listener count.
+    Strategy: normalise each signal independently to 0–100, take the maximum,
+    then apply a minimum-signal gate for higher tiers.
+
+    max() protects against false lows (a bad Last.fm lookup can't suppress a
+    mainstream track).  The signal gate protects against false highs (a meme
+    remix with 200M views but near-zero Last.fm + Spotify can't reach Global).
+
+    Gate rules (from SystemConstants):
+      Emerging / Regional: 1 signal sufficient
+      Mainstream:          requires POPULARITY_MIN_SIGNALS_MAINSTREAM signals > 0
+      Global:              requires POPULARITY_MIN_SIGNALS_GLOBAL signals > 0
 
     Signals used (each optional — omitted when unavailable):
       - Last.fm listeners (piecewise-linear normalised against tier boundaries)
@@ -435,11 +495,17 @@ def _classify_popularity(
         scores.append(_normalise_views(view_count, cfg))
 
     popularity_score = max(scores) if scores else 0
+    signal_count = len(scores)
 
-    if popularity_score >= cfg.POPULARITY_GLOBAL_MIN:
+    # Determine tier, applying the minimum-signal gate to higher tiers.
+    # If the score qualifies for a tier but not enough signals are present,
+    # cap at the next tier down.
+    if (popularity_score >= cfg.POPULARITY_GLOBAL_MIN
+            and signal_count >= cfg.POPULARITY_MIN_SIGNALS_GLOBAL):
         tier                = "Global"
         cost_low, cost_high = cfg.SYNC_COST_GLOBAL
-    elif popularity_score >= cfg.POPULARITY_MAINSTREAM_MIN:
+    elif (popularity_score >= cfg.POPULARITY_MAINSTREAM_MIN
+            and signal_count >= cfg.POPULARITY_MIN_SIGNALS_MAINSTREAM):
         tier                = "Mainstream"
         cost_low, cost_high = cfg.SYNC_COST_MAINSTREAM
     elif popularity_score >= cfg.POPULARITY_REGIONAL_MIN:

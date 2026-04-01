@@ -9,6 +9,7 @@ import pytest
 from services.discovery import (
     Discovery,
     _classify_popularity,
+    _clean_title_for_lastfm,
     _find_binary,
     _normalise_lastfm,
     _normalise_views,
@@ -76,19 +77,25 @@ class TestClassifyPopularity:
         assert result.popularity_score == 0
 
     def test_spotify_score_elevates_tier(self) -> None:
-        # 10 Last.fm listeners alone → Emerging, but Spotify score of 80 → Global
+        # Spotify score of 80 alone scores high, but the signal gate requires
+        # POPULARITY_MIN_SIGNALS_GLOBAL signals for Global — so with only 1
+        # signal the tier is capped below Global.
         result = _classify_popularity(10, 0, spotify_score=80, constants=CONSTANTS)
-        assert result.tier == "Global"
+        assert result.tier != "Emerging"          # score is elevated
+        assert result.tier != "Global"            # gate fires — not enough signals
         assert result.spotify_score == 80
 
     def test_high_view_count_elevates_tier(self) -> None:
-        # 1 Last.fm listener, but 300M YouTube views → should be Mainstream or Global
+        # 300M YouTube views is a strong signal, but with only 1 signal the
+        # Mainstream gate fires (requires POPULARITY_MIN_SIGNALS_MAINSTREAM).
+        # Score is elevated well above Emerging though.
         result = _classify_popularity(
             1, 0,
             platform_metrics={"view_count": 300_000_000},
             constants=CONSTANTS,
         )
-        assert result.tier in ("Mainstream", "Global")
+        assert result.tier not in ("Emerging",)   # score is elevated
+        assert result.popularity_score > 25        # clearly above Emerging range
 
     def test_bad_lastfm_overridden_by_youtube_views(self) -> None:
         # Simulates the "24K Magic shows as Emerging" bug:
@@ -265,3 +272,165 @@ class TestDiscovery:
             results = svc.find_similar("Title", "Artist")
 
         assert all(r.youtube_url is None for r in results)
+
+
+# ---------------------------------------------------------------------------
+# _classify_popularity — signal gate (#88)
+# ---------------------------------------------------------------------------
+
+class TestSignalGate:
+    """Tests for the minimum-signal gate that guards Mainstream/Global tiers."""
+
+    def test_single_high_view_count_capped_at_regional_not_mainstream(self) -> None:
+        # 50M views → score 50 (Mainstream boundary), but only 1 signal — gate fires
+        result = _classify_popularity(
+            0, 0,
+            platform_metrics={"view_count": CONSTANTS.PLATFORM_VIEWS_MAINSTREAM},
+            constants=CONSTANTS,
+        )
+        # With only 1 signal and POPULARITY_MIN_SIGNALS_MAINSTREAM == 2, tier is capped
+        assert result.tier in ("Regional", "Emerging")
+
+    def test_two_signals_unlocks_mainstream(self) -> None:
+        # Last.fm + views together satisfy the 2-signal gate
+        result = _classify_popularity(
+            CONSTANTS.LASTFM_LISTENERS_MAINSTREAM,  # score 50
+            0,
+            platform_metrics={"view_count": CONSTANTS.PLATFORM_VIEWS_MAINSTREAM},  # score 50
+            constants=CONSTANTS,
+        )
+        assert result.tier == "Mainstream"
+
+    def test_single_spotify_score_capped_below_global(self) -> None:
+        # Spotify 90 alone → score 90, but 1 signal → Global gate fires
+        result = _classify_popularity(0, 0, spotify_score=90, constants=CONSTANTS)
+        assert result.tier != "Global"
+
+    def test_two_signals_unlocks_global(self) -> None:
+        # Spotify 80 + Last.fm at global boundary → both score ≥ 75, 2 signals
+        result = _classify_popularity(
+            CONSTANTS.LASTFM_LISTENERS_GLOBAL,
+            0,
+            spotify_score=80,
+            constants=CONSTANTS,
+        )
+        assert result.tier == "Global"
+
+    def test_signal_count_stored_in_popularity_score(self) -> None:
+        # When two signals are present the blended score is max of both
+        result = _classify_popularity(
+            100, 0, spotify_score=60, constants=CONSTANTS
+        )
+        assert result.popularity_score == 60
+
+
+# ---------------------------------------------------------------------------
+# _clean_title_for_lastfm — fuzzy Last.fm fallback (#89)
+# ---------------------------------------------------------------------------
+
+class TestCleanTitleForLastfm:
+    def test_strips_feat_dot(self) -> None:
+        assert _clean_title_for_lastfm("24K Magic (feat. Bruno Mars)") == "24K Magic"
+
+    def test_strips_ft_dot(self) -> None:
+        assert _clean_title_for_lastfm("Song (ft. Artist)") == "Song"
+
+    def test_strips_featuring(self) -> None:
+        assert _clean_title_for_lastfm("Track featuring Someone") == "Track"
+
+    def test_strips_bracket_suffix(self) -> None:
+        assert _clean_title_for_lastfm("Mr. Brightside [Official Video]") == "Mr. Brightside"
+
+    def test_strips_bare_parenthetical(self) -> None:
+        assert _clean_title_for_lastfm("Blue (Extended Version)") == "Blue"
+
+    def test_clean_title_unchanged(self) -> None:
+        assert _clean_title_for_lastfm("Blinding Lights") == "Blinding Lights"
+
+    def test_empty_string_returns_empty(self) -> None:
+        assert _clean_title_for_lastfm("") == ""
+
+    def test_feat_inline_without_parens(self) -> None:
+        result = _clean_title_for_lastfm("Sunflower feat. Swae Lee")
+        assert "feat" not in result.lower()
+        assert "Sunflower" in result
+
+
+# ---------------------------------------------------------------------------
+# get_track_popularity — fuzzy Last.fm retry integration test (#89)
+# ---------------------------------------------------------------------------
+
+class TestFuzzyLastfmRetry:
+    """
+    Verifies that get_track_popularity() retries with a cleaned title when
+    the first Last.fm lookup returns suspiciously few listeners.
+    """
+
+    def _make_settings(self):
+        s = MagicMock()
+        s.lastfm_api_key = "fakekey"
+        s.spotify_client_id = ""
+        s.spotify_client_secret = ""
+        return s
+
+    def test_retry_fires_and_upgrades_listeners(self) -> None:
+        """First call returns 13 listeners; retry returns 1_500_000."""
+        low_resp = MagicMock()
+        low_resp.raise_for_status.return_value = None
+        low_resp.json.return_value = {
+            "track": {"listeners": "13", "playcount": "50"}
+        }
+
+        high_resp = MagicMock()
+        high_resp.raise_for_status.return_value = None
+        high_resp.json.return_value = {
+            "track": {"listeners": "1500000", "playcount": "10000000"}
+        }
+
+        with patch("services.discovery.get_settings", return_value=self._make_settings()), \
+             patch("services.discovery.requests.get", side_effect=[low_resp, high_resp]):
+            svc = Discovery()
+            result = svc.get_track_popularity(
+                "24K Magic (feat. Bruno Mars)", "Bruno Mars"
+            )
+
+        assert result is not None
+        assert result.listeners == 1_500_000
+
+    def test_retry_does_not_downgrade(self) -> None:
+        """If the retry returns fewer listeners, keep the original."""
+        first_resp = MagicMock()
+        first_resp.raise_for_status.return_value = None
+        first_resp.json.return_value = {
+            "track": {"listeners": "500", "playcount": "2000"}
+        }
+
+        lower_resp = MagicMock()
+        lower_resp.raise_for_status.return_value = None
+        lower_resp.json.return_value = {
+            "track": {"listeners": "10", "playcount": "100"}
+        }
+
+        with patch("services.discovery.get_settings", return_value=self._make_settings()), \
+             patch("services.discovery.requests.get", side_effect=[first_resp, lower_resp]):
+            svc = Discovery()
+            result = svc.get_track_popularity("Song (feat. X)", "Artist")
+
+        assert result is not None
+        assert result.listeners == 500
+
+    def test_no_retry_when_clean_title_unchanged(self) -> None:
+        """If the title has no decorations, the retry should not fire (only 1 HTTP call)."""
+        resp = MagicMock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {
+            "track": {"listeners": "200", "playcount": "1000"}
+        }
+
+        with patch("services.discovery.get_settings", return_value=self._make_settings()), \
+             patch("services.discovery.requests.get", return_value=resp) as mock_get:
+            svc = Discovery()
+            svc.get_track_popularity("Blinding Lights", "The Weeknd")
+
+        # Only 1 call — no retry needed because title has no decorations
+        assert mock_get.call_count == 1

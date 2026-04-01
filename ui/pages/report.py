@@ -152,6 +152,10 @@ def render_report(
     with st.expander("Structural Repetition", expanded=True):
         _render_production_analysis_card(result.forensics)
 
+    if result.sync_cuts:
+        with st.expander("Sync Edit Points", expanded=False):
+            _render_sync_cuts(result)
+
     with st.expander("Sync Readiness Checks", expanded=True):
         _render_sync_readiness(result.compliance)
         _render_audio_quality_card(result.audio_quality)
@@ -161,10 +165,6 @@ def render_report(
 
     with st.expander("Lyrics & Content Audit", expanded=True):
         _render_lyric_section(result)
-
-    if result.sync_cuts:
-        with st.expander("Sync Edit Points", expanded=False):
-            _render_sync_cuts(result)
 
     _render_export_buttons(result)
     _render_footer()
