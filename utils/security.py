@@ -9,14 +9,21 @@ import shlex
 from urllib.parse import urlparse
 
 # ---------------------------------------------------------------------------
-# Allowlisted YouTube hostnames
+# Allowlisted hostnames for yt-dlp-routed downloads
 # ---------------------------------------------------------------------------
 _ALLOWED_HOSTS = frozenset({
+    # YouTube
     "youtube.com",
     "www.youtube.com",
     "youtu.be",
     "music.youtube.com",
     "m.youtube.com",
+    # Bandcamp (subdomains matched separately in ingestion via _BANDCAMP_HOSTS)
+    "bandcamp.com",
+    # SoundCloud
+    "soundcloud.com",
+    "www.soundcloud.com",
+    "on.soundcloud.com",
 })
 
 # Control characters (excluding normal whitespace) and null bytes
@@ -60,10 +67,11 @@ def validate_url(url: str) -> str:
         raise ValueError("URLs with embedded credentials are not accepted.")
 
     host = (parsed.hostname or "").lower()
-    if host not in _ALLOWED_HOSTS:
+    if host not in _ALLOWED_HOSTS and not host.endswith(".bandcamp.com"):
         raise ValueError(
             f"URL host '{host}' is not on the allowlist. "
-            f"Accepted hosts: {', '.join(sorted(_ALLOWED_HOSTS))}"
+            f"Accepted hosts: {', '.join(sorted(_ALLOWED_HOSTS))} "
+            f"(or any *.bandcamp.com subdomain)"
         )
 
     return url

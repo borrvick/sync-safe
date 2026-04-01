@@ -68,6 +68,15 @@ class SystemConstants:
     SYNTHID_BAND_LOW_HZ: int = 18_000
     SYNTHID_BAND_HIGH_HZ: int = 22_000
 
+    # ---- C2PA: DAW software agent strings -----------------------------------------
+    # Case-insensitive substrings matched against c2pa.created/edited softwareAgent field.
+    # Presence → c2pa_origin = "daw"; absence with manifest → "unknown".
+    C2PA_DAW_SOFTWARE_AGENTS: tuple[str, ...] = (
+        "adobe audition", "logic pro", "garageband", "pro tools",
+        "ableton", "fl studio", "reaper", "cubase", "studio one",
+        "nuendo", "reason", "bitwig",
+    )
+
     # ---- Compliance: Sting / Ending -------------------------------------------
     # Tail energy / mean energy ratio below this → ending qualifies as a fade
     STING_TAIL_RATIO: float = 0.05
@@ -107,8 +116,137 @@ class SystemConstants:
     # ---- Discovery ------------------------------------------------------------
     MAX_SIMILAR_TRACKS: int = 5
 
+    # ---- Sync-Cut Detection ---------------------------------------------------
+    # Standard ad/TV edit durations (seconds) to find edit points for.
+    SYNC_CUT_TARGET_DURATIONS: tuple[int, ...] = (15, 30, 60)
+
+    # Beat snap granularity: prefer windows that start on a bar boundary (every
+    # SYNC_CUT_SNAP_BARS beats). 4 = 1 bar in 4/4 time.
+    SYNC_CUT_SNAP_BARS: int = 4
+
+    # How close (seconds) a beat must be to a section boundary to count as
+    # "starts/ends at section boundary" for scoring.
+    SYNC_CUT_BOUNDARY_TOLERANCE_S: float = 0.5
+
+    # Duration tolerance: candidate window must be within ±this many seconds
+    # of the target duration to be considered.
+    SYNC_CUT_DURATION_TOLERANCE_S: float = 3.0
+
+    # ---- Stem validation: mono compatibility / phase alignment ----------------
+    # Pearson L/R correlation below this → warn about phase issues
+    PHASE_CORRELATION_WARN: float = 0.0
+    # Pearson L/R correlation below this → flag as likely anti-phase
+    PHASE_CORRELATION_FAIL: float = -0.3
+    # Mono sum dB loss below this (negative) → warn
+    MONO_CANCELLATION_DB_WARN: float = -3.0
+    # Mono sum dB loss below this (negative) → significant cancellation flag
+    MONO_CANCELLATION_DB_FAIL: float = -6.0
+
+    # ---- AI Probability Heatmap -----------------------------------------------
+    # Window and hop size (seconds) for per-segment AI probability analysis.
+    AI_HEATMAP_WINDOW_S: int = 10
+    AI_HEATMAP_HOP_S: int    = 5
+
+    # Grade thresholds: probability below each value earns the corresponding grade.
+    # A: [0, 0.20)  B: [0.20, 0.40)  C: [0.40, 0.60)  D: [0.60, 0.80)  F: [0.80, 1.0]
+    AI_GRADE_THRESHOLDS: tuple[float, ...] = (0.20, 0.40, 0.60, 0.80)
+
+    # ---- Metadata / Split Sheet Validation ------------------------------------
+    # Writer/publisher splits must sum to 100 % within this tolerance.
+    # Allows for standard 2-decimal-place rounding (e.g. 33.33 + 33.33 + 33.34).
+    SPLIT_TOLERANCE: float = 0.01
+
+    # ---- MusicBrainz API --------------------------------------------------------
+    # Per-request HTTP timeout for MusicBrainz recordings API calls.
+    MB_TIMEOUT_S: int = 8
+
+    # ---- Pipeline step timeout budgets (seconds) ------------------------------
+    # Generous walls to prevent hung subprocesses (yt-dlp, Whisper, allin1)
+    # from blocking the UI indefinitely on ZeroGPU.
+    STEP_TIMEOUT_INGESTION_S: int     = 120
+    STEP_TIMEOUT_STRUCTURE_S: int     = 90
+    STEP_TIMEOUT_TRANSCRIPTION_S: int = 180   # Whisper on cold GPU is slow
+    STEP_TIMEOUT_FORENSICS_S: int     = 60
+    STEP_TIMEOUT_COMPLIANCE_S: int    = 60
+    STEP_TIMEOUT_AUTHORSHIP_S: int    = 30
+    STEP_TIMEOUT_DISCOVERY_S: int     = 30
+    STEP_TIMEOUT_LEGAL_S: int         = 30
+
+    # ---- Loudness & Dialogue (LUFS / ITU-R BS.1770-4) ------------------------
+    # Target integrated loudness per platform (LUFS)
+    LUFS_SPOTIFY: float       = -14.0
+    LUFS_APPLE_MUSIC: float   = -16.0
+    LUFS_YOUTUBE: float       = -14.0
+    LUFS_BROADCAST: float     = -23.0   # ATSC A/85 (US) / EBU R128 (EU)
+
+    # Minimum track duration for pyloudnorm integrated LUFS (gating requires several 400ms blocks)
+    LUFS_MIN_DURATION_S: float = 3.0
+
+    # True peak warning threshold — exceeding causes clipping on loudness-normalised playback
+    TRUE_PEAK_WARN_DBFS: float = -1.0
+
+    # Dialogue-ready score thresholds (0.0–1.0)
+    # Score = fraction of energy OUTSIDE the 300–3000 Hz dialogue competition band.
+    # Higher = sits more cleanly under voiceover.
+    DIALOGUE_READY_HIGH: float = 0.70   # ≥ this → "Dialogue-Ready"
+    DIALOGUE_READY_LOW: float  = 0.40   # < this → "Dialogue-Heavy"; between → "Mixed"
+
+    # ---- Track Popularity (blended 0–100 score) --------------------------------
+    # Tier boundaries applied to the normalised popularity_score (0–100).
+    # Score is derived from whichever signals are available:
+    #   Last.fm listeners, Last.fm playcount, YouTube/platform view count,
+    #   YouTube like count, Spotify popularity (0–100 native).
+    # Each signal is normalised independently then the max is taken so a strong
+    # signal on any single platform cannot be drowned out by weak others.
+    # Tiers: Emerging < Regional < Mainstream < Global
+    POPULARITY_REGIONAL_MIN: int    = 25    # normalised score ≥ 25
+    POPULARITY_MAINSTREAM_MIN: int  = 50    # normalised score ≥ 50
+    POPULARITY_GLOBAL_MIN: int      = 75    # normalised score ≥ 75
+
+    # Last.fm listener count ceilings for per-signal normalisation.
+    # Raw listener counts above the ceiling are clamped to 100.
+    LASTFM_LISTENERS_REGIONAL: int    = 10_000
+    LASTFM_LISTENERS_MAINSTREAM: int  = 100_000
+    LASTFM_LISTENERS_GLOBAL: int      = 1_000_000
+
+    # YouTube / platform view count ceilings for normalisation.
+    # Calibrated against known mainstream (100M+ views) and emerging (<1M) tracks.
+    PLATFORM_VIEWS_REGIONAL: int    = 1_000_000     # 1M views → score ~25
+    PLATFORM_VIEWS_MAINSTREAM: int  = 50_000_000    # 50M views → score ~50
+    PLATFORM_VIEWS_GLOBAL: int      = 500_000_000   # 500M views → score ~75+
+
+    # Minimum number of independent signals required to award higher tiers.
+    # Protects against false highs (e.g. a meme remix with 200M views but
+    # near-zero Last.fm + Spotify scores reaching Global).
+    # Emerging/Regional: 1 signal sufficient (single source is credible enough).
+    # Mainstream: at least 2 signals must score > 0.
+    # Global: at least 2 signals must score > 0.
+    POPULARITY_MIN_SIGNALS_MAINSTREAM: int = 2
+    POPULARITY_MIN_SIGNALS_GLOBAL: int     = 2
+
+    # Last.fm listener threshold below which a fuzzy retry is attempted.
+    # If the first lookup returns fewer listeners than this, strip featured
+    # artists and parenthetical suffixes and retry — covers "13 listeners for
+    # Bruno Mars" cases caused by title decoration mismatches in Last.fm's index.
+    LASTFM_LOW_LISTENER_THRESHOLD: int = 1_000
+
+    # Estimated sync fee ranges (USD) per popularity tier — shown as guidance only.
+    # Source: industry averages 2024-2026; highly variable by usage and territory.
+    SYNC_COST_EMERGING: tuple[int, int]    = (500,    5_000)
+    SYNC_COST_REGIONAL: tuple[int, int]    = (2_000,  25_000)
+    SYNC_COST_MAINSTREAM: tuple[int, int]  = (15_000, 100_000)
+    SYNC_COST_GLOBAL: tuple[int, int]      = (50_000, 500_000)
+
     # ---- Forensics: IBI / Groove ----------------------------------------------
-    # IBI variance below this → "Perfect Quantization" AI signal
+    # IBI variance below this → "Perfect Quantization" AI signal.
+    # FakeMusicCaps calibration 2026-03-23: AI median IBI variance (621) is
+    # HIGHER than human median (179). The "AI = perfect grid" hypothesis is not
+    # supported — FMC generators add humanization jitter, or librosa beat tracking
+    # is less stable on AI audio. The very-low-IBI path (< 0.5) still catches
+    # outlier AI tracks (AI min=0.0) and is retained at current threshold.
+    # The erratic-high-IBI path (IBI_ERRATIC_MIN) was originally designed to
+    # catch randomly humanized AI but FMC data shows human p90=618 overlaps
+    # AI p50=621 — retained for continuity, but precision is low.
     IBI_PERFECT_QUANTIZATION_MAX: float = 0.5
     # IBI variance above this → "Erratic Humanization" AI signal
     IBI_ERRATIC_MIN: float = 90.0
@@ -127,7 +265,7 @@ class SystemConstants:
     LOOP_PEAK_SPACING_MAX: int = 100
     # Autocorrelation loop score at or above this → "Sample-Heavy / Loop-Based" verdict path
     LOOP_AUTOCORR_VERDICT_THRESHOLD: float = 0.70
-    # Autocorrelation score above this + organic groove + high IBI → "Human (Sample/Loop)" verdict
+    # Autocorrelation score above this + organic groove + high IBI → "Likely Not AI" (organic sampled production)
     LOOP_AUTOCORR_SAMPLE_VERDICT_THRESHOLD: float = 0.85
     # UI display threshold — scores above this shown as "Moderate" repetition (below = "Low")
     LOOP_AUTOCORR_DISPLAY_MODERATE_MIN: float = 0.40
@@ -156,24 +294,58 @@ class SystemConstants:
     # AI generators produce unnaturally clean harmonic content — no breath, reed
     # noise, or physical resonance. HPSS separates harmonic/percussive components;
     # harmonic_energy / total_energy within sustained intervals gives HNR.
-    # Calibrated against 5 tracks (3 with live HNR values):
-    #   Human: Springsteen=0.485, Levitating=0.503
-    #   AI:    Breaking Rust=0.664
-    # Threshold at 0.59: highest human=0.503, lowest AI=0.664.
-    # Margin: 0.087 on human side, 0.074 on AI side.
-    HARMONIC_RATIO_AI_MIN: float = 0.59
+    # Original 5-track calibration: human max=0.503, AI min=0.664 → threshold 0.59.
+    # FakeMusicCaps calibration 2026-03-24 (502 AI / 27 human):
+    #   AI:    p25=0.507, p50=0.679, p75=0.847, p90=0.933
+    #   Human: p25=0.455, p50=0.558, p75=0.630, p90=0.778, max=0.844
+    #   At 0.59: ~50% of AI fire, ~30% human FP → unacceptable false positive rate.
+    #   Raised to 0.85: AI p90=0.933 catches ~10% of AI; human p90=0.778 gives
+    #   ~5-10% FP rate — acceptable at PROB_WEIGHT_HARMONIC_RATIO=0.10.
+    HARMONIC_RATIO_AI_MIN: float = 0.85
 
-    # HNR threshold for blocking the Human (Sample/Loop) override when centroid
-    # is also flagged. Sampled tracks from clean libraries score 0.60–0.62; true
-    # AI covers score 0.66+. Set above the sampled-track cluster (0.62) and below
-    # the AI cluster (0.66) to allow high-autocorr / high-IBI sampled tracks
-    # through the override while still blocking AI covers.
-    # Calibrated: 01a4x17A3Ks (Heavily Sampled)=0.615 → passes; Careless Whisper
-    # AI Cover=0.619 → passes (blocked by IBI gate); ea5C9IVarZM (100% AI)=0.68
-    # → blocked by this threshold.
+    # HNR threshold for blocking the organic-sampled override toward "Likely Not AI".
+    # Originally 0.65 based on 5-track calibration. FMC 2026-03-24: human p90=0.778,
+    # so 0.65 would block ~10% of human tracks from the organic override — acceptable.
+    # Raised to match recalibrated HARMONIC_RATIO_AI_MIN (0.85) context: tracks below
+    # 0.85 are not flagged as AI anyway, so the block only matters at the high end.
+    # Kept at 0.65 as a conservative gate; revisit if organic override misfires.
     HARMONIC_RATIO_SAMPLE_OVERRIDE_BLOCK: float = 0.65
 
-    # IBI variance required to override "Human (Sample/Loop)" when centroid IS
+    # ---- Forensics: Vocal / Instrumental path routing -------------------------
+    # Tracks are routed to vocal or instrumental scoring based on voiced frame
+    # count from librosa.pyin. Vocal and instrumental AI have fundamentally
+    # different spectral signatures — one algorithm cannot serve both accurately.
+    #
+    # Vocal AI (Suno/Udio): neural vocoders produce formant drift (centroid
+    # instability) + unnaturally clean harmonics (HNR) → those signals are valid.
+    # Instrumental AI (MusicGen, AudioLDM2): stable spectral profiles + lower HNR
+    # than human counterparts → centroid/HNR are inverted or absent (FMC 2026-03-24).
+    #
+    # Minimum voiced frames from librosa.pyin to classify a track as vocal.
+    # At SAMPLE_RATE=22050 with librosa.pyin default hop=512: each frame ≈ 23.2 ms.
+    # 100 frames ≈ 2.3 seconds of detectable pitched vocal content.
+    VOCAL_MIN_VOICED_FRAMES: int = 100
+
+    # Vocal-path harmonic ratio threshold.
+    # SONICS calibration 2026-03-24 (500 AI vocal: 250 Suno + 250 Udio / 27 human WAV masters):
+    #   Suno median=0.688, Udio median=0.590, human median=0.558
+    #   Suno p10=0.535, Udio p10=0.397, human p10=0.439, human p90=0.778
+    # Threshold 0.70 sits just above Suno median → catches ~50% Suno, misses most Udio.
+    # Udio at 0.590 median is below human median; no threshold separates Udio cleanly.
+    # This is the best available single threshold given the bimodal AI distribution.
+    HARMONIC_RATIO_AI_MIN_VOCAL: float = 0.70
+
+    # Vocal-path probability weights.
+    # centroid_instability: DISABLED (weight=0.0) — SONICS calibration 2026-03-24
+    #   confirmed inversion on 500 vocal AI tracks: AI p10 avg=0.187 < human p10=0.251.
+    #   The original 8-track calibration was overfitted. FMC showed same inversion for
+    #   instrumental AI; SONICS confirms it extends to vocal AI as well.
+    # harmonic_ratio: reduced to 0.15 — marginal Udio separation means HNR alone cannot
+    #   reliably identify vocal AI. Weight reduced to limit false positive impact.
+    PROB_WEIGHT_CENTROID_VOCAL: float = 0.0
+    PROB_WEIGHT_HARMONIC_RATIO_VOCAL: float = 0.15
+
+    # IBI variance required to override toward "Likely Not AI" when centroid IS
     # flagged (i.e. AI vocal signals are present). The idea: if centroid is in the
     # AI range but ibi_variance is very high, the human timing jitter is strong
     # enough to override the weaker centroid signal. Calibrated so that the
@@ -184,45 +356,74 @@ class SystemConstants:
     # ---- Forensics: Probability weights for verdict scoring ------------------
     # Each weight is the contribution to ai_probability [0.0, 1.0] when the
     # corresponding signal fires. Weights are additive; score is clamped to 1.0.
-    # Calibrated so Espresso (human + Splice) ≈ 0.00 and
-    # Careless Whisper AI cover ≈ 0.55.
-    PROB_WEIGHT_CENTROID: float = 0.40          # within-note formant drift
-    PROB_WEIGHT_IBI_QUANTIZED: float = 0.25     # machine-grid beat timing
-    PROB_WEIGHT_LOOP_CROSS_CORR: float = 0.15   # near-identical 4-bar fingerprints
-    PROB_WEIGHT_AUTOCORR_CENTROID: float = 0.15 # autocorr + centroid together
-    PROB_WEIGHT_HARMONIC_RATIO: float = 0.20    # unnaturally clean harmonics
+    #
+    # FakeMusicCaps calibration 2026-03-24 (1000 AI / 27 human, 32-bit WAVs)
+    # drove several weight changes — see individual signal comments below.
+
+    # DISABLED 2026-03-24: FMC calibration shows human centroid instability
+    # (median=0.379) is HIGHER than AI (median=0.244). The signal fires on ~50%
+    # of human tracks and only ~25% of AI tracks at the 0.32 threshold — inverted.
+    # Original 8-track calibration was overfitted to unusually stable pop songs.
+    # Kept as research history; do not re-enable without a vocal-only AI dataset.
+    PROB_WEIGHT_CENTROID: float = 0.0
+
+    # IBI near-zero (machine-perfect grid). FMC: fires on <2% of AI tracks
+    # (only AI min=0.0 qualifies at threshold 0.5 ms²). Retained for that
+    # rare case; weight unchanged.
+    PROB_WEIGHT_IBI_QUANTIZED: float = 0.25
+
+    # Loop signals removed from AI detection 2026-03-24.
+    # FMC calibration shows human music has FAR higher loop scores than AI:
+    #   loop_cross_corr: human median=0.895, AI median=0.000
+    #   loop_autocorr:   human p05=0.835,   AI median=0.000
+    # Human verse/chorus repetition produces higher cross-correlation and
+    # autocorrelation than AI generators, which produce more varied structure.
+    # Loop detection is now a standalone Sync/Sample Analysis feature —
+    # not an AI-detection signal.
+    PROB_WEIGHT_LOOP_CROSS_CORR: float = 0.0
+    PROB_WEIGHT_AUTOCORR_CENTROID: float = 0.0
+
+    # Harmonic ratio threshold raised 2026-03-24.
+    # Original 5-track calibration: human max=0.503, AI min=0.664 → threshold 0.59.
+    # FMC calibration: human max=0.844, human p75=0.630 → ~30% FP rate at 0.59.
+    # Raised to 0.85 (AI p90=0.933, human p90=0.778): ~10% catch rate, ~5% FP.
+    # Weight halved to reflect lower catch rate and remaining overlap.
+    PROB_WEIGHT_HARMONIC_RATIO: float = 0.10
+
     PROB_WEIGHT_SYNTHID_MEDIUM: float = 0.10    # medium-confidence watermark
     PROB_WEIGHT_SYNTHID_LOW: float = 0.05       # low-confidence watermark
-    PROB_WEIGHT_SPECTRAL_SLOP: float = 0.10     # HF energy anomaly
-    # New signals (2026-03-21)
-    # TODO: kurtosis and decoder_peak are calibrated on uncompressed audio (ISMIR TISMIR 2025,
-    # arXiv 2506.19108). YouTube MP3 encoding masks both artifacts — overlap between AI and human
-    # distributions collapses to noise (AI mean=664 vs Human mean=622 for kurtosis;
-    # decoder_peak=0.0 for all 54 tracks). Re-enable and recalibrate once direct file upload
-    # (uncompressed WAV/FLAC) is the primary input path.
-    PROB_WEIGHT_KURTOSIS: float = 0.0           # DISABLED — requires uncompressed audio
-    PROB_WEIGHT_DECODER_PEAK: float = 0.0       # DISABLED — requires uncompressed audio
-    PROB_WEIGHT_CENTROID_MEAN: float = 0.10     # low mean spectral centroid (AI energy concentrated low)
 
-    # Probability thresholds for final verdict assignment
-    PROB_VERDICT_AI: float = 0.70               # ≥ this → "AI"
-    PROB_VERDICT_HYBRID: float = 0.45           # ≥ this → "Possible Hybrid AI Cover"
-    PROB_VERDICT_UNCERTAIN: float = 0.25        # ≥ this → "Uncertain"
-                                                # < this → "Human" or override
+    # DEAD SIGNAL 2026-03-24: all zeros on both AI and human in FMC.
+    # Retained at 0.10 only if somehow fires on pathological uploads.
+    PROB_WEIGHT_SPECTRAL_SLOP: float = 0.10
 
-    # Organic production damping: if autocorr is below this threshold (highly
-    # non-repetitive structure) AND centroid is below vocoder territory, the
-    # elevated centroid+HNR are more likely from pitch processing / vocal stacking
-    # than AI generation. Halve the probability contribution of those two signals.
-    # AI generators always produce structured repetitive content (autocorr > 0.83
-    # across all tracks tested); experimental human production (Bon Iver, avant-garde)
-    # can have autocorr near zero while using heavy pitch processing.
-    # Calibrated: Bon Iver 22 (OVER S∞∞N) autocorr=0.000 → correctly damped.
+    # kurtosis and decoder_peak gated on uncompressed source; weights 0.0 pending
+    # calibration on uncompressed WAV/FLAC uploads (FMC showed no separation).
+    PROB_WEIGHT_KURTOSIS: float = 0.0
+    PROB_WEIGHT_DECODER_PEAK: float = 0.0
+    PROB_WEIGHT_CENTROID_MEAN: float = 0.10     # low mean centroid — AI energy concentrated low
+
+    # Probability threshold for "Likely AI" verdict assignment.
+    # "AI" is reserved for hard-evidence signals (C2PA / SynthID) in _compute_verdict.
+    PROB_VERDICT_HYBRID: float = 0.45           # ≥ this → "Likely AI"
+                                                # < this → "Likely Not AI" or organic override
+
+    # Organic production damping — retained for vocoder/experimental tracks
+    # (Bon Iver, heavy DSP) that have near-zero autocorr and elevated HNR.
+    # Note: FMC calibration showed AI also has near-zero autocorr (median=0.0),
+    # so this damping accidentally suppresses AI scores too. With centroid and
+    # loop weights now at 0.0 the damping has minimal effect on scoring; it
+    # remains to protect against false positives on avant-garde human music.
     PROB_AUTOCORR_ORGANIC_THRESHOLD: float = 0.30   # below → genuinely non-repetitive
     PROB_ORGANIC_DAMPING_FACTOR: float = 0.50        # multiply score by this when damped
 
     # ---- Forensics: Spectral slop --------------------------------------------
-    # HF-to-total energy ratio above this → spectral slop flag
+    # HF-to-total energy ratio above SPECTRAL_SLOP_HZ → spectral slop flag.
+    # FakeMusicCaps calibration 2026-03-23: ALL zeros for both AI (1000 tracks)
+    # and Human (27 tracks). No track from either group has >15% of total energy
+    # above 16kHz. PROB_WEIGHT_SPECTRAL_SLOP = 0.10 is a dead weight in practice —
+    # the signal never fires. Kept for theoretical completeness; would only
+    # activate on severely broken AI output with pathological HF boosting.
     SPECTRAL_SLOP_RATIO: float = 0.15
 
     # ---- Forensics: Mel-band kurtosis variability ----------------------------
@@ -231,10 +432,15 @@ class SystemConstants:
     # Codec decoder checkerboard artifacts create sharp per-frame mel-band spikes
     # (high kurtosis) that vary wildly frame-to-frame → high variance.
     # Human audio has smooth, consistent mel distributions → near-zero variance.
-    # Uncompressed threshold: ~50 (Suno=1508, Human=2). On YouTube audio both collapse
-    # to ~640 with heavy overlap — see calibration run 2026-03-21. Raised to 9999 to
-    # effectively disable until direct-upload path is available (PROB_WEIGHT_KURTOSIS=0).
-    # TODO: recalibrate on uncompressed WAV/FLAC uploads; expected threshold ~800.
+    # On YouTube MP3 both groups collapse to ~640 (see calibration 2026-03-21).
+    # FakeMusicCaps calibration 2026-03-23 (32-bit float WAVs, 1000 AI / 27 human):
+    #   AI mean=649, Human mean=652 — COMPLETE OVERLAP even on uncompressed audio.
+    #   FMC generators (MusicGen, StableAudioOpen, etc.) do NOT produce the
+    #   checkerboard kurtosis spikes described in ISMIR TISMIR 2025 for Suno.
+    #   Either the Suno architecture is uniquely responsible, or FMC generators
+    #   use a different vocoder path. This signal is not useful for the current
+    #   detector corpus. Kept as research history — do not re-enable without
+    #   a Suno-specific uncompressed dataset.
     KURTOSIS_VARIABILITY_AI_MIN: float = 9999.0
     # Number of mel bands used for kurtosis computation
     KURTOSIS_N_MELS: int = 128
@@ -254,8 +460,13 @@ class SystemConstants:
     # Minimum number of evenly-spaced peaks to flag a periodic pattern
     DECODER_PEAK_MIN_COUNT: int = 4
     # Score above this → decoder fingerprint detected.
-    # TODO: all 54 YouTube tracks scored 0.0 — MP3 encoding masks the periodic peaks.
-    # Re-enable on direct uncompressed uploads. Set to 2.0 (unreachable) until then.
+    # FakeMusicCaps calibration 2026-03-23 (32-bit float WAVs):
+    #   AI: all 0.0 (1000 tracks). Human: all 0.0 (27 tracks).
+    #   The periodic peak pattern described in arXiv 2506.19108 does not
+    #   manifest in the FMC generator set. Possible reasons: (a) FMC generators
+    #   use DAC/EnCodec vocoders whose stride artifacts fall below the 3 dB
+    #   prominence threshold at 44.1kHz, or (b) the periodization is present
+    #   but masked by the generators' post-processing. Kept as research history.
     DECODER_PEAK_SCORE_MIN: float = 2.0
 
     # ---- Forensics: Spectral centroid mean -----------------------------------
@@ -264,13 +475,21 @@ class SystemConstants:
     # AI generators concentrate energy lower in the spectrum; real recordings
     # have more high-frequency content from room acoustics, instrument overtones,
     # and natural noise. Threshold set conservatively above the Suno mean + 1σ:
-    # 1091 + 386 = 1477 ≈ 1400 Hz. Will be refined after batch scan.
+    # 1091 + 386 = 1477 ≈ 1400 Hz.
+    # FakeMusicCaps calibration 2026-03-23 (503 AI / 27 human):
+    #   AI:    p25=1104, p50=1554, p75=2000, mean=1596
+    #   Human: p25=1850, p50=2044, p75=2418, mean=2040, min=1163
+    #   Threshold at 1400 catches ~25% of AI (below AI p25) with ~2% human
+    #   false positive rate (human min=1163 is the single track below threshold).
+    #   Cross-validation confirms existing threshold. Weight=0.10 is appropriate
+    #   given centroid stacking risk (centroid family can reach 0.65 combined).
     SPECTRAL_CENTROID_MEAN_AI_MAX: float = 1400.0
 
     # ---- Forensics: Structural / instrumental signals (2026-03-21) -----------
-    # All weights start at 0.0 — disabled pending calibration against 54-track dataset.
-    # TODO: run scripts/calibrate_signals.py after implementing, set thresholds from
-    # the AI vs Human distribution data, then enable weights.
+    # Calibrated 2026-03-23 against FakeMusicCaps (1000 AI / 27 human, 32-bit float WAVs).
+    # Each signal's calibration result is documented below. Signals without useful
+    # separation are kept as research history (disabled, do not re-enable without
+    # new evidence). Signals with clean separation are enabled below.
 
     # Self-similarity entropy: Shannon entropy of chroma recurrence matrix upper-triangle.
     # Calibrated 2026-03-21: AI mean=0.296, Human mean=0.262 — WRONG direction.
@@ -312,6 +531,156 @@ class SystemConstants:
     # Confirmed: modern music is recorded to a click grid regardless of AI origin.
     SUBBEAT_DEVIATION_AI_MAX: float = 0.0          # DISABLED — no separation found
     PROB_WEIGHT_SUBBEAT_GRID: float = 0.0
+
+    # Pitch quantization score: mean absolute deviation of detected pitches from
+    # equal temperament (12-TET) in cents (100 cents = 1 semitone).
+    # Hypothesis: AI generators produce pitch-perfect output (near-zero cents deviation);
+    # real instruments have natural intonation drift of 10–30 cents empirically.
+    # FakeMusicCaps calibration 2026-03-23:
+    #   AI:    median=13.9 cents, p25=9.0, p75=18.6, mean=14.2
+    #   Human: median=12.4 cents, p25=11.4, p75=13.5, mean=12.2
+    #   COMPLETE OVERLAP — no threshold separates the distributions.
+    #   AI generators do NOT produce near-zero pitch deviation; they produce
+    #   the same ~10–20 cent scatter as human recordings. Hypothesis disproved.
+    #   Kept as research history.
+    PITCH_QUANTIZATION_AI_MAX: float = 0.0         # DISABLED — no separation in FMC data
+    PROB_WEIGHT_PITCH_QUANTIZATION: float = 0.0
+    PITCH_QUANTIZATION_MIN_VOICED_FRAMES: int = 20 # require ≥ this many voiced frames
+
+    # ---- Forensics: Ultrasonic noise plateau (20–22 kHz) ---------------------
+    # Diffusion models start with white noise across the full 0–22 kHz spectrum
+    # and must explicitly carve it away during denoising. They often don't bother
+    # above 20 kHz. Human masters are shelf-filtered or LPF'd by the engineer.
+    # The "tell": a flat plateau of residual noise at 20–22 kHz that no mastering
+    # engineer would leave there — it wastes headroom and is inaudible.
+    #
+    # Gated on not compressed_source AND native_sr ≥ 40000 — YouTube strips HF
+    # above 16–17 kHz, and resampling a 16 kHz file to 44.1 kHz cannot create
+    # real content above its original 8 kHz Nyquist. Both checks live inside
+    # _analyse_ultrasonic() so the gate is self-contained (GPU decorator rule).
+    #
+    # FakeMusicCaps calibration 2026-03-23 (44.1kHz 32-bit WAVs):
+    #   AI: count=0 — no AI track produced a measurable score.
+    #   Human: count=27, median=2.9e-6, max=0.00126.
+    #   The AI count=0 result is directionally interesting (FMC generators are
+    #   hard band-limited at 20 kHz and produce no ultrasonic content), but
+    #   the signal as implemented produces -1.0 (not computed) for all AI tracks,
+    #   not a positive score. Rewiring the absence of ultrasonic content as an
+    #   AI signal would require a redesign (presence-of-content gate → binary flag).
+    #   Keeping disabled pending that redesign. Do not confuse with the diffusion
+    #   residue hypothesis: the FMC generators simply do not render above 20 kHz
+    #   at all, rather than leaving a noise plateau.
+    ULTRASONIC_BAND_LOW_HZ: int   = 20_000
+    ULTRASONIC_BAND_HIGH_HZ: int  = 22_000
+    ULTRASONIC_ENERGY_RATIO_AI_MIN: float = 0.0   # DISABLED — requires redesign (see above)
+    PROB_WEIGHT_ULTRASONIC: float = 0.0
+
+    # ---- Forensics: Infrasonic rumble (1–20 Hz) ------------------------------
+    # Real microphone diaphragms and preamp capacitors act as natural high-pass
+    # filters — it is physically impossible for a vocal or instrument to produce
+    # a pure 1–20 Hz signal. AI math can drift, leaving DC bias or sub-sonic
+    # "rumble" that no microphone would ever capture and no engineer would leave.
+    #
+    # Gated on uncompressed sources only (upload-only): MP3 encoding quantization
+    # noise sits above the infrasonic band and would create false positives on
+    # YouTube-sourced tracks. Gate added 2026-03-23.
+    #
+    # FakeMusicCaps calibration 2026-03-23 (32-bit float WAVs, 503 AI / 27 human):
+    #   AI:    median=0.000151, p95=0.0062, mean=0.0042
+    #   Human: median=0.000043, p75=0.00018, max=0.016
+    #   AI has ~3.5× higher median than human (consistent with "math drift" theory)
+    #   but distributions overlap heavily — human max (0.016) >> AI p95 (0.006).
+    #   No threshold exists that doesn't produce significant false positives.
+    #   Kept disabled as research history.
+    INFRASONIC_BAND_HIGH_HZ: int  = 20
+    INFRASONIC_ENERGY_RATIO_AI_MIN: float = 0.0   # DISABLED — no clean threshold in FMC data
+    PROB_WEIGHT_INFRASONIC: float = 0.0
+
+    # ---- Forensics: Inter-channel phase coherence ----------------------------
+    # In human recordings the stereo field is intentional — phase relationships
+    # between L and R are set by the engineer (panning, delays, room mics).
+    # AI diffusion "carves" high and low frequencies as separate statistical
+    # events, causing HF phase to wobble while LF phase stays stable.
+    #
+    # Metric: mean_LF_coherence − mean_HF_coherence.
+    #   Positive = LF more coherent than HF = AI pattern.
+    #   Near zero or negative = both bands coherent = intentional human mix.
+    #
+    # Gated on not compressed_source — stereo field degrades under MP3.
+    # Stereo check is self-contained in _analyse_phase_coherence(); returns
+    # -1.0 automatically for mono sources (YouTube always transcodes mono).
+    #
+    # FakeMusicCaps calibration 2026-03-23:
+    #   AI: count=0 — FMC WAVs appear to be mono (or stereo but collapsing to
+    #   identical channels), so the stereo gate returned -1.0 for all AI tracks.
+    #   Human: count=26, median=-0.004, p25=-0.079, p75=0.140, mean=0.011.
+    #   Human distribution is centred near zero with high variance — no bias
+    #   toward positive differential as hypothesised.
+    #   Cannot calibrate without AI stereo data. The FMC dataset does not provide
+    #   usable stereo content for this signal. Kept disabled pending a stereo-only
+    #   AI dataset (e.g. MusicGen-stereo or StableAudioOpen raw outputs).
+    PHASE_COHERENCE_LF_MAX_HZ: int  = 2_000
+    PHASE_COHERENCE_HF_MIN_HZ: int  = 8_000
+    PHASE_COHERENCE_DIFFERENTIAL_AI_MIN: float = 0.0   # DISABLED — no AI stereo data in FMC
+    PROB_WEIGHT_PHASE_COHERENCE: float = 0.0
+
+    # ---- Forensics: Voiced-region noise floor --------------------------------
+    # Real vocal recordings contain continuous mic/room noise even during
+    # sustained notes — breath, room tone, and microphone self-noise sit in
+    # the 4–12 kHz band where vocal harmonics are sparse.  Neural vocoder
+    # synthesis produces spectrally clean partials: the 4–12 kHz band between
+    # harmonics approaches digital silence.
+    #
+    # Metric: mean spectral flatness of voiced frames in the 4–12 kHz band.
+    #   High flatness → noise present → human recording.
+    #   Low flatness  → unnaturally clean partials → AI synthesis.
+    #
+    # Only meaningful for tracks flagged as vocal (is_vocal=True).
+    # Returns -1.0 when is_vocal=False or too few voiced frames detected.
+    #
+    # FILE-UPLOAD ONLY — gated on compressed_source=False in forensics.py.
+    # Calibrated 2026-03-25:
+    #   AI (native WAV): stable_audio_open mean=0.008, audioldm2 mean=0.008,
+    #                    MusicGen mean=0.013, max across all=0.042
+    #   AI (SONICS MP3): Suno p90=0.005, Udio p90=0.005, max=0.022
+    #   Human (iTunes MP3): p10=0.333, p05=0.293
+    #   Human (debug WAV/YouTube): 0.54–0.69 — NOT used for threshold (codec noise)
+    # YouTube AAC/Opus → WAV decoding floods the between-harmonic band; signal
+    # gated to file-upload path only via compressed_source check.
+    VOICED_NOISE_FLOOR_HZ_LOW:  int   = 4_000   # lower bound of analysis band
+    VOICED_NOISE_FLOOR_HZ_HIGH: int   = 12_000  # upper bound of analysis band
+    VOICED_NOISE_FLOOR_AI_MAX:  float = 0.10    # fires when flatness ≤ 0.10; AI max=0.042
+    PROB_WEIGHT_VOICED_NOISE_FLOOR: float = 0.15  # same weight as PLR — strong separation
+    # STFT parameters for voiced noise floor computation.
+    # hop_length must match librosa.pyin default so voiced-frame indices align
+    # with STFT frame indices. n_fft=2048 at sr=22050 → ~93 Hz frequency resolution,
+    # sufficient to resolve the 4–12 kHz analysis band into ~86 bins.
+    VOICED_NOISE_FLOOR_HOP_LENGTH: int = 512
+    VOICED_NOISE_FLOOR_N_FFT:      int = 2048
+
+    # ---- Forensics: Temporal loudness flatness (PLR variance) ----------------
+    # Human masters "breathe" — the crest factor (peak_db − rms_db) varies
+    # naturally as quiet verses and loud choruses alternate. AI generators
+    # produce "frozen density": they look-ahead limit to contain wild diffusion
+    # values, flattening the PLR across every window to maintain a high
+    # confidence score for every second of audio.
+    #
+    # Metric: std of per-window PLR across the full track.
+    #   Low std = frozen density = AI pattern.
+    #   High std = breathing room = human pattern.
+    #
+    # FakeMusicCaps calibration 2026-03-23 (1000 AI / 27 human, 32-bit WAVs):
+    #   AI:    p25=0.70, p50=1.04, p75=1.51, mean=1.31, min=0.14
+    #   Human: p25=1.50, p50=1.80, p75=2.14, mean=1.82, min=1.17
+    #   Threshold at 1.2 catches ~55% of AI (below AI p50=1.04 → AI p75=1.51)
+    #   with ~4% human false positive rate (human min=1.17, p05=1.26 → only
+    #   the single lowest-PLR-std track in our 27-track set falls near threshold).
+    #   Heavily brick-wall mastered pop may score low regardless of origin;
+    #   weight is kept conservative (0.15) to avoid false positives on that genre.
+    PLR_WINDOW_SECONDS: int  = 2
+    PLR_MIN_WINDOWS:    int  = 5      # require ≥ this many windows; short tracks return -1.0
+    PLR_STD_AI_MAX:     float = 1.2   # below → frozen loudness density (AI signal)
+    PROB_WEIGHT_PLR_FLATNESS: float = 0.15   # calibrated 2026-03-23 against FMC
 
     # ---- Forensics: SynthID watermark scan -----------------------------------
     # Coherent-bin count thresholds for low / medium / high confidence
@@ -376,9 +745,27 @@ class Settings(BaseSettings):
         description="Last.fm API key for similar-track discovery. "
                     "Get one at https://www.last.fm/api/account/create",
     )
+    spotify_client_id: str = Field(
+        default="",
+        description="Spotify Web API client ID for popularity score lookup. "
+                    "Create an app at https://developer.spotify.com/dashboard",
+    )
+    spotify_client_secret: str = Field(
+        default="",
+        description="Spotify Web API client secret (pairs with spotify_client_id).",
+    )
     hf_token: Optional[str] = Field(
         default=None,
         description="HuggingFace token for private model access (optional).",
+    )
+
+    # ---- MusicBrainz API (PRO lookup) -----------------------------------------
+    # MusicBrainz requires a descriptive User-Agent for all API requests.
+    # Format: "AppName/Version (contact_url_or_email)"
+    musicbrainz_app: str = Field(
+        default="sync-safe-forensic-portal/1.0 (https://github.com/borrvick/sync-safe)",
+        description="User-Agent string sent to MusicBrainz API. "
+                    "Set to your app name, version, and contact URL/email.",
     )
 
     # ---- Model selection ------------------------------------------------------

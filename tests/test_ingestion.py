@@ -128,6 +128,16 @@ class TestFetchYoutubeAudio:
 
     def setup_method(self):
         self.svc = Ingestion()
+        # _fetch_platform_engagement uses subprocess.run; patch it to a no-op
+        # so these tests don't require yt-dlp on PATH.
+        self._run_patcher = patch(
+            "services.ingestion.subprocess.run",
+            return_value=MagicMock(returncode=1, stdout=""),
+        )
+        self._run_patcher.start()
+
+    def teardown_method(self):
+        self._run_patcher.stop()
 
     def test_returns_audio_buffer_on_success(self):
         wav = b"RIFF\x00\x00\x00\x00WAVEfmt "
@@ -165,9 +175,10 @@ class TestFetchYoutubeAudio:
             with pytest.raises(AudioSourceError, match="empty"):
                 self.svc.load(self.VALID_URL)
 
-    def test_raises_validation_error_for_non_youtube_url(self):
+    def test_raises_validation_error_for_unsupported_url(self):
+        # Spotify is not in the supported source list; "unknown" classification → ValidationError
         with pytest.raises(ValidationError) as exc_info:
-            self.svc.load("https://evil.com/audio.mp3")
+            self.svc.load("https://open.spotify.com/track/abc123")
         assert "url" in exc_info.value.context
 
     def test_raises_validation_error_for_http_url(self):
@@ -190,3 +201,145 @@ class TestFetchYoutubeAudio:
     def test_satisfies_audio_provider_protocol(self):
         from core.protocols import AudioProvider
         assert isinstance(self.svc, AudioProvider)
+
+
+# ---------------------------------------------------------------------------
+# _classify_url
+# ---------------------------------------------------------------------------
+
+class TestClassifyUrl:
+    """Tests for the pure URL classification function."""
+
+    def test_youtube_dot_com(self):
+        from services.ingestion import _classify_url
+        assert _classify_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ") == "youtube"
+
+    def test_youtu_be_short(self):
+        from services.ingestion import _classify_url
+        assert _classify_url("https://youtu.be/dQw4w9WgXcQ") == "youtube"
+
+    def test_bandcamp_subdomain(self):
+        from services.ingestion import _classify_url
+        assert _classify_url("https://artist.bandcamp.com/track/song-name") == "bandcamp"
+
+    def test_soundcloud(self):
+        from services.ingestion import _classify_url
+        assert _classify_url("https://soundcloud.com/artist/track") == "soundcloud"
+
+    def test_direct_mp3(self):
+        from services.ingestion import _classify_url
+        assert _classify_url("https://example.com/audio/track.mp3") == "direct"
+
+    def test_direct_wav(self):
+        from services.ingestion import _classify_url
+        assert _classify_url("https://cdn.example.com/files/track.wav") == "direct"
+
+    def test_tiktok_standard(self):
+        from services.ingestion import _classify_url
+        assert _classify_url("https://www.tiktok.com/@user/video/123456") == "tiktok"
+
+    def test_tiktok_short_vm(self):
+        from services.ingestion import _classify_url
+        assert _classify_url("https://vm.tiktok.com/abc123/") == "tiktok"
+
+    def test_instagram(self):
+        from services.ingestion import _classify_url
+        assert _classify_url("https://www.instagram.com/reel/abc123/") == "instagram"
+
+    def test_facebook(self):
+        from services.ingestion import _classify_url
+        assert _classify_url("https://www.facebook.com/watch?v=123456") == "facebook"
+
+    def test_facebook_short_fb_watch(self):
+        from services.ingestion import _classify_url
+        assert _classify_url("https://fb.watch/abc123/") == "facebook"
+
+    def test_unknown_http_url_falls_through_to_ytdlp(self):
+        # Any unrecognised HTTP URL should be attempted via yt-dlp (1000+ extractors)
+        from services.ingestion import _classify_url
+        assert _classify_url("https://spotify.com/track/abc") == "ytdlp"
+
+    def test_malformed_url_returns_unknown(self):
+        from services.ingestion import _classify_url
+        assert _classify_url("not-a-url") == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# _clean_title / _split_artist_title
+# ---------------------------------------------------------------------------
+
+class TestCleanTitle:
+    def _clean(self, title: str) -> str:
+        from services.ingestion import _clean_title
+        return _clean_title(title)
+
+    def test_lyrics_suffix_stripped(self):
+        assert self._clean("24K Magic (Lyrics)") == "24K Magic"
+
+    def test_lyric_video_stripped(self):
+        assert self._clean("Blinding Lights (Lyric Video)") == "Blinding Lights"
+
+    def test_official_video_stripped(self):
+        assert self._clean("Shape of You (Official Video)") == "Shape of You"
+
+    def test_official_music_video_stripped(self):
+        assert self._clean("Stay (Official Music Video)") == "Stay"
+
+    def test_official_audio_stripped(self):
+        assert self._clean("Levitating (Official Audio)") == "Levitating"
+
+    def test_hq_stripped(self):
+        assert self._clean("Bohemian Rhapsody (HQ)") == "Bohemian Rhapsody"
+
+    def test_hd_stripped(self):
+        assert self._clean("Purple Rain (HD)") == "Purple Rain"
+
+    def test_clean_version_stripped(self):
+        assert self._clean("WAP (Clean)") == "WAP"
+
+    def test_explicit_stripped(self):
+        assert self._clean("WAP (Explicit)") == "WAP"
+
+    def test_extended_version_stripped(self):
+        assert self._clean("Blue (Extended Version)") == "Blue"
+
+    def test_slowed_reverb_stripped(self):
+        assert self._clean("drivers license (Slowed + Reverb)") == "drivers license"
+
+    def test_sped_up_stripped(self):
+        assert self._clean("As It Was (Sped Up)") == "As It Was"
+
+    def test_nightcore_stripped(self):
+        assert self._clean("Fireflies (Nightcore)") == "Fireflies"
+
+    def test_remastered_stripped(self):
+        assert self._clean("Hotel California (Remastered)") == "Hotel California"
+
+    def test_clean_title_unchanged(self):
+        assert self._clean("24K Magic") == "24K Magic"
+
+    def test_bracket_variant_stripped(self):
+        assert self._clean("Mr. Brightside [Official Video]") == "Mr. Brightside"
+
+
+class TestSplitArtistTitle:
+    def _split(self, title: str) -> tuple:
+        from services.ingestion import _split_artist_title
+        return _split_artist_title(title)
+
+    def test_standard_dash_split(self):
+        artist, title = self._split("Bruno Mars - 24K Magic (Lyrics)")
+        assert artist == "Bruno Mars"
+        assert title == "24K Magic"
+
+    def test_lyrics_stripped_before_split(self):
+        _, title = self._split("The Weeknd - Blinding Lights (Lyrics)")
+        assert title == "Blinding Lights"
+
+    def test_no_dash_returns_empty_artist(self):
+        artist, title = self._split("24K Magic (Lyrics)")
+        assert artist == ""
+
+    def test_official_video_stripped(self):
+        _, title = self._split("Adele - Hello (Official Video)")
+        assert title == "Hello"

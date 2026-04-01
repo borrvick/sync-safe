@@ -19,6 +19,7 @@ from __future__ import annotations
 import io
 import json
 import re
+import shlex
 import shutil
 import subprocess
 import urllib.request
@@ -31,6 +32,40 @@ from core.config import CONSTANTS, Settings, get_settings
 from core.exceptions import AudioSourceError, ConfigurationError, ValidationError
 from core.models import AudioBuffer
 from utils.security import validate_url
+
+# ---------------------------------------------------------------------------
+# URL classification constants (module-level for testability)
+# ---------------------------------------------------------------------------
+
+_YOUTUBE_HOSTS: frozenset[str] = frozenset({
+    "youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be",
+})
+_BANDCAMP_HOSTS: frozenset[str] = frozenset({"bandcamp.com"})
+_SOUNDCLOUD_HOSTS: frozenset[str] = frozenset({
+    "soundcloud.com", "www.soundcloud.com", "on.soundcloud.com",
+})
+_TIKTOK_HOSTS: frozenset[str] = frozenset({
+    "tiktok.com", "www.tiktok.com", "vm.tiktok.com", "m.tiktok.com",
+})
+_INSTAGRAM_HOSTS: frozenset[str] = frozenset({
+    "instagram.com", "www.instagram.com",
+})
+_FACEBOOK_HOSTS: frozenset[str] = frozenset({
+    "facebook.com", "www.facebook.com", "fb.com", "fb.watch",
+})
+_DIRECT_AUDIO_EXTENSIONS: frozenset[str] = frozenset({
+    ".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac",
+})
+
+# Engagement fields requested from yt-dlp --print for popularity signals.
+# One field per line (newline separator avoids comma-in-value misalignment).
+_ENGAGEMENT_FIELDS: list[str] = [
+    "view_count",
+    "like_count",
+    "share_count",
+    "repost_count",
+    "channel_follower_count",
+]
 
 
 class Ingestion:
@@ -75,14 +110,24 @@ class Ingestion:
             ConfigurationError:  yt-dlp or ffmpeg binary not found.
         """
         if isinstance(source, str):
-            return self._load_youtube(source)
+            kind = _classify_url(source)
+            if kind == "unknown":
+                raise ValidationError(
+                    "Unsupported URL — paste a YouTube, TikTok, Instagram, Facebook, "
+                    "Bandcamp, or SoundCloud link, a direct audio file URL "
+                    "(.mp3/.wav/.flac/.ogg/.m4a/.aac), or any other URL supported by yt-dlp.",
+                    context={"url": source},
+                )
+            if kind == "direct":
+                return self._load_direct(source)
+            return self._load_ytdlp(source, source_label=kind)
         return self._load_upload(source)
 
     # ------------------------------------------------------------------
-    # Private: YouTube path
+    # Private: yt-dlp path (YouTube, Bandcamp, SoundCloud)
     # ------------------------------------------------------------------
 
-    def _load_youtube(self, url: str) -> AudioBuffer:
+    def _load_ytdlp(self, url: str, source_label: str = "youtube") -> AudioBuffer:
         try:
             validate_url(url)
         except ValueError as exc:
@@ -98,6 +143,7 @@ class Ingestion:
         # two consecutive requests for the same video. --dump-json is a
         # lightweight info-only call (~2s); the download follows separately.
         track_metadata = _fetch_youtube_metadata(url, ytdlp_bin)
+        track_metadata.update(_fetch_platform_engagement(url, ytdlp_bin))
 
         ytdlp_cmd = [
             ytdlp_bin,
@@ -179,12 +225,61 @@ class Ingestion:
                 sample_rate=CONSTANTS.SAMPLE_RATE,
                 label=_label_from_url(url),
                 metadata=track_metadata,
+                source=source_label,  # type: ignore[arg-type]
             )
 
         finally:
             for proc in (ytdlp_proc, ffmpeg_proc):
                 if proc and proc.poll() is None:
                     proc.kill()
+
+    # ------------------------------------------------------------------
+    # Private: direct HTTP audio download
+    # ------------------------------------------------------------------
+
+    def _load_direct(self, url: str) -> AudioBuffer:
+        """Download a direct audio URL into an AudioBuffer."""
+        import urllib.error
+        max_bytes = CONSTANTS.MAX_UPLOAD_BYTES
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "sync-safe/1.0"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                chunks: list[bytes] = []
+                total = 0
+                while True:
+                    chunk = resp.read(65536)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise AudioSourceError(
+                            f"Direct download exceeds {max_bytes} byte limit.",
+                            context={"url": url},
+                        )
+                    chunks.append(chunk)
+                raw = b"".join(chunks)
+        except AudioSourceError:
+            raise
+        except urllib.error.URLError as exc:
+            raise AudioSourceError(
+                "Direct audio download failed.",
+                context={"url": url, "error": str(exc)},
+            ) from exc
+
+        if not raw:
+            raise AudioSourceError("Direct download produced empty bytes.", context={"url": url})
+
+        _check_size(len(raw), self._settings.max_upload_mb)
+
+        from pathlib import PurePosixPath
+        from urllib.parse import urlparse as _urlparse
+        label = PurePosixPath(_urlparse(url).path).name or url
+        return AudioBuffer(
+            raw=raw,
+            sample_rate=CONSTANTS.SAMPLE_RATE,
+            label=label,
+            source="direct",
+        )
 
     # ------------------------------------------------------------------
     # Private: file-upload path
@@ -218,6 +313,7 @@ class Ingestion:
             raw=raw,
             sample_rate=CONSTANTS.SAMPLE_RATE,
             label=name,
+            source="file",
         )
 
 
@@ -225,19 +321,75 @@ class Ingestion:
 # Module-level pure functions (testable without instantiating the service)
 # ---------------------------------------------------------------------------
 
+def _classify_url(url: str) -> str:
+    """
+    Classify a URL as one of:
+      youtube / bandcamp / soundcloud / tiktok / instagram / facebook /
+      direct / ytdlp / unknown
+
+    - Known streaming platforms → named label (used as source_label on AudioBuffer)
+    - Direct audio file URL (.mp3/.wav/etc.) → "direct" (downloaded via urllib)
+    - Any other HTTP(S) URL → "ytdlp" (passed to yt-dlp as a best-effort attempt;
+      yt-dlp supports thousands of sites beyond the named set above)
+    - Non-HTTP strings or parse failures → "unknown" (rejected at load() boundary)
+
+    Pure function — no I/O, no side effects, deterministic.
+    """
+    try:
+        parsed = urlparse(url.strip())
+        if parsed.scheme not in ("http", "https"):
+            return "unknown"
+        host = parsed.netloc.lower().removeprefix("www.")
+        if host in _YOUTUBE_HOSTS or host == "youtu.be":
+            return "youtube"
+        if host in _BANDCAMP_HOSTS or host.endswith(".bandcamp.com"):
+            return "bandcamp"
+        if host in _SOUNDCLOUD_HOSTS:
+            return "soundcloud"
+        if host in _TIKTOK_HOSTS:
+            return "tiktok"
+        if host in _INSTAGRAM_HOSTS:
+            return "instagram"
+        if host in _FACEBOOK_HOSTS:
+            return "facebook"
+        from pathlib import PurePosixPath
+        ext = PurePosixPath(parsed.path).suffix.lower()
+        if ext in _DIRECT_AUDIO_EXTENSIONS:
+            return "direct"
+        # Any other HTTP URL — pass to yt-dlp and let it decide.
+        # yt-dlp supports 1000+ extractors; if it can't handle the URL it will
+        # raise an error that surfaces as AudioSourceError to the user.
+        return "ytdlp"
+    except Exception:   # noqa: BLE001 — pure parse helper; never fatal
+        return "unknown"
+
+
 def _find_binary(name: str) -> str:
     """
     Resolve a system binary by name.
 
-    Checks PATH first, then the pip --user bin directory (macOS / Linux).
+    Search order:
+      1. The active venv's bin/ directory (sys.executable parent) — preferred
+         so venv-installed binaries take precedence over stale system installs.
+      2. PATH via shutil.which.
+      3. The pip --user bin directory (macOS / Linux fallback).
 
     Raises:
         ConfigurationError: if the binary cannot be found anywhere.
     """
-    found = shutil.which(name)
-    if found:
-        return found
+    import sys
 
+    # 1. Venv bin — most reliable when running inside a virtualenv
+    venv_bin = Path(sys.executable).parent / name
+    if venv_bin.exists():
+        return str(venv_bin)
+
+    # 2. PATH
+    path_bin = shutil.which(name)
+    if path_bin:
+        return path_bin
+
+    # 3. pip --user bin
     import site
     user_bin = Path(site.getuserbase()) / "bin" / name
     if user_bin.exists():
@@ -248,7 +400,7 @@ def _find_binary(name: str) -> str:
         context={
             "binary": name,
             "suggestion": f"pip install {name}",
-            "searched": [shutil.which(name), str(user_bin)],
+            "searched": [str(venv_bin), path_bin, str(user_bin)],
         },
     )
 
@@ -321,6 +473,58 @@ def _fetch_youtube_metadata(url: str, ytdlp_bin: str) -> dict[str, str]:
         return {"title": "", "artist": ""}
 
 
+def _fetch_platform_engagement(url: str, ytdlp_bin: str) -> dict[str, int]:
+    """
+    Fetch per-platform engagement metrics for a URL via yt-dlp --print.
+
+    Returns a flat dict of whichever integer fields yt-dlp exposes for the
+    platform (e.g. view_count, like_count, share_count, repost_count).
+    Fields absent or non-integer for a given platform are omitted.
+
+    This is a lightweight info-only call — no audio is downloaded.
+    Never raises — engagement data is always supplementary.
+
+    Supported platforms and available fields:
+      YouTube:    view_count, like_count, channel_follower_count
+      TikTok:     view_count, like_count, share_count, repost_count
+      Instagram:  view_count, like_count
+      Facebook:   view_count, like_count
+      SoundCloud: view_count (plays), like_count, repost_count
+    """
+    # One field per line — newline separator avoids misalignment when
+    # yt-dlp formats numbers with commas (e.g. "1,234,567").
+    print_template = "\n".join(f"%({f})s" for f in _ENGAGEMENT_FIELDS)
+    try:
+        result = subprocess.run(
+            [
+                ytdlp_bin,
+                "--quiet",
+                "--no-warnings",
+                "--no-playlist",
+                "--print", print_template,
+                shlex.quote(url),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode != 0:
+            return {}
+
+        lines = result.stdout.splitlines()
+        metrics: dict[str, int] = {}
+        for field, raw in zip(_ENGAGEMENT_FIELDS, lines):
+            raw = raw.strip()
+            if raw and raw not in ("NA", "None", "none"):
+                try:
+                    metrics[field] = int(float(raw.replace(",", "")))
+                except ValueError:
+                    pass
+        return metrics
+    except Exception:  # noqa: BLE001 — engagement data is always best-effort
+        return {}
+
+
 def _artist_from_uploader(uploader: str) -> str:
     """
     Extract an artist name from YouTube's 'Artist - Topic' channel convention.
@@ -351,7 +555,11 @@ def _split_artist_title(video_title: str) -> tuple[str, str]:
     clean = re.sub(
         r"\s*[\(\[]"
         r"(Official\s*(Music\s*|Lyric\s*|Audio\s*)?Video"
-        r"|Lyric\s*Video|Audio|Live( Version)?|Visualizer)"
+        r"|Official\s*Audio"
+        r"|Lyric\s*Video|Lyrics?|Audio|Live( Version)?"
+        r"|Visualizer|HQ|HD|Full\s*Song|Clean|Explicit"
+        r"|Extended(\s*Version)?|Slowed(\s*\+?\s*Reverb)?"
+        r"|Sped\s*Up|Nightcore|Remaster(ed)?)"
         r"[^\)\]]*[\)\]]\s*$",
         "",
         video_title,
@@ -379,8 +587,11 @@ def _clean_title(title: str) -> str:
         r"\s*[\(\[]"
         r"(Official\s*(Music\s*|Lyric\s*|Audio\s*)?Video"
         r"|Official\s*Audio"
-        r"|Lyric\s*Video|Audio|Live( Version)?|Visualizer"
-        r"|Radio\s*Edit|Remaster(ed)?|feat\.[^\)\]]*)"
+        r"|Lyric\s*Video|Lyrics?|Audio|Live( Version)?"
+        r"|Visualizer|HQ|HD|Full\s*Song|Clean|Explicit"
+        r"|Extended(\s*Version)?|Slowed(\s*\+?\s*Reverb)?"
+        r"|Sped\s*Up|Nightcore|Remaster(ed)?"
+        r"|Radio\s*Edit|feat\.[^\)\]]*)"
         r"[^\)\]]*[\)\]]\s*$",
         "",
         title,

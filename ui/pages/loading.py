@@ -15,16 +15,20 @@ Design rules:
 """
 from __future__ import annotations
 
+import logging
 import os
 import time
 from typing import Any
 
+_log = logging.getLogger(__name__)
+
 import streamlit as st
 
-from core.config import get_settings
-from core.exceptions import SyncSafeError
+from core.config import CONSTANTS, get_settings
+from core.exceptions import StepTimeoutError, SyncSafeError
 from core.logging import DEFAULT_LOG_DIR, PipelineLogger
-from core.models import AudioBuffer
+from core.models import AnalysisResult, AudioBuffer, SyncCut
+from core.timeout import step_timeout
 from ui.components import eq_bars
 
 # (key, display label, estimated wall-clock seconds on ZeroGPU free tier, tooltip description)
@@ -57,6 +61,31 @@ _STEPS: list[tuple[str, str, int, str]] = [
 
 _TOTAL_EST: int = sum(s[2] for s in _STEPS)
 
+# Wall-clock timeout budget per step (seconds). Referenced via CONSTANTS so
+# values stay in one place; defined here as a lookup dict for fast access.
+_STEP_TIMEOUT_S: dict[str, int] = {
+    "ingestion":     CONSTANTS.STEP_TIMEOUT_INGESTION_S,
+    "structure":     CONSTANTS.STEP_TIMEOUT_STRUCTURE_S,
+    "transcription": CONSTANTS.STEP_TIMEOUT_TRANSCRIPTION_S,
+    "forensics":     CONSTANTS.STEP_TIMEOUT_FORENSICS_S,
+    "compliance":    CONSTANTS.STEP_TIMEOUT_COMPLIANCE_S,
+    "authorship":    CONSTANTS.STEP_TIMEOUT_AUTHORSHIP_S,
+    "discovery":     CONSTANTS.STEP_TIMEOUT_DISCOVERY_S,
+    "legal":         CONSTANTS.STEP_TIMEOUT_LEGAL_S,
+}
+
+# ---------------------------------------------------------------------------
+# Skeleton card definitions — shown below the step checklist while pipeline
+# runs to preview the shape of the report sections being built.
+# Label text chosen to match the analysis step currently doing the work.
+# ---------------------------------------------------------------------------
+
+_SKELETON_CARDS: list[tuple[str, str]] = [
+    ("forensics",     "Analyzing Spectral Fingerprints…"),
+    ("compliance",    "Running Compliance Checks…"),
+    ("transcription", "Reading Lyrics…"),
+]
+
 # ---------------------------------------------------------------------------
 # Loading page CSS — injected once at the start of render_loading.
 # Makes the main block fill the full viewport and center content vertically.
@@ -85,6 +114,13 @@ _LOADING_CSS = """
   margin: 0 auto !important;
   width: 100% !important;
 }
+/* Skeleton loader pulse — opacity only, no layout thrash */
+@keyframes sk-pulse {
+  0%, 100% { opacity: 0.25; }
+  50%       { opacity: 0.55; }
+}
+.sk-pulse { animation: sk-pulse 1.6s ease-in-out infinite; }
+
 /* Slim accent progress bar */
 [data-testid="stProgress"] > div {
   background: rgba(245,100,10,.12) !important;
@@ -109,6 +145,42 @@ def _fmt(secs: float) -> str:
     """Format seconds as M:SS."""
     s = max(0, int(secs))
     return f"{s // 60}:{s % 60:02d}"
+
+
+def _skeleton_html(active_step_key: str) -> str:
+    """
+    Return animated skeleton placeholder cards for the three main report sections.
+
+    Cards are shown for steps that have not yet completed. Once a step finishes
+    its card disappears, giving a sense of the report assembling in real time.
+    active_step_key is the key of the currently-running step.
+    """
+    # Steps before the active one are complete; their skeleton cards are hidden.
+    # If active_step_key is unrecognised or empty, treat all as pending (show all cards).
+    active_idx = next(
+        (i for i, (k, *_) in enumerate(_STEPS) if k == active_step_key),
+        0,
+    )
+    completed_keys = {key for key, *_ in _STEPS[:active_idx]}
+    cards = ""
+    for step_key, label in _SKELETON_CARDS:
+        if step_key in completed_keys:
+            continue
+        cards += (
+            f'<div class="sk-pulse" aria-hidden="true"'
+            f' style="border:1px solid var(--border);border-radius:10px;'
+            f'padding:14px 16px;margin-bottom:8px;background:var(--s1);">'
+            f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">'
+            f'<div style="width:6px;height:6px;border-radius:50%;'
+            f'background:var(--dim);flex-shrink:0;"></div>'
+            f'<div style="font-family:\'JetBrains Mono\',monospace;font-size:.58rem;'
+            f'color:var(--dim);letter-spacing:.1em;text-transform:uppercase;">{label}</div>'
+            f'</div>'
+            f'<div style="height:8px;border-radius:4px;background:var(--border);width:85%;margin-bottom:6px;"></div>'
+            f'<div style="height:8px;border-radius:4px;background:var(--border);width:60%;"></div>'
+            f'</div>'
+        )
+    return cards
 
 
 # Tooltip + progress bar CSS injected once per _draw() call.
@@ -334,14 +406,15 @@ def render_loading(source: Any) -> None:
     st.markdown(_LOADING_CSS, unsafe_allow_html=True)
     _render_brand()
 
-    header_ph = st.empty()
-    bar_ph    = st.empty()
-    steps_ph  = st.empty()
+    header_ph   = st.empty()
+    bar_ph      = st.empty()
+    steps_ph    = st.empty()
     # Timer uses st.components.v1.html() (real iframe, JS executes).
     # Placed here in layout order before error_ph. Never updated — the
     # JS setInterval runs for the full pipeline duration on its own.
     _start_timer()
-    error_ph  = st.empty()
+    skeleton_ph = st.empty()
+    error_ph    = st.empty()   # fatal ingestion errors only
 
     completed      = 0
     step_durations: list[float] = []
@@ -350,8 +423,14 @@ def render_loading(source: Any) -> None:
 
     log.pipeline_start(source=str(source))
 
-    def _tick(label: str) -> None:
+    def _tick(label: str, step_key: str = "") -> None:
         _draw(header_ph, bar_ph, steps_ph, completed, label, step_durations)
+        if step_key:
+            html = _skeleton_html(step_key)
+            if html:
+                skeleton_ph.markdown(html, unsafe_allow_html=True)
+            else:
+                skeleton_ph.empty()
 
     def _advance(key: str, step_start: float, error: str | None = None,
                  context: dict | None = None) -> None:
@@ -365,12 +444,19 @@ def render_loading(source: Any) -> None:
             log.step_end(key, duration_s=duration)
 
     # ── Step 1: Ingestion (fatal on failure) ──────────────────────────────
-    _tick("Fetching Audio")
+    _tick("Fetching Audio", "ingestion")
     t0 = time.time()
     log.step_start("ingestion")
     try:
-        from services.ingestion import Ingestion
-        audio: AudioBuffer = Ingestion().load(source)
+        with step_timeout(_STEP_TIMEOUT_S["ingestion"], "ingestion"):
+            from services.ingestion import Ingestion
+            audio: AudioBuffer = Ingestion().load(source)
+    except StepTimeoutError as exc:
+        log.step_error("ingestion", error=str(exc))
+        log.pipeline_error(error=str(exc))
+        error_ph.error(f"Could not load audio: timed out after {CONSTANTS.STEP_TIMEOUT_INGESTION_S}s. "
+                       "Try a shorter track or check your connection.")
+        return
     except SyncSafeError as exc:
         log.step_error("ingestion", error=str(exc))
         log.pipeline_error(error=str(exc))
@@ -388,7 +474,7 @@ def render_loading(source: Any) -> None:
     if os.getenv("DEBUG_ANALYSIS"):
         import re as _re
         from pathlib import Path as _Path
-        _debug_dir = _Path(__file__).parent.parent.parent / "debug"
+        _debug_dir = _Path(__file__).parent.parent.parent / "local" / "debug"
         _debug_dir.mkdir(exist_ok=True)
         _safe = _re.sub(r"[^\w\-]", "_", audio.label)[:60]
         _dest = _debug_dir / f"{_safe}.wav"
@@ -396,13 +482,17 @@ def render_loading(source: Any) -> None:
         print(f"[DEBUG_ANALYSIS] Audio saved → {_dest}")
 
     # ── Step 2: Structure analysis (title/artist needed for lyrics lookup) ──
-    _tick("Analysing Structure")
+    _tick("Analysing Structure", "structure")
     t0 = time.time()
     structure = None
     log.step_start("structure")
     try:
-        from services.analysis import Analysis
-        structure = Analysis().analyze(audio)
+        with step_timeout(_STEP_TIMEOUT_S["structure"], "structure"):
+            from services.analysis import Analysis
+            structure = Analysis().analyze(audio)
+    except StepTimeoutError as exc:
+        st.toast(f"⏱ Structure analysis timed out — BPM/key/sections unavailable.", icon="⚠️")
+        _advance("structure", t0, error=str(exc))
     except SyncSafeError as exc:
         _advance("structure", t0, error=str(exc), context=getattr(exc, "context", None))
     except Exception as exc:  # noqa: BLE001 — UI boundary; unexpected errors degrade gracefully
@@ -416,14 +506,33 @@ def render_loading(source: Any) -> None:
     title  = (structure.metadata.get("title", "") if structure else "") or audio.metadata.get("title", "")
     artist = (structure.metadata.get("artist", "") if structure else "") or audio.metadata.get("artist", "")
 
+    # ── Sync-cut detection (pure, fast — no GPU, no UI step) ─────────────────
+    # Runs immediately after structure so sections/beats are available.
+    # Non-fatal: degrades to [] on any failure.
+    sync_cuts: list[SyncCut] = []
+    if structure:
+        try:
+            from services.sync_cut import SyncCutAnalyzer
+            sync_cuts = SyncCutAnalyzer().suggest(
+                sections         = list(structure.sections),
+                beats            = list(structure.beats),
+                target_durations = list(CONSTANTS.SYNC_CUT_TARGET_DURATIONS),
+            )
+        except Exception as exc:  # noqa: BLE001 — non-fatal, no UI step to mark failed
+            _log.warning("sync_cut: failed — %s", exc)
+
     # ── Step 3: Transcription (LRCLib first, then Demucs+Whisper fallback) ─
-    _tick("Transcribing Lyrics")
+    _tick("Transcribing Lyrics", "transcription")
     t0 = time.time()
     transcript = []
     log.step_start("transcription")
     try:
-        from services.transcription import LyricsOrchestrator
-        transcript = LyricsOrchestrator().transcribe(audio, title=title, artist=artist)
+        with step_timeout(_STEP_TIMEOUT_S["transcription"], "transcription"):
+            from services.transcription import LyricsOrchestrator
+            transcript = LyricsOrchestrator().transcribe(audio, title=title, artist=artist)
+    except StepTimeoutError as exc:
+        st.toast("⏱ Transcription timed out — lyric audit skipped.", icon="⚠️")
+        _advance("transcription", t0, error=str(exc))
     except SyncSafeError as exc:
         _advance("transcription", t0, error=str(exc))
     except Exception as exc:  # noqa: BLE001 — UI boundary
@@ -432,13 +541,17 @@ def render_loading(source: Any) -> None:
         _advance("transcription", t0)
 
     # ── Step 4: Forensics ─────────────────────────────────────────────────
-    _tick("Forensic Scan")
+    _tick("Forensic Scan", "forensics")
     t0 = time.time()
     forensics = None
     log.step_start("forensics")
     try:
-        from services.forensics import Forensics
-        forensics = Forensics().analyze(audio)
+        with step_timeout(_STEP_TIMEOUT_S["forensics"], "forensics"):
+            from services.forensics import Forensics
+            forensics = Forensics().analyze(audio)
+    except StepTimeoutError as exc:
+        st.toast("⏱ Forensic scan timed out — AI-detection unavailable.", icon="⚠️")
+        _advance("forensics", t0, error=str(exc))
     except SyncSafeError as exc:
         _advance("forensics", t0, error=str(exc))
     except Exception as exc:  # noqa: BLE001 — UI boundary
@@ -447,15 +560,19 @@ def render_loading(source: Any) -> None:
         _advance("forensics", t0)
 
     # ── Step 5: Compliance ────────────────────────────────────────────────
-    _tick("Compliance Audit")
+    _tick("Compliance Audit", "compliance")
     t0 = time.time()
     compliance = None
     log.step_start("compliance")
     try:
-        from services.compliance import Compliance
-        sections = structure.sections if structure else []
-        beats    = structure.beats    if structure else []
-        compliance = Compliance().check(audio, transcript, sections, beats)
+        with step_timeout(_STEP_TIMEOUT_S["compliance"], "compliance"):
+            from services.compliance import Compliance
+            sections = structure.sections if structure else []
+            beats    = structure.beats    if structure else []
+            compliance = Compliance().check(audio, transcript, sections, beats)
+    except StepTimeoutError as exc:
+        st.toast("⏱ Compliance audit timed out — sync checks unavailable.", icon="⚠️")
+        _advance("compliance", t0, error=str(exc))
     except SyncSafeError as exc:
         _advance("compliance", t0, error=str(exc))
     except Exception as exc:  # noqa: BLE001 — UI boundary
@@ -464,13 +581,17 @@ def render_loading(source: Any) -> None:
         _advance("compliance", t0)
 
     # ── Step 6: Authorship ────────────────────────────────────────────────
-    _tick("Authorship Check")
+    _tick("Authorship Check", "authorship")
     t0 = time.time()
     authorship = None
     log.step_start("authorship")
     try:
-        from services.authorship import Authorship
-        authorship = Authorship().analyze(transcript)
+        with step_timeout(_STEP_TIMEOUT_S["authorship"], "authorship"):
+            from services.authorship import Authorship
+            authorship = Authorship().analyze(transcript)
+    except StepTimeoutError as exc:
+        st.toast("⏱ Authorship check timed out — AI-lyric detection skipped.", icon="⚠️")
+        _advance("authorship", t0, error=str(exc))
     except SyncSafeError as exc:
         _advance("authorship", t0, error=str(exc))
     except Exception as exc:  # noqa: BLE001 — UI boundary
@@ -479,13 +600,17 @@ def render_loading(source: Any) -> None:
         _advance("authorship", t0)
 
     # ── Step 7: Track discovery ───────────────────────────────────────────
-    _tick("Track Discovery")
+    _tick("Track Discovery", "discovery")
     t0 = time.time()
     similar = []
     log.step_start("discovery")
     try:
-        from services.discovery import Discovery
-        similar = Discovery().find_similar(title, artist) or []
+        with step_timeout(_STEP_TIMEOUT_S["discovery"], "discovery"):
+            from services.discovery import Discovery
+            similar = Discovery().find_similar(title, artist) or []
+    except StepTimeoutError as exc:
+        st.toast("⏱ Track discovery timed out — similar tracks unavailable.", icon="⚠️")
+        _advance("discovery", t0, error=str(exc))
     except SyncSafeError as exc:
         _advance("discovery", t0, error=str(exc))
     except Exception as exc:  # noqa: BLE001 — UI boundary
@@ -493,14 +618,35 @@ def render_loading(source: Any) -> None:
     else:
         _advance("discovery", t0)
 
-    # ── Step 8: Legal links ───────────────────────────────────────────────
-    _tick("Legal Links")
+    # ── Step 8: Legal links, popularity, loudness & dialogue ─────────────
+    _tick("Legal Links", "legal")
     t0 = time.time()
-    legal = None
+    legal         = None
+    popularity    = None
+    audio_quality = None
     log.step_start("legal")
     try:
-        from services.legal import Legal
-        legal = Legal().get_links(title, artist)
+        with step_timeout(_STEP_TIMEOUT_S["legal"], "legal"):
+            from services.discovery import Discovery
+            from services.legal import Legal
+            from services.loudness import AudioQualityAnalyzer
+            from services.pro_lookup import ProLookup
+            base_links    = Legal().get_links(title, artist)
+            isrc, pro     = ProLookup().lookup(title, artist)
+            legal         = base_links.model_copy(update={"isrc": isrc, "pro_match": pro})
+            popularity    = Discovery().get_track_popularity(
+                title, artist,
+                platform_metrics={
+                    k: v for k, v in (audio.metadata or {}).items()
+                    if k in ("view_count", "like_count", "share_count",
+                             "repost_count", "channel_follower_count")
+                    and isinstance(v, int)
+                },
+            )
+            audio_quality = AudioQualityAnalyzer().analyze(audio)
+    except StepTimeoutError as exc:
+        st.toast("⏱ Legal/loudness step timed out — PRO links and loudness data unavailable.", icon="⚠️")
+        _advance("legal", t0, error=str(exc))
     except SyncSafeError as exc:
         _advance("legal", t0, error=str(exc))
     except Exception as exc:  # noqa: BLE001 — UI boundary
@@ -511,17 +657,27 @@ def render_loading(source: Any) -> None:
     # ── All done — render final state then transition ─────────────────────
     log.pipeline_end(duration_s=time.time() - pipeline_start)
     _draw(header_ph, bar_ph, steps_ph, completed, "", step_durations)
+    skeleton_ph.empty()
 
-    from core.models import AnalysisResult
-    result = AnalysisResult(
-        audio=audio,
-        structure=structure,
-        forensics=forensics,
-        transcript=transcript,
-        compliance=compliance,
-        authorship=authorship,
-        similar_tracks=similar,
-        legal=legal,
+    # model_validate with from_attributes=True re-parses each field from its
+    # current attribute values, bypassing Pydantic's strict class-identity check.
+    # This prevents ValidationError when Streamlit hot-reloads cause the model
+    # classes used by service modules to diverge from the ones in this module.
+    result = AnalysisResult.model_validate(
+        {
+            "audio":               audio,
+            "structure":           structure,
+            "forensics":           forensics,
+            "transcript":          transcript,
+            "compliance":          compliance,
+            "authorship":          authorship,
+            "similar_tracks":      similar,
+            "legal":               legal,
+            "popularity":          popularity,
+            "audio_quality":       audio_quality,
+            "sync_cuts":           sync_cuts,
+        },
+        from_attributes=True,
     )
 
     # Debug hook: save forensics scores + full result JSON for offline iteration.
@@ -530,7 +686,7 @@ def render_loading(source: Any) -> None:
         import json as _json
         import re as _re
         from pathlib import Path as _Path
-        _debug_dir = _Path(__file__).parent.parent.parent / "debug"
+        _debug_dir = _Path(__file__).parent.parent.parent / "local" / "debug"
         _debug_dir.mkdir(exist_ok=True)
         _safe = _re.sub(r"[^\w\-]", "_", audio.label)[:60]
         if forensics is not None:
@@ -540,19 +696,6 @@ def render_loading(source: Any) -> None:
         _rdest = _debug_dir / f"{_safe}_result.json"
         _rdest.write_text(result.to_json())
         print(f"[DEBUG_ANALYSIS] Result saved   → {_rdest}")
-        # Save the label the user selected on the portal before scanning
-        _debug_label = st.session_state.pop("debug_label", None)
-        if _debug_label and _debug_label != "— unrated —":
-            _labels_file = _debug_dir / "labels.json"
-            _existing: dict = {}
-            if _labels_file.exists():
-                try:
-                    _existing = _json.loads(_labels_file.read_text())
-                except Exception:
-                    pass
-            _existing[audio.label] = _debug_label
-            _labels_file.write_text(_json.dumps(_existing, indent=2, ensure_ascii=False))
-            print(f"[DEBUG_ANALYSIS] Label saved    → {audio.label}: {_debug_label}")
 
     st.session_state.audio    = audio
     st.session_state.analysis = result

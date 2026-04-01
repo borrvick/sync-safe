@@ -22,6 +22,11 @@ Swap guide:
   AuthorshipAnalyzer → swap RoBERTa for GPTZero API or a fine-tuned model
   TrackDiscovery     → swap Last.fm for Spotify, Soundcharts, or internal DB
   LegalLinksProvider → swap static URL templates for a live licensing API
+  SyncCutProvider           → swap heuristic scorer for an ML-based edit point detector
+  TagInjectorProvider       → swap mutagen for a cloud tagging API or a different tag schema
+  PlatformExportProvider    → swap built-in CSV templates for a paid sync API (Songtradr, etc.)
+  MetadataValidatorProvider → swap local rules for AllTrack, DDEX, or SoundExchange
+  ProLookupProvider  → swap MusicBrainz for a paid metadata provider
 """
 from __future__ import annotations
 
@@ -38,7 +43,9 @@ from core.models import (
     ComplianceReport,
     ForensicsResult,
     LegalLinks,
+    MetadataValidationResult,
     StructureResult,
+    SyncCut,
     TrackCandidate,
     TranscriptSegment,
 )
@@ -307,5 +314,126 @@ class LegalLinksProvider(Protocol):
 
         Returns:
             LegalLinks with ASCAP, BMI, and SESAC search URLs.
+        """
+        ...
+
+
+class SyncCutProvider(Protocol):
+    """
+    Suggest edit-point windows for standard ad/TV format durations.
+
+    Implementations: services/sync_cut.py (SyncCutAnalyzer)
+    Swap candidates:  An ML-based edit detector, a manual cue-sheet override
+    """
+
+    def suggest(
+        self,
+        sections: list[Section],
+        beats: list[float],
+        target_durations: "list[int]",
+    ) -> list[SyncCut]:
+        """
+        Args:
+            sections:          allin1 structural sections (label, start, end).
+            beats:             Beat grid as seconds-from-track-start.
+            target_durations:  Format lengths to target (e.g. [15, 30, 60]).
+
+        Returns:
+            One SyncCut per target duration (fewer if the track is too short).
+        """
+        ...
+
+
+class TagInjectorProvider(Protocol):
+    """
+    Embed audit results into audio file tags.
+
+    Implementations: services/tag_injector.py (TagInjector)
+    Swap candidates:  Cloud-based tag writing service, BWF metadata standard
+    """
+
+    def inject(self, audio_bytes: bytes, result: AnalysisResult) -> bytes:
+        """
+        Args:
+            audio_bytes: Raw audio bytes (MP3, FLAC, OGG, M4A).
+            result:      Complete AnalysisResult to embed as SYNC_SAFE_* tags.
+
+        Returns:
+            Audio bytes with tags injected; returns *audio_bytes* unchanged
+            if the format is unsupported or tagging fails (non-fatal).
+        """
+        ...
+
+
+class PlatformExportProvider(Protocol):
+    """
+    Generate platform-specific catalog CSV bytes for a sync licensing portal.
+
+    Implementations: services/platform_export.py (to_platform_csv)
+    Swap candidates:  Songtradr API, Musicstax, or a custom DAM integration
+    """
+
+    def export(self, result: AnalysisResult, platform: str) -> bytes:
+        """
+        Args:
+            result:   Complete pipeline AnalysisResult.
+            platform: Target schema name (e.g. "generic", "disco", "synchtank").
+
+        Returns:
+            UTF-8-with-BOM CSV bytes ready for download or API upload.
+
+        Raises:
+            ValueError: if *platform* is not a recognised schema name.
+        """
+        ...
+
+
+class MetadataValidatorProvider(Protocol):
+    """
+    Validate pre-flight track rights metadata at sync intake.
+
+    Implementations: services/metadata_validator.py (MetadataValidator)
+    Swap candidates:  A paid metadata registry (AllTrack, DDEX, SoundExchange)
+    """
+
+    def validate(
+        self,
+        fields: dict[str, str],
+        splits: list[float],
+        isrc: str = "",
+    ) -> MetadataValidationResult:
+        """
+        Args:
+            fields: Mapping of required intake field names to values.
+                    Expected keys: "title", "artist", "pro", "publisher".
+            splits: List of writer/publisher percentage splits (must sum to 100).
+            isrc:   ISRC string; empty means not yet known.
+
+        Returns:
+            MetadataValidationResult with per-field detail and rejection reason.
+        """
+        ...
+
+
+class ProLookupProvider(Protocol):
+    """
+    Best-effort ISRC and PRO affiliation lookup from an external metadata source.
+
+    Implementations: services/pro_lookup.py (MusicBrainz recordings API)
+    Swap candidates:  Songkick, AcousticBrainz, or a paid licensing data provider.
+    """
+
+    def lookup(
+        self,
+        title: str,
+        artist: str,
+    ) -> tuple[Optional[str], Optional[str]]:
+        """
+        Args:
+            title:  Track title.
+            artist: Artist name.
+
+        Returns:
+            (isrc, pro_match) tuple — both None when no match found or on error.
         """
         ...
