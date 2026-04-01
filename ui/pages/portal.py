@@ -6,49 +6,14 @@ on communication and the portal page can focus on the task.
 """
 from __future__ import annotations
 
-import html
-
 import streamlit as st
 
-from services.metadata_validator import validate_isrc, validate_splits
 from ui.components import eq_bars
 from ui.nav import render_site_nav, render_site_footer
-
-# Known PRO names shown in the dropdown — ordered by global prevalence
-_PRO_OPTIONS: list[str] = [
-    "",
-    "ASCAP (US)",
-    "BMI (US)",
-    "SESAC (US)",
-    "PRS for Music (UK)",
-    "GEMA (Germany)",
-    "SACEM (France)",
-    "SOCAN (Canada)",
-    "APRA AMCOS (Australia)",
-    "STIM (Sweden)",
-    "TONO (Norway)",
-    "KODA (Denmark)",
-    "Teosto (Finland)",
-    "Buma/Stemra (Netherlands)",
-    "SABAM (Belgium)",
-    "SIAE (Italy)",
-    "SGAE (Spain)",
-    "ECAD (Brazil)",
-    "JASRAC (Japan)",
-    "KOMCA (South Korea)",
-    "SACM (Mexico)",
-    "Other",
-]
 
 
 def render_portal() -> None:
     """Render the track submission portal."""
-    # Initialise metadata session state before access
-    if "intake_require_splits" not in st.session_state:
-        st.session_state.intake_require_splits = False
-    if "intake_metadata" not in st.session_state:
-        st.session_state.intake_metadata = {}
-
     st.markdown(
         '<a href="#main-content" class="skip-link">Skip to main content</a>',
         unsafe_allow_html=True,
@@ -182,173 +147,9 @@ def render_portal() -> None:
             </div>
             """, unsafe_allow_html=True)
 
-        # ── Rights Metadata Pre-flight ────────────────────────────────────────
-        _render_metadata_preflight()
-
         st.markdown("<br>", unsafe_allow_html=True)
 
     render_site_footer()
-
-
-def _render_metadata_preflight() -> None:
-    """
-    Collapsible rights metadata intake form (optional unless agency mode enabled).
-
-    Stores validated metadata in st.session_state.intake_metadata so that
-    loading.py can attach it to the AnalysisResult.
-    """
-    with st.expander("Rights Metadata  (optional — required for agency placements)"):
-        st.markdown(
-            "<div style='font-family:\"Figtree\",sans-serif;font-size:.82rem;"
-            "color:var(--muted);margin-bottom:12px;'>"
-            "Fill in rights details for your split sheet. ISRC and writer splits "
-            "are validated before the scan starts."
-            "</div>",
-            unsafe_allow_html=True,
-        )
-
-        require_splits = st.checkbox(
-            "Require signed split sheet (agency tier — blocks scan until complete)",
-            key="intake_require_splits",
-        )
-
-        col_a, col_b = st.columns(2)
-        with col_a:
-            title = st.text_input("Track title", key="intake_title", placeholder="e.g. Blinding Lights")
-            pro = st.selectbox("PRO affiliation", _PRO_OPTIONS, key="intake_pro")
-        with col_b:
-            artist = st.text_input("Artist name", key="intake_artist", placeholder="e.g. The Weeknd")
-            publisher = st.text_input("Publisher name", key="intake_publisher", placeholder="e.g. Warner Chappell")
-
-        isrc_raw = st.text_input(
-            "ISRC  (e.g. US-ABC-23-12345)",
-            key="intake_isrc",
-            placeholder="CC-XXX-YY-NNNNN",
-        )
-
-        st.markdown(
-            "<div style='font-family:\"Figtree\",sans-serif;font-size:.8rem;"
-            "color:var(--muted);margin:12px 0 4px;'>Writer splits (%) — must sum to 100</div>",
-            unsafe_allow_html=True,
-        )
-        num_writers = st.number_input(
-            "Number of writers",
-            min_value=1,
-            max_value=10,
-            value=1,
-            key="intake_num_writers",
-        )
-        splits: list[float] = []
-        for i in range(int(num_writers)):
-            v = st.number_input(
-                f"Writer {i + 1} split (%)",
-                min_value=0.0,
-                max_value=100.0,
-                value=round(100.0 / int(num_writers), 2),
-                step=0.01,
-                format="%.2f",
-                key=f"intake_split_{i}",
-            )
-            splits.append(float(v))
-
-        # ── Inline validation feedback ────────────────────────────────────────
-        _show_preflight_feedback(
-            title=title,
-            artist=artist,
-            pro=pro,
-            publisher=publisher,
-            isrc=isrc_raw,
-            splits=splits,
-            require_splits=require_splits,
-        )
-
-        # Persist metadata for loading.py
-        st.session_state.intake_metadata = {
-            "title": title.strip(),
-            "artist": artist.strip(),
-            "pro": pro.strip(),
-            "publisher": publisher.strip(),
-            "isrc": isrc_raw.strip(),
-            "splits": splits,
-            "require_splits": require_splits,
-        }
-
-
-def _badge_span(label: str, value: str, ok: bool, suffix: str = "") -> str:
-    """Return an HTML <span> badge for a single validation field. Pure — no I/O."""
-    color      = "var(--accent)" if ok else "var(--danger)"
-    icon_char  = "✓" if ok else "✗"
-    icon_label = "pass" if ok else "fail"
-    escaped    = html.escape(value.strip() or "—")
-    return (
-        f'<span style="color:{color};margin-right:12px;">'
-        f'<span aria-label="{icon_label}">{icon_char}</span>'
-        f' {label}: <strong>{escaped}</strong>{suffix}</span>'
-    )
-
-
-def _build_badge_spans(
-    title: str,
-    artist: str,
-    pro: str,
-    publisher: str,
-    isrc: str,
-    splits: list[float],
-) -> tuple[list[str], float]:
-    """Build badge span strings and return (spans, split_sum). Pure — no I/O."""
-    lines: list[str] = []
-    for field_label, value in [
-        ("Title", title), ("Artist", artist), ("PRO", pro), ("Publisher", publisher)
-    ]:
-        lines.append(_badge_span(field_label, value, ok=bool(value.strip())))
-
-    if isrc.strip():
-        isrc_ok = validate_isrc(isrc)
-        lines.append(_badge_span(
-            "ISRC", isrc.strip(), ok=isrc_ok,
-            suffix="" if isrc_ok else " — invalid format",
-        ))
-
-    splits_ok = validate_splits(splits)
-    split_sum = round(sum(splits), 2)
-    lines.append(_badge_span(
-        "Splits sum", f"{split_sum}%", ok=splits_ok,
-        suffix="" if splits_ok else " — must equal 100%",
-    ))
-    return lines, split_sum
-
-
-def _show_preflight_feedback(
-    title: str,
-    artist: str,
-    pro: str,
-    publisher: str,
-    isrc: str,
-    splits: list[float],
-    require_splits: bool,
-) -> None:
-    """Render inline field-level validation badges (no I/O — reads session state only)."""
-    any_filled = any([title.strip(), artist.strip(), pro.strip(), publisher.strip(), isrc.strip()])
-    if not any_filled and not require_splits:
-        return  # nothing entered — don't show noise
-
-    lines, split_sum = _build_badge_spans(title, artist, pro, publisher, isrc, splits)
-
-    st.markdown(
-        "<div style='font-family:\"JetBrains Mono\",monospace;font-size:.72rem;"
-        "line-height:1.9;margin-top:10px;padding:10px 12px;border-radius:6px;"
-        "background:var(--surface-raised,rgba(255,255,255,.03));"
-        "border:1px solid var(--border-hr);'>"
-        + "".join(lines)
-        + "</div>",
-        unsafe_allow_html=True,
-    )
-
-    if require_splits and not validate_splits(splits):
-        st.error(
-            f"Agency mode: writer splits must sum to 100% (currently {split_sum}%). "
-            "Correct the splits before initiating the scan."
-        )
 
 
 def _submit_source(source: object) -> None:
