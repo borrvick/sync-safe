@@ -110,6 +110,13 @@ _THEME_JS = """<script>
           container.querySelectorAll('[data-testid="stBaseButton-secondary"]').forEach(function(btn) {
             btn.setAttribute('data-nav-btn', pair[1]);
           });
+          // Primary CTA button ("Launch Portal →") — stamp separately so CSS
+          // can constrain its size to match the nav bar height.
+          if (pair[1] === 'nav') {
+            container.querySelectorAll('[data-testid="stBaseButton-primary"]').forEach(function(btn) {
+              btn.setAttribute('data-nav-btn', 'nav-cta');
+            });
+          }
         });
       });
     }
