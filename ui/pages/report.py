@@ -442,22 +442,7 @@ def _render_structure_card(sr: Optional[StructureResult]) -> None:
         m, s = divmod(int(secs), 60)
         return f"{m}:{s:02d}"
 
-    if sections:
-        rows_html = "".join(
-            f"<div style='display:flex;align-items:center;gap:12px;padding:5px 0;"
-            f"border-bottom:1px solid var(--border-hr);'>"
-            f"<span style='font-family:\"JetBrains Mono\",monospace;font-size:.78rem;"
-            f"color:var(--dim);min-width:90px;'>{_fmt_ts(s.start)} – {_fmt_ts(s.end)}</span>"
-            f"<span style='font-family:\"Chakra Petch\",monospace;font-size:.76rem;"
-            f"font-weight:600;letter-spacing:.08em;text-transform:uppercase;"
-            f"color:var(--text);'>{html_mod.escape(s.label)}</span>"
-            f"</div>"
-            for s in sections
-        )
-        sections_html = f"<div style='margin-top:4px;'>{rows_html}</div>"
-    else:
-        sections_html = "<span style='font-family:var(--mono);font-size:.8rem;color:var(--dim);'>No section data</span>"
-
+    # BPM + Key rendered as a pure HTML card (no interactive elements here)
     st.markdown(f"""
     <div class="sig">
       <div class="sig-head">Structure Analysis</div>
@@ -480,10 +465,41 @@ def _render_structure_card(sr: Optional[StructureResult]) -> None:
         </div>
       </div>
       <div style="font-family:'Chakra Petch',monospace;font-size:.56rem;font-weight:600;
-                  letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:10px;">Detected Sections</div>
-      {sections_html}
+                  letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:6px;">
+        Detected Sections — click to seek
+      </div>
     </div>
     """, unsafe_allow_html=True)
+
+    # Sections rendered as Streamlit columns so timestamps are clickable buttons
+    if sections:
+        for s in sections:
+            ts_s = int(s.start)
+            col_btn, col_label = st.columns([1.4, 3], gap="small")
+            with col_btn:
+                if st.button(
+                    f"{_fmt_ts(s.start)} – {_fmt_ts(s.end)}",
+                    key=f"sec_{ts_s}_{html_mod.escape(s.label)}",
+                    help=f"Jump to {_fmt_ts(s.start)} in the audio player",
+                    use_container_width=True,
+                    type="secondary",
+                ):
+                    st.session_state.start_time = ts_s
+                    st.session_state.player_key = st.session_state.get("player_key", 0) + 1
+                    st.rerun()
+            with col_label:
+                st.markdown(
+                    f"<div style='font-family:\"Chakra Petch\",monospace;font-size:.76rem;"
+                    f"font-weight:600;letter-spacing:.08em;text-transform:uppercase;"
+                    f"color:var(--text);padding-top:6px;'>{html_mod.escape(s.label)}</div>",
+                    unsafe_allow_html=True,
+                )
+    else:
+        st.markdown(
+            "<span style='font-family:var(--mono);font-size:.8rem;color:var(--dim);'>"
+            "No section data</span>",
+            unsafe_allow_html=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1654,45 +1670,76 @@ def _sync_cut_conf_bar(conf: float) -> str:
 
 
 def _render_sync_cuts(result: AnalysisResult) -> None:
-    """Render the Sync Edit Points table — one row per target duration."""
-    rows_html = ""
-    for cut in result.sync_cuts:
-        rows_html += (
-            f'<tr>'
-            f'<td style="padding:8px 12px;font-family:JetBrains Mono,monospace;font-size:.78rem;'
-            f'color:var(--text);font-weight:600;">{cut.duration_s}s</td>'
-            f'<td style="padding:8px 12px;font-family:JetBrains Mono,monospace;font-size:.78rem;'
-            f'color:var(--muted);">{_sync_cut_ts(cut.start_s)}</td>'
-            f'<td style="padding:8px 12px;font-family:JetBrains Mono,monospace;font-size:.78rem;'
-            f'color:var(--muted);">{_sync_cut_ts(cut.end_s)}</td>'
-            f'<td style="padding:8px 12px;font-family:JetBrains Mono,monospace;font-size:.78rem;'
-            f'color:var(--muted);">{cut.actual_duration_s:.1f}s</td>'
-            f'<td style="padding:8px 12px;">{_sync_cut_conf_bar(cut.confidence)}</td>'
-            f'<td style="padding:8px 12px;font-family:Figtree,sans-serif;font-size:.78rem;'
-            f'color:var(--muted);">{html_mod.escape(cut.note)}</td>'
-            f'</tr>'
-        )
+    """Render the Sync Edit Points table — one row per target duration.
 
-    header_cells = ""
-    for col in ("Target", "Start", "End", "Actual", "Confidence", "Note"):
-        header_cells += (
-            f'<th style="padding:8px 12px;text-align:left;font-family:JetBrains Mono,monospace;'
-            f'font-size:.6rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;'
-            f'color:var(--dim);border-bottom:1px solid var(--border);">{col}</th>'
-        )
-
-    st.markdown(
-        f'<div style="overflow-x:auto;">'
-        f'<table style="width:100%;border-collapse:collapse;background:var(--s1);'
-        f'border:1px solid var(--border);border-radius:10px;">'
-        f'<thead><tr>{header_cells}</tr></thead>'
-        f'<tbody>{rows_html}</tbody>'
-        f'</table></div>',
-        unsafe_allow_html=True,
+    Start timestamps are rendered as st.button so clicking seeks the audio
+    player to that position (same pattern as lyric audit timestamps).
+    """
+    # Column header row
+    h_target, h_start, h_end, h_actual, h_conf, h_note = st.columns(
+        [0.7, 0.8, 0.8, 0.7, 1.4, 2], gap="small"
     )
+    _mono_hdr = (
+        "font-family:JetBrains Mono,monospace;font-size:.6rem;font-weight:600;"
+        "letter-spacing:.12em;text-transform:uppercase;color:var(--dim);"
+        "padding-bottom:4px;border-bottom:1px solid var(--border);"
+    )
+    for col, label in (
+        (h_target, "Target"),
+        (h_start,  "Start ▶"),
+        (h_end,    "End"),
+        (h_actual, "Actual"),
+        (h_conf,   "Confidence"),
+        (h_note,   "Note"),
+    ):
+        col.markdown(f"<div style='{_mono_hdr}'>{label}</div>", unsafe_allow_html=True)
+
+    _mono_cell = (
+        "font-family:JetBrains Mono,monospace;font-size:.78rem;"
+        "color:var(--muted);padding-top:6px;"
+    )
+    for cut in result.sync_cuts:
+        ts_s = int(cut.start_s)
+        c_target, c_start, c_end, c_actual, c_conf, c_note = st.columns(
+            [0.7, 0.8, 0.8, 0.7, 1.4, 2], gap="small"
+        )
+        c_target.markdown(
+            f"<div style='{_mono_cell}font-weight:600;color:var(--text);'>{cut.duration_s}s</div>",
+            unsafe_allow_html=True,
+        )
+        with c_start:
+            if st.button(
+                _sync_cut_ts(cut.start_s),
+                key=f"cut_{ts_s}_{cut.duration_s}",
+                help=f"Jump to {_sync_cut_ts(cut.start_s)} in the audio player",
+                use_container_width=True,
+                type="secondary",
+            ):
+                st.session_state.start_time = ts_s
+                st.session_state.player_key = st.session_state.get("player_key", 0) + 1
+                st.rerun()
+        c_end.markdown(
+            f"<div style='{_mono_cell}'>{_sync_cut_ts(cut.end_s)}</div>",
+            unsafe_allow_html=True,
+        )
+        c_actual.markdown(
+            f"<div style='{_mono_cell}'>{cut.actual_duration_s:.1f}s</div>",
+            unsafe_allow_html=True,
+        )
+        c_conf.markdown(
+            f"<div style='padding-top:6px;'>{_sync_cut_conf_bar(cut.confidence)}</div>",
+            unsafe_allow_html=True,
+        )
+        c_note.markdown(
+            f"<div style='font-family:Figtree,sans-serif;font-size:.78rem;"
+            f"color:var(--muted);padding-top:6px;'>{html_mod.escape(cut.note)}</div>",
+            unsafe_allow_html=True,
+        )
+
     st.caption(
         "Edit windows are beat-aligned and scored on: post-intro start, section-boundary "
-        "entry/exit, chorus presence, and bar-grid snap. Confidence = composite score (0–100%)."
+        "entry/exit, chorus presence, and bar-grid snap. Confidence = composite score (0–100%). "
+        "Click a Start timestamp to seek the audio player."
     )
 
 
