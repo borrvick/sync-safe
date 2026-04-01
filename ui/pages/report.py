@@ -1071,8 +1071,55 @@ _POPULARITY_TIER_COLORS: dict[str, str] = {
 }
 
 
+def _popularity_signal_rows(pop: object) -> list[tuple[str, str, int, bool]]:
+    """
+    Build signal breakdown rows for the popularity card.
+
+    Returns list of (label, raw_value_str, normalised_score_0_100, is_winner).
+    Only includes signals that contributed a non-zero score.
+    Pure — no I/O.
+    """
+    from core.config import CONSTANTS
+    from services.discovery import _normalise_lastfm, _normalise_views
+
+    rows: list[tuple[str, str, int, bool]] = []
+
+    lastfm_score = _normalise_lastfm(pop.listeners, CONSTANTS) if pop.listeners else 0
+    if lastfm_score > 0:
+        rows.append(("Last.fm", f"{pop.listeners:,} listeners", lastfm_score, False))
+
+    if pop.spotify_score is not None:
+        rows.append(("Spotify", f"{pop.spotify_score}/100", pop.spotify_score, False))
+
+    view_count = pop.platform_metrics.get("view_count", 0)
+    if view_count > 0:
+        view_score = _normalise_views(view_count, CONSTANTS)
+        rows.append(("Views", _fmt_count(view_count), view_score, False))
+
+    # Mark the winning (highest) signal
+    if rows:
+        max_score = max(r[2] for r in rows)
+        rows = [
+            (label, raw, score, score == max_score)
+            for label, raw, score, _ in rows
+        ]
+
+    return rows
+
+
+def _fmt_count(n: int) -> str:
+    """Format a large integer as a compact string (e.g. 1.2M, 500K). Pure."""
+    if n >= 1_000_000_000:
+        return f"{n / 1_000_000_000:.1f}B"
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.0f}K"
+    return str(n)
+
+
 def _render_popularity_card(result: AnalysisResult) -> None:
-    """Render track popularity tier and estimated sync cost from Last.fm data."""
+    """Render track popularity tier, estimated sync cost, and per-signal breakdown."""
     pop = result.popularity
     if pop is None:
         st.markdown(
@@ -1082,7 +1129,7 @@ def _render_popularity_card(result: AnalysisResult) -> None:
         )
         return
 
-    tier_color = _POPULARITY_TIER_COLORS.get(pop.tier, "var(--dim)")
+    tier_color    = _POPULARITY_TIER_COLORS.get(pop.tier, "var(--dim)")
     listeners_fmt = f"{pop.listeners:,}"
     cost_fmt      = f"${pop.sync_cost_low:,} – ${pop.sync_cost_high:,}"
 
@@ -1105,10 +1152,48 @@ def _render_popularity_card(result: AnalysisResult) -> None:
                     color:var(--text);">{cost_fmt}</div>
         <div style="font-family:'Figtree',sans-serif;font-size:.7rem;color:var(--muted);
                     margin-top:4px;">Varies by usage, territory, and negotiation.
-                    Source: Last.fm · Industry estimates 2024–2026.</div>
+                    Industry estimates 2024–2026.</div>
       </div>
     </div>
     """, unsafe_allow_html=True)
+
+    # ── Signal breakdown ──────────────────────────────────────────────────────
+    signal_rows = _popularity_signal_rows(pop)
+    if not signal_rows:
+        return
+
+    rows_html = ""
+    for label, raw, score, is_winner in signal_rows:
+        bar_color  = "var(--accent)" if is_winner else "var(--dim)"
+        label_color = "var(--text)" if is_winner else "var(--muted)"
+        winner_mark = " ✓" if is_winner else ""
+        rows_html += f"""
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:.58rem;
+                      color:{label_color};font-weight:{'600' if is_winner else '400'};
+                      width:60px;flex-shrink:0;">{html_mod.escape(label)}{winner_mark}</div>
+          <div style="flex:1;height:4px;border-radius:2px;background:var(--border-hr);
+                      overflow:hidden;">
+            <div style="height:100%;width:{score}%;background:{bar_color};
+                        border-radius:2px;transition:width .4s ease;"></div>
+          </div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:.56rem;
+                      color:var(--muted);width:28px;text-align:right;">{score}</div>
+          <div style="font-family:'Figtree',sans-serif;font-size:.62rem;
+                      color:var(--dim);min-width:80px;">{html_mod.escape(raw)}</div>
+        </div>"""
+
+    st.markdown(
+        "<div class='sig' style='padding:12px 14px;margin-bottom:4px;'>"
+        "<div style=\"font-family:'Chakra Petch',monospace;font-size:.48rem;font-weight:600;"
+        "letter-spacing:.18em;text-transform:uppercase;color:var(--dim);margin-bottom:10px;\">"
+        "Signal Breakdown</div>"
+        + rows_html
+        + "<div style=\"font-family:'Figtree',sans-serif;font-size:.6rem;color:var(--dim);"
+        "margin-top:8px;\">Score 0–100 · tier uses highest signal</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def _render_legal_and_discovery(result: AnalysisResult) -> None:
