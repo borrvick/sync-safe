@@ -107,7 +107,7 @@ def render_portal() -> None:
                     label_visibility="collapsed",
                 )
                 st.markdown("""
-                <div style="display:flex;align-items:center;gap:6px;margin:6px 0 10px;flex-wrap:wrap;">
+                <div style="display:flex;align-items:center;gap:5px;margin:6px 0 10px;flex-wrap:wrap;">
                   <span style="font-family:'JetBrains Mono',monospace;font-size:.5rem;
                                color:var(--dim);letter-spacing:.08em;text-transform:uppercase;
                                margin-right:2px;">Accepts</span>
@@ -117,16 +117,28 @@ def render_portal() -> None:
                                border:1px solid rgba(255,0,0,.18);">YouTube</span>
                   <span style="font-family:'JetBrains Mono',monospace;font-size:.52rem;font-weight:600;
                                padding:2px 7px;border-radius:3px;
-                               background:rgba(29,129,96,.1);color:#1DB954;
-                               border:1px solid rgba(29,129,96,.25);">Bandcamp</span>
-                  <span style="font-family:'JetBrains Mono',monospace;font-size:.52rem;font-weight:600;
-                               padding:2px 7px;border-radius:3px;
                                background:rgba(255,85,0,.08);color:#FF5500;
                                border:1px solid rgba(255,85,0,.2);">SoundCloud</span>
                   <span style="font-family:'JetBrains Mono',monospace;font-size:.52rem;font-weight:600;
                                padding:2px 7px;border-radius:3px;
+                               background:rgba(29,129,96,.1);color:#1DB954;
+                               border:1px solid rgba(29,129,96,.25);">Bandcamp</span>
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:.52rem;font-weight:600;
+                               padding:2px 7px;border-radius:3px;
+                               background:rgba(0,0,0,.08);color:#69C9D0;
+                               border:1px solid rgba(105,201,208,.25);">TikTok</span>
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:.52rem;font-weight:600;
+                               padding:2px 7px;border-radius:3px;
+                               background:rgba(225,48,108,.08);color:#E1306C;
+                               border:1px solid rgba(225,48,108,.22);">Instagram</span>
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:.52rem;font-weight:600;
+                               padding:2px 7px;border-radius:3px;
+                               background:rgba(24,119,242,.08);color:#1877F2;
+                               border:1px solid rgba(24,119,242,.22);">Facebook</span>
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:.52rem;font-weight:600;
+                               padding:2px 7px;border-radius:3px;
                                background:rgba(245,100,10,.08);color:var(--dim);
-                               border:1px solid var(--border-hr);">.mp3 .wav .flac</span>
+                               border:1px solid var(--border-hr);">+ more</span>
                 </div>
                 """, unsafe_allow_html=True)
                 st.caption(

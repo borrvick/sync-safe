@@ -43,6 +43,15 @@ _BANDCAMP_HOSTS: frozenset[str] = frozenset({"bandcamp.com"})
 _SOUNDCLOUD_HOSTS: frozenset[str] = frozenset({
     "soundcloud.com", "www.soundcloud.com", "on.soundcloud.com",
 })
+_TIKTOK_HOSTS: frozenset[str] = frozenset({
+    "tiktok.com", "www.tiktok.com", "vm.tiktok.com", "m.tiktok.com",
+})
+_INSTAGRAM_HOSTS: frozenset[str] = frozenset({
+    "instagram.com", "www.instagram.com",
+})
+_FACEBOOK_HOSTS: frozenset[str] = frozenset({
+    "facebook.com", "www.facebook.com", "fb.com", "fb.watch",
+})
 _DIRECT_AUDIO_EXTENSIONS: frozenset[str] = frozenset({
     ".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac",
 })
@@ -93,8 +102,9 @@ class Ingestion:
             kind = _classify_url(source)
             if kind == "unknown":
                 raise ValidationError(
-                    "Unsupported URL — only YouTube, Bandcamp, SoundCloud, "
-                    "and direct audio links (.mp3/.wav/.flac/.ogg/.m4a/.aac) are supported.",
+                    "Unsupported URL — paste a YouTube, TikTok, Instagram, Facebook, "
+                    "Bandcamp, or SoundCloud link, a direct audio file URL "
+                    "(.mp3/.wav/.flac/.ogg/.m4a/.aac), or any other URL supported by yt-dlp.",
                     context={"url": source},
                 )
             if kind == "direct":
@@ -301,25 +311,43 @@ class Ingestion:
 
 def _classify_url(url: str) -> str:
     """
-    Classify a URL as one of: youtube / bandcamp / soundcloud / direct / unknown.
+    Classify a URL as one of:
+      youtube / bandcamp / soundcloud / tiktok / instagram / facebook /
+      direct / ytdlp / unknown
+
+    - Known streaming platforms → named label (used as source_label on AudioBuffer)
+    - Direct audio file URL (.mp3/.wav/etc.) → "direct" (downloaded via urllib)
+    - Any other HTTP(S) URL → "ytdlp" (passed to yt-dlp as a best-effort attempt;
+      yt-dlp supports thousands of sites beyond the named set above)
+    - Non-HTTP strings or parse failures → "unknown" (rejected at load() boundary)
 
     Pure function — no I/O, no side effects, deterministic.
-    Returns "unknown" on any parse error rather than raising.
     """
     try:
         parsed = urlparse(url.strip())
-        host   = parsed.netloc.lower().removeprefix("www.")
+        if parsed.scheme not in ("http", "https"):
+            return "unknown"
+        host = parsed.netloc.lower().removeprefix("www.")
         if host in _YOUTUBE_HOSTS or host == "youtu.be":
             return "youtube"
         if host in _BANDCAMP_HOSTS or host.endswith(".bandcamp.com"):
             return "bandcamp"
         if host in _SOUNDCLOUD_HOSTS:
             return "soundcloud"
+        if host in _TIKTOK_HOSTS:
+            return "tiktok"
+        if host in _INSTAGRAM_HOSTS:
+            return "instagram"
+        if host in _FACEBOOK_HOSTS:
+            return "facebook"
         from pathlib import PurePosixPath
         ext = PurePosixPath(parsed.path).suffix.lower()
         if ext in _DIRECT_AUDIO_EXTENSIONS:
             return "direct"
-        return "unknown"
+        # Any other HTTP URL — pass to yt-dlp and let it decide.
+        # yt-dlp supports 1000+ extractors; if it can't handle the URL it will
+        # raise an error that surfaces as AudioSourceError to the user.
+        return "ytdlp"
     except Exception:   # noqa: BLE001 — pure parse helper; never fatal
         return "unknown"
 
