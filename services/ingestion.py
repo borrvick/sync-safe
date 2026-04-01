@@ -19,6 +19,7 @@ from __future__ import annotations
 import io
 import json
 import re
+import shlex
 import shutil
 import subprocess
 import urllib.request
@@ -55,6 +56,16 @@ _FACEBOOK_HOSTS: frozenset[str] = frozenset({
 _DIRECT_AUDIO_EXTENSIONS: frozenset[str] = frozenset({
     ".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac",
 })
+
+# Engagement fields requested from yt-dlp --print for popularity signals.
+# One field per line (newline separator avoids comma-in-value misalignment).
+_ENGAGEMENT_FIELDS: list[str] = [
+    "view_count",
+    "like_count",
+    "share_count",
+    "repost_count",
+    "channel_follower_count",
+]
 
 
 class Ingestion:
@@ -132,6 +143,7 @@ class Ingestion:
         # two consecutive requests for the same video. --dump-json is a
         # lightweight info-only call (~2s); the download follows separately.
         track_metadata = _fetch_youtube_metadata(url, ytdlp_bin)
+        track_metadata.update(_fetch_platform_engagement(url, ytdlp_bin))
 
         ytdlp_cmd = [
             ytdlp_bin,
@@ -459,6 +471,58 @@ def _fetch_youtube_metadata(url: str, ytdlp_bin: str) -> dict[str, str]:
         return {"title": _clean_title(title_raw), "artist": artist}
     except Exception:  # noqa: BLE001 — metadata is always best-effort
         return {"title": "", "artist": ""}
+
+
+def _fetch_platform_engagement(url: str, ytdlp_bin: str) -> dict[str, int]:
+    """
+    Fetch per-platform engagement metrics for a URL via yt-dlp --print.
+
+    Returns a flat dict of whichever integer fields yt-dlp exposes for the
+    platform (e.g. view_count, like_count, share_count, repost_count).
+    Fields absent or non-integer for a given platform are omitted.
+
+    This is a lightweight info-only call — no audio is downloaded.
+    Never raises — engagement data is always supplementary.
+
+    Supported platforms and available fields:
+      YouTube:    view_count, like_count, channel_follower_count
+      TikTok:     view_count, like_count, share_count, repost_count
+      Instagram:  view_count, like_count
+      Facebook:   view_count, like_count
+      SoundCloud: view_count (plays), like_count, repost_count
+    """
+    # One field per line — newline separator avoids misalignment when
+    # yt-dlp formats numbers with commas (e.g. "1,234,567").
+    print_template = "\n".join(f"%({f})s" for f in _ENGAGEMENT_FIELDS)
+    try:
+        result = subprocess.run(
+            [
+                ytdlp_bin,
+                "--quiet",
+                "--no-warnings",
+                "--no-playlist",
+                "--print", print_template,
+                shlex.quote(url),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode != 0:
+            return {}
+
+        lines = result.stdout.splitlines()
+        metrics: dict[str, int] = {}
+        for field, raw in zip(_ENGAGEMENT_FIELDS, lines):
+            raw = raw.strip()
+            if raw and raw not in ("NA", "None", "none"):
+                try:
+                    metrics[field] = int(float(raw.replace(",", "")))
+                except ValueError:
+                    pass
+        return metrics
+    except Exception:  # noqa: BLE001 — engagement data is always best-effort
+        return {}
 
 
 def _artist_from_uploader(uploader: str) -> str:

@@ -128,6 +128,16 @@ class TestFetchYoutubeAudio:
 
     def setup_method(self):
         self.svc = Ingestion()
+        # _fetch_platform_engagement uses subprocess.run; patch it to a no-op
+        # so these tests don't require yt-dlp on PATH.
+        self._run_patcher = patch(
+            "services.ingestion.subprocess.run",
+            return_value=MagicMock(returncode=1, stdout=""),
+        )
+        self._run_patcher.start()
+
+    def teardown_method(self):
+        self._run_patcher.stop()
 
     def test_returns_audio_buffer_on_success(self):
         wav = b"RIFF\x00\x00\x00\x00WAVEfmt "

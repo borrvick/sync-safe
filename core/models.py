@@ -333,15 +333,34 @@ class AudioQualityResult(BaseModel):
 
 
 class PopularityResult(BaseModel):
-    """Last.fm popularity data for the scanned track."""
+    """
+    Multi-signal popularity result for the scanned track.
+
+    popularity_score is a normalised 0–100 value derived from whichever
+    signals are available (Last.fm, Spotify, platform engagement).  tier
+    is derived from popularity_score so the tier cannot be dragged down by
+    a single bad Last.fm lookup.
+
+    platform_metrics holds raw per-platform engagement counts keyed by
+    field name (e.g. "view_count", "like_count", "share_count").  Values
+    are source-dependent and may be absent when the scan is from a file
+    upload rather than a URL.
+
+    Designed to be re-fetched independently of the static forensic signals
+    once result caching is added (issue #84) — popularity data goes stale,
+    forensic data does not.
+    """
 
     model_config = ConfigDict(frozen=True)
 
-    listeners: int           # unique listeners on Last.fm
-    playcount: int           # total scrobbles on Last.fm
-    tier: str                # "Emerging" | "Regional" | "Mainstream" | "Global"
-    sync_cost_low: int       # estimated sync fee lower bound (USD)
-    sync_cost_high: int      # estimated sync fee upper bound (USD)
+    listeners: int                                              # Last.fm unique listener count
+    playcount: int                                              # Last.fm total scrobble count
+    spotify_score: Optional[int]                               # Spotify popularity 0–100 (None if unavailable)
+    platform_metrics: dict[str, int] = Field(default_factory=dict)  # raw engagement: view_count, like_count, etc.
+    popularity_score: int                   # blended normalised 0–100 score
+    tier: str                               # "Emerging" | "Regional" | "Mainstream" | "Global"
+    sync_cost_low: int                      # estimated sync fee lower bound (USD)
+    sync_cost_high: int                     # estimated sync fee upper bound (USD)
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
