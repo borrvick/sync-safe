@@ -215,6 +215,21 @@ class SystemConstants:
     PLATFORM_VIEWS_MAINSTREAM: int  = 50_000_000    # 50M views → score ~50
     PLATFORM_VIEWS_GLOBAL: int      = 500_000_000   # 500M views → score ~75+
 
+    # Minimum number of independent signals required to award higher tiers.
+    # Protects against false highs (e.g. a meme remix with 200M views but
+    # near-zero Last.fm + Spotify scores reaching Global).
+    # Emerging/Regional: 1 signal sufficient (single source is credible enough).
+    # Mainstream: at least 2 signals must score > 0.
+    # Global: at least 2 signals must score > 0.
+    POPULARITY_MIN_SIGNALS_MAINSTREAM: int = 2
+    POPULARITY_MIN_SIGNALS_GLOBAL: int     = 2
+
+    # Last.fm listener threshold below which a fuzzy retry is attempted.
+    # If the first lookup returns fewer listeners than this, strip featured
+    # artists and parenthetical suffixes and retry — covers "13 listeners for
+    # Bruno Mars" cases caused by title decoration mismatches in Last.fm's index.
+    LASTFM_LOW_LISTENER_THRESHOLD: int = 1_000
+
     # Estimated sync fee ranges (USD) per popularity tier — shown as guidance only.
     # Source: industry averages 2024-2026; highly variable by usage and territory.
     SYNC_COST_EMERGING: tuple[int, int]    = (500,    5_000)
