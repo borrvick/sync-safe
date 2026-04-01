@@ -224,9 +224,30 @@ class TestClassifyUrl:
         from services.ingestion import _classify_url
         assert _classify_url("https://cdn.example.com/files/track.wav") == "direct"
 
-    def test_unknown_url(self):
+    def test_tiktok_standard(self):
         from services.ingestion import _classify_url
-        assert _classify_url("https://spotify.com/track/abc") == "unknown"
+        assert _classify_url("https://www.tiktok.com/@user/video/123456") == "tiktok"
+
+    def test_tiktok_short_vm(self):
+        from services.ingestion import _classify_url
+        assert _classify_url("https://vm.tiktok.com/abc123/") == "tiktok"
+
+    def test_instagram(self):
+        from services.ingestion import _classify_url
+        assert _classify_url("https://www.instagram.com/reel/abc123/") == "instagram"
+
+    def test_facebook(self):
+        from services.ingestion import _classify_url
+        assert _classify_url("https://www.facebook.com/watch?v=123456") == "facebook"
+
+    def test_facebook_short_fb_watch(self):
+        from services.ingestion import _classify_url
+        assert _classify_url("https://fb.watch/abc123/") == "facebook"
+
+    def test_unknown_http_url_falls_through_to_ytdlp(self):
+        # Any unrecognised HTTP URL should be attempted via yt-dlp (1000+ extractors)
+        from services.ingestion import _classify_url
+        assert _classify_url("https://spotify.com/track/abc") == "ytdlp"
 
     def test_malformed_url_returns_unknown(self):
         from services.ingestion import _classify_url
