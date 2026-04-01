@@ -10,11 +10,48 @@ from services.discovery import (
     Discovery,
     _classify_popularity,
     _find_binary,
+    _normalise_lastfm,
+    _normalise_views,
     _parse_track_list,
     _resolve_youtube_url,
 )
 from core.config import CONSTANTS
 from core.exceptions import ConfigurationError
+
+
+# ---------------------------------------------------------------------------
+# _normalise_lastfm / _normalise_views (pure helpers — no mocks needed)
+# ---------------------------------------------------------------------------
+
+class TestNormaliseLastfm:
+    def test_zero_listeners_returns_zero(self) -> None:
+        assert _normalise_lastfm(0, CONSTANTS) == 0
+
+    def test_global_ceiling_returns_75(self) -> None:
+        # The global boundary maps to exactly 75 — above it extends toward 100
+        assert _normalise_lastfm(CONSTANTS.LASTFM_LISTENERS_GLOBAL, CONSTANTS) == 75
+
+    def test_above_ceiling_clamped_to_100(self) -> None:
+        assert _normalise_lastfm(CONSTANTS.LASTFM_LISTENERS_GLOBAL * 10, CONSTANTS) == 100
+
+    def test_small_count_returns_low_score(self) -> None:
+        assert _normalise_lastfm(100, CONSTANTS) < 30
+
+
+class TestNormaliseViews:
+    def test_zero_views_returns_zero(self) -> None:
+        assert _normalise_views(0, CONSTANTS) == 0
+
+    def test_global_ceiling_returns_75(self) -> None:
+        # The global boundary maps to exactly 75 — above it extends toward 100
+        assert _normalise_views(CONSTANTS.PLATFORM_VIEWS_GLOBAL, CONSTANTS) == 75
+
+    def test_above_ceiling_clamped_to_100(self) -> None:
+        assert _normalise_views(CONSTANTS.PLATFORM_VIEWS_GLOBAL * 2, CONSTANTS) == 100
+
+    def test_1m_views_returns_low_score(self) -> None:
+        score = _normalise_views(1_000_000, CONSTANTS)
+        assert 0 < score < 50
 
 
 # ---------------------------------------------------------------------------
@@ -25,36 +62,60 @@ class TestClassifyPopularity:
     """Tests for _classify_popularity — uses CONSTANTS directly so tier boundaries
     come from config, not magic numbers in tests."""
 
-    def test_emerging_tier(self) -> None:
-        result = _classify_popularity(5_000, 50_000, CONSTANTS)
+    def test_emerging_tier_lastfm_only(self) -> None:
+        result = _classify_popularity(5_000, 50_000, constants=CONSTANTS)
         assert result.tier == "Emerging"
         assert result.listeners == 5_000
         assert result.playcount == 50_000
         assert result.sync_cost_low  == CONSTANTS.SYNC_COST_EMERGING[0]
         assert result.sync_cost_high == CONSTANTS.SYNC_COST_EMERGING[1]
 
-    def test_regional_tier_at_boundary(self) -> None:
-        result = _classify_popularity(CONSTANTS.POPULARITY_REGIONAL_MIN, 0, CONSTANTS)
-        assert result.tier == "Regional"
-
-    def test_mainstream_tier_at_boundary(self) -> None:
-        result = _classify_popularity(CONSTANTS.POPULARITY_MAINSTREAM_MIN, 0, CONSTANTS)
-        assert result.tier == "Mainstream"
-
-    def test_global_tier_at_boundary(self) -> None:
-        result = _classify_popularity(CONSTANTS.POPULARITY_GLOBAL_MIN, 0, CONSTANTS)
-        assert result.tier == "Global"
-        assert result.sync_cost_low  == CONSTANTS.SYNC_COST_GLOBAL[0]
-        assert result.sync_cost_high == CONSTANTS.SYNC_COST_GLOBAL[1]
-
     def test_zero_listeners(self) -> None:
-        result = _classify_popularity(0, 0, CONSTANTS)
+        result = _classify_popularity(0, 0, constants=CONSTANTS)
         assert result.tier == "Emerging"
-        assert result.listeners == 0
+        assert result.popularity_score == 0
 
-    def test_just_below_regional(self) -> None:
-        result = _classify_popularity(CONSTANTS.POPULARITY_REGIONAL_MIN - 1, 0, CONSTANTS)
+    def test_spotify_score_elevates_tier(self) -> None:
+        # 10 Last.fm listeners alone → Emerging, but Spotify score of 80 → Global
+        result = _classify_popularity(10, 0, spotify_score=80, constants=CONSTANTS)
+        assert result.tier == "Global"
+        assert result.spotify_score == 80
+
+    def test_high_view_count_elevates_tier(self) -> None:
+        # 1 Last.fm listener, but 300M YouTube views → should be Mainstream or Global
+        result = _classify_popularity(
+            1, 0,
+            platform_metrics={"view_count": 300_000_000},
+            constants=CONSTANTS,
+        )
+        assert result.tier in ("Mainstream", "Global")
+
+    def test_bad_lastfm_overridden_by_youtube_views(self) -> None:
+        # Simulates the "24K Magic shows as Emerging" bug:
+        # 13 Last.fm listeners + 500M YouTube views → should NOT be Emerging
+        result = _classify_popularity(
+            13, 0,
+            platform_metrics={"view_count": 500_000_000},
+            constants=CONSTANTS,
+        )
+        assert result.tier != "Emerging"
+
+    def test_max_of_signals_taken(self) -> None:
+        # Spotify score 60 > last.fm score → popularity_score should equal 60
+        result = _classify_popularity(
+            100, 0, spotify_score=60, constants=CONSTANTS
+        )
+        assert result.popularity_score == 60
+
+    def test_platform_metrics_stored(self) -> None:
+        metrics = {"view_count": 1_000_000, "like_count": 50_000}
+        result = _classify_popularity(0, 0, platform_metrics=metrics, constants=CONSTANTS)
+        assert result.platform_metrics == metrics
+
+    def test_no_signals_returns_emerging(self) -> None:
+        result = _classify_popularity(0, 0, constants=CONSTANTS)
         assert result.tier == "Emerging"
+        assert result.popularity_score == 0
 
 
 # ---------------------------------------------------------------------------

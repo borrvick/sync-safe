@@ -634,7 +634,15 @@ def render_loading(source: Any) -> None:
             base_links    = Legal().get_links(title, artist)
             isrc, pro     = ProLookup().lookup(title, artist)
             legal         = base_links.model_copy(update={"isrc": isrc, "pro_match": pro})
-            popularity    = Discovery().get_track_popularity(title, artist)
+            popularity    = Discovery().get_track_popularity(
+                title, artist,
+                platform_metrics={
+                    k: v for k, v in (audio.metadata or {}).items()
+                    if k in ("view_count", "like_count", "share_count",
+                             "repost_count", "channel_follower_count")
+                    and isinstance(v, int)
+                },
+            )
             audio_quality = AudioQualityAnalyzer().analyze(audio)
     except StepTimeoutError as exc:
         st.toast("⏱ Legal/loudness step timed out — PRO links and loudness data unavailable.", icon="⚠️")

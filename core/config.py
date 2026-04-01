@@ -191,12 +191,29 @@ class SystemConstants:
     DIALOGUE_READY_HIGH: float = 0.70   # ≥ this → "Dialogue-Ready"
     DIALOGUE_READY_LOW: float  = 0.40   # < this → "Dialogue-Heavy"; between → "Mixed"
 
-    # ---- Track Popularity (Last.fm listener counts) ---------------------------
-    # Tier boundaries based on Last.fm unique listener counts.
+    # ---- Track Popularity (blended 0–100 score) --------------------------------
+    # Tier boundaries applied to the normalised popularity_score (0–100).
+    # Score is derived from whichever signals are available:
+    #   Last.fm listeners, Last.fm playcount, YouTube/platform view count,
+    #   YouTube like count, Spotify popularity (0–100 native).
+    # Each signal is normalised independently then the max is taken so a strong
+    # signal on any single platform cannot be drowned out by weak others.
     # Tiers: Emerging < Regional < Mainstream < Global
-    POPULARITY_REGIONAL_MIN: int    = 10_000
-    POPULARITY_MAINSTREAM_MIN: int  = 100_000
-    POPULARITY_GLOBAL_MIN: int      = 1_000_000
+    POPULARITY_REGIONAL_MIN: int    = 25    # normalised score ≥ 25
+    POPULARITY_MAINSTREAM_MIN: int  = 50    # normalised score ≥ 50
+    POPULARITY_GLOBAL_MIN: int      = 75    # normalised score ≥ 75
+
+    # Last.fm listener count ceilings for per-signal normalisation.
+    # Raw listener counts above the ceiling are clamped to 100.
+    LASTFM_LISTENERS_REGIONAL: int    = 10_000
+    LASTFM_LISTENERS_MAINSTREAM: int  = 100_000
+    LASTFM_LISTENERS_GLOBAL: int      = 1_000_000
+
+    # YouTube / platform view count ceilings for normalisation.
+    # Calibrated against known mainstream (100M+ views) and emerging (<1M) tracks.
+    PLATFORM_VIEWS_REGIONAL: int    = 1_000_000     # 1M views → score ~25
+    PLATFORM_VIEWS_MAINSTREAM: int  = 50_000_000    # 50M views → score ~50
+    PLATFORM_VIEWS_GLOBAL: int      = 500_000_000   # 500M views → score ~75+
 
     # Estimated sync fee ranges (USD) per popularity tier — shown as guidance only.
     # Source: industry averages 2024-2026; highly variable by usage and territory.
@@ -712,6 +729,15 @@ class Settings(BaseSettings):
         default="",
         description="Last.fm API key for similar-track discovery. "
                     "Get one at https://www.last.fm/api/account/create",
+    )
+    spotify_client_id: str = Field(
+        default="",
+        description="Spotify Web API client ID for popularity score lookup. "
+                    "Create an app at https://developer.spotify.com/dashboard",
+    )
+    spotify_client_secret: str = Field(
+        default="",
+        description="Spotify Web API client secret (pairs with spotify_client_id).",
     )
     hf_token: Optional[str] = Field(
         default=None,
