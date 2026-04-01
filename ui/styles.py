@@ -662,6 +662,23 @@ html body div[data-testid="stButton"]:has(button[data-nav-btn="nav"]):hover {
   box-shadow: none !important;
 }
 
+/* Nav CTA — "Launch Portal →" primary button, constrained to nav height */
+html body button[data-nav-btn="nav-cta"] {
+  padding: 0.35rem 0.9rem !important;
+  font-size: .82rem !important;
+  font-weight: 600 !important;
+  font-family: 'Figtree', sans-serif !important;
+  white-space: nowrap !important;
+  border-radius: 6px !important;
+  line-height: 1.4 !important;
+  min-height: unset !important;
+  height: auto !important;
+}
+html body button[data-nav-btn="nav-cta"]:focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 3px !important;
+}
+
 /* Footer link buttons — block-level plain text */
 html body button[data-nav-btn="footer"] {
   all: unset !important;
