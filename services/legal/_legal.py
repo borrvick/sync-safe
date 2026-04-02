@@ -16,9 +16,9 @@ Design notes:
 """
 from __future__ import annotations
 
-from urllib.parse import urlencode
-
 from core.models import LegalLinks
+
+from ._pure import _build_url
 
 
 # ---------------------------------------------------------------------------
@@ -85,10 +85,3 @@ class Legal:
         )
 
 
-# ---------------------------------------------------------------------------
-# Module-level pure function — independently testable
-# ---------------------------------------------------------------------------
-
-def _build_url(base_url: str, params: dict) -> str:
-    """Append URL-encoded query parameters to a base URL string."""
-    return f"{base_url}?{urlencode(params)}"
