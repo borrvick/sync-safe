@@ -46,6 +46,7 @@ from core.models import (
     MetadataValidationResult,
     StructureResult,
     SyncCut,
+    ThemeMoodResult,
     TrackCandidate,
     TranscriptSegment,
 )
@@ -259,6 +260,33 @@ class AuthorshipAnalyzer(Protocol):
 
         Raises:
             ModelInferenceError: on RoBERTa load or inference failure.
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Theme & Mood analysis
+# ---------------------------------------------------------------------------
+
+@runtime_checkable
+class ThemeMoodAnalyzer(Protocol):
+    """
+    Classify lyric themes and overall mood from a transcript.
+
+    Implementations: services/content/_theme.py (keyword taxonomy + Groq)
+    Swap candidates:  zero-shot NLI classifier, OpenAI chat completion
+    """
+
+    def analyze(self, transcript: list[TranscriptSegment]) -> ThemeMoodResult:
+        """
+        Args:
+            transcript: Whisper/LRCLib segments (text fields are the input).
+
+        Returns:
+            ThemeMoodResult with themes, mood, confidence, and raw keywords.
+
+        Raises:
+            ModelInferenceError: on Groq API failure (keyword path never raises).
         """
         ...
 
