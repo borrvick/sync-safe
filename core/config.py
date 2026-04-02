@@ -169,6 +169,7 @@ class SystemConstants:
     STEP_TIMEOUT_FORENSICS_S: int     = 60
     STEP_TIMEOUT_COMPLIANCE_S: int    = 60
     STEP_TIMEOUT_AUTHORSHIP_S: int    = 30
+    STEP_TIMEOUT_THEME_MOOD_S: int    = 15
     STEP_TIMEOUT_DISCOVERY_S: int     = 30
     STEP_TIMEOUT_LEGAL_S: int         = 30
 

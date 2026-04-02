@@ -51,6 +51,9 @@ _STEPS: list[tuple[str, str, int, str]] = [
     ("authorship",    "Authorship Check",     8,
      "Scores lyrics on four signals — burstiness, vocabulary diversity, rhyme density, repetition — "
      "plus a RoBERTa classifier. Verdicts: Likely Human, Uncertain, or Likely AI."),
+    ("theme_mood",    "Theme & Mood",         8,
+     "Classifies lyric themes (e.g. Love & Romance, Empowerment) and overall mood (e.g. Uplifting, "
+     "Melancholic) via keyword taxonomy. Optionally enriched with Groq LLM when an API key is set."),
     ("discovery",     "Track Discovery",     10,
      "Queries Last.fm's similarity graph for comparable tracks, then resolves each result to a live "
      "YouTube preview URL via yt-dlp. Fully stateless — no database involved."),
@@ -70,6 +73,7 @@ _STEP_TIMEOUT_S: dict[str, int] = {
     "forensics":     CONSTANTS.STEP_TIMEOUT_FORENSICS_S,
     "compliance":    CONSTANTS.STEP_TIMEOUT_COMPLIANCE_S,
     "authorship":    CONSTANTS.STEP_TIMEOUT_AUTHORSHIP_S,
+    "theme_mood":    CONSTANTS.STEP_TIMEOUT_THEME_MOOD_S,
     "discovery":     CONSTANTS.STEP_TIMEOUT_DISCOVERY_S,
     "legal":         CONSTANTS.STEP_TIMEOUT_LEGAL_S,
 }
@@ -599,7 +603,26 @@ def render_loading(source: Any) -> None:
     else:
         _advance("authorship", t0)
 
-    # ── Step 7: Track discovery ───────────────────────────────────────────
+    # ── Step 7: Theme & Mood ──────────────────────────────────────────────
+    _tick("Theme & Mood", "theme_mood")
+    t0 = time.time()
+    theme_mood = None
+    log.step_start("theme_mood")
+    try:
+        with step_timeout(_STEP_TIMEOUT_S["theme_mood"], "theme_mood"):
+            from services.content import ThemeMoodAnalyzer
+            theme_mood = ThemeMoodAnalyzer().analyze(transcript)
+    except StepTimeoutError as exc:
+        st.toast("⏱ Theme & Mood check timed out — skipped.", icon="⚠️")
+        _advance("theme_mood", t0, error=str(exc))
+    except SyncSafeError as exc:
+        _advance("theme_mood", t0, error=str(exc))
+    except Exception as exc:  # noqa: BLE001 — UI boundary
+        _advance("theme_mood", t0, error=str(exc))
+    else:
+        _advance("theme_mood", t0)
+
+    # ── Step 8: Track discovery ───────────────────────────────────────────
     _tick("Track Discovery", "discovery")
     t0 = time.time()
     similar = []
@@ -671,6 +694,7 @@ def render_loading(source: Any) -> None:
             "transcript":          transcript,
             "compliance":          compliance,
             "authorship":          authorship,
+            "theme_mood":          theme_mood,
             "similar_tracks":      similar,
             "legal":               legal,
             "popularity":          popularity,
