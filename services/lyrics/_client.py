@@ -1,5 +1,5 @@
 """
-services/lyrics_provider.py
+services/lyrics/_client.py
 LRCLib lyrics lookup — implements LyricsProvider protocol.
 
 Tries to fetch synced (LRC-format) lyrics from the free, open LRCLib API
@@ -10,17 +10,12 @@ Design notes:
 - Pure HTTP — no GPU, no audio processing, no disk writes.
 - All network errors degrade to None (logged as step_error); the caller is
   responsible for the fallback strategy.
-- _parse_lrc and _best_result are pure module-level functions for independent
+- _parse_lrc and _best_result are pure functions in _pure.py for independent
   testability.
-- LRC timestamp format: [MM:SS.xx] or [MM:SS.xxx] followed by lyric text.
-  Lines with no text (instrumental markers) are skipped.
-- Segment end times are inferred from the start of the following line;
-  the final segment gets a fixed 5-second tail.
 """
 from __future__ import annotations
 
 import json
-import re
 import time
 import urllib.parse
 import urllib.request
@@ -30,13 +25,10 @@ from core.config import get_settings
 from core.logging import PipelineLogger
 from core.models import TranscriptSegment
 
+from ._pure import _best_result, _parse_lrc
 
 _LRCLIB_SEARCH_URL = "https://lrclib.net/api/search"
-_REQUEST_TIMEOUT_S = 8           # seconds before giving up on LRCLib
-_FINAL_SEGMENT_TAIL_S = 5.0      # seconds added to the last segment's end time
-_LRC_RE = re.compile(
-    r"^\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)"
-)
+_REQUEST_TIMEOUT_S = 8
 
 
 class LRCLibClient:
@@ -123,7 +115,7 @@ class LRCLibClient:
         Call GET /api/search?q=artist+title and return the decoded JSON list.
 
         Raises:
-            OSError:       on network failure or non-200 status.
+            OSError:             on network failure or non-200 status.
             json.JSONDecodeError: on malformed response body.
         """
         query = urllib.parse.urlencode({"q": f"{artist} {title}"})
@@ -136,81 +128,3 @@ class LRCLibClient:
             if resp.status != 200:
                 raise OSError(f"LRCLib returned HTTP {resp.status}")
             return json.loads(resp.read().decode("utf-8"))
-
-
-# ---------------------------------------------------------------------------
-# Module-level pure functions — independently testable
-# ---------------------------------------------------------------------------
-
-def _best_result(results: list[dict]) -> dict | None:
-    """
-    Pick the best LRCLib result from a search response.
-
-    Preference: first entry that has syncedLyrics (LRC format with timestamps).
-    Falls back to None if no synced result exists — plain lyrics without
-    timestamps are not useful for our compliance audit pipeline.
-
-    Pure function — no I/O, no side effects.
-    """
-    if not results:
-        return None
-    for entry in results:
-        if entry.get("syncedLyrics"):
-            return entry
-    return None
-
-
-def _parse_lrc(lrc_text: str) -> list[TranscriptSegment]:
-    """
-    Parse LRC-format synced lyrics into TranscriptSegment objects.
-
-    LRC format example:
-        [00:12.45]First line of lyrics
-        [00:17.32]Second line of lyrics
-        [01:05.00]
-
-    Rules:
-    - Lines that don't match the timestamp pattern are skipped.
-    - Lines with no text after the timestamp (e.g. instrumental markers)
-      are skipped.
-    - Segment end is inferred from the start of the next non-empty line.
-    - The final segment end = its start + _FINAL_SEGMENT_TAIL_S.
-
-    Pure function — no I/O, no side effects.
-
-    Args:
-        lrc_text: Raw LRC string from LRCLib syncedLyrics field.
-
-    Returns:
-        Ordered list of TranscriptSegment objects (may be empty).
-    """
-    timed: list[tuple[float, str]] = []
-
-    for raw_line in lrc_text.splitlines():
-        match = _LRC_RE.match(raw_line.strip())
-        if not match:
-            continue
-        minutes = int(match.group(1))
-        seconds = int(match.group(2))
-        frac_str = match.group(3)
-        # Normalise 2- or 3-digit fractional seconds
-        frac = int(frac_str) / (1000 if len(frac_str) == 3 else 100)
-        start = minutes * 60.0 + seconds + frac
-        text = match.group(4).strip()
-        if text:
-            timed.append((round(start, 2), text))
-
-    segments: list[TranscriptSegment] = []
-    for i, (start, text) in enumerate(timed):
-        end = (
-            timed[i + 1][0]
-            if i + 1 < len(timed)
-            else start + _FINAL_SEGMENT_TAIL_S
-        )
-        segments.append(TranscriptSegment(
-            start=start,
-            end=round(end, 2),
-            text=text,
-        ))
-
-    return segments
