@@ -36,6 +36,8 @@ from core.config import CONSTANTS, get_settings
 from core.exceptions import AudioSourceError, ConfigurationError
 from core.models import PopularityResult, TrackCandidate
 
+from ._pure import _normalise_lastfm, _normalise_views, _parse_track_list
+
 
 # ---------------------------------------------------------------------------
 # Last.fm API base URL (module-level constant — not a business threshold)
@@ -297,26 +299,6 @@ def _fetch_top_track(artist: str, api_key: str) -> Optional[str]:
     return None
 
 
-def _parse_track_list(tracks: list) -> list[tuple[str, str]]:
-    """
-    Extract (artist, title) pairs from a Last.fm track list payload.
-
-    Pure function — no I/O.
-    """
-    results: list[tuple[str, str]] = []
-    for t in tracks[:CONSTANTS.MAX_SIMILAR_TRACKS]:
-        title       = t.get("name", "")
-        artist_data = t.get("artist", {})
-        artist      = (
-            artist_data.get("name", "")
-            if isinstance(artist_data, dict)
-            else str(artist_data)
-        )
-        if title and artist:
-            results.append((artist, title))
-    return results
-
-
 # ---------------------------------------------------------------------------
 # YouTube URL resolution — pure function, independently testable
 # ---------------------------------------------------------------------------
@@ -351,68 +333,6 @@ def _resolve_youtube_url(artist: str, title: str) -> Optional[str]:
         pass
 
     return None
-
-
-def _piecewise_score(value: int, low: int, mid: int, high: int) -> int:
-    """
-    Map a raw count to a 0–100 score using three tier-boundary breakpoints.
-
-    Segments:
-      0        → low:  scores 0–25  (Emerging range)
-      low      → mid:  scores 25–50 (Regional range)
-      mid      → high: scores 50–75 (Mainstream range)
-      high     → ∞:    scores 75–100, clamped at 100 (Global range)
-
-    Breakpoints correspond directly to the tier boundaries in SystemConstants,
-    so each tier segment occupies exactly 25 points of score space.
-
-    Pure function — no I/O.
-    """
-    if value <= 0:
-        return 0
-    if value >= high:
-        # Linear continuation above high ceiling, clamped at 100
-        extra = min(value - high, high) / high * 25
-        return min(100, 75 + int(extra))
-    if value >= mid:
-        return 50 + int((value - mid) / (high - mid) * 25)
-    if value >= low:
-        return 25 + int((value - low) / (mid - low) * 25)
-    return int(value / low * 25)
-
-
-def _normalise_lastfm(listeners: int, constants: object) -> int:
-    """
-    Normalise a Last.fm listener count to a 0–100 score.
-
-    Breakpoints: LASTFM_LISTENERS_REGIONAL / _MAINSTREAM / _GLOBAL → 25/50/75.
-
-    Pure function — no I/O.
-    """
-    cfg = constants
-    return _piecewise_score(
-        listeners,
-        cfg.LASTFM_LISTENERS_REGIONAL,
-        cfg.LASTFM_LISTENERS_MAINSTREAM,
-        cfg.LASTFM_LISTENERS_GLOBAL,
-    )
-
-
-def _normalise_views(view_count: int, constants: object) -> int:
-    """
-    Normalise a platform view count to a 0–100 score.
-
-    Breakpoints: PLATFORM_VIEWS_REGIONAL / _MAINSTREAM / _GLOBAL → 25/50/75.
-
-    Pure function — no I/O.
-    """
-    cfg = constants
-    return _piecewise_score(
-        view_count,
-        cfg.PLATFORM_VIEWS_REGIONAL,
-        cfg.PLATFORM_VIEWS_MAINSTREAM,
-        cfg.PLATFORM_VIEWS_GLOBAL,
-    )
 
 
 def _clean_title_for_lastfm(title: str) -> str:
