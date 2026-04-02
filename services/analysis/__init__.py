@@ -1,7 +1,5 @@
-from ._orchestrator import (
-    Analysis,
-    _merge_consecutive_sections,
-)
+from ._orchestrator import Analysis
+from ._pure import _merge_consecutive_sections
 
 __all__ = [
     "Analysis",
