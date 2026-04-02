@@ -1,25 +1,6 @@
 """
-services/tag_injector.py
-Write Sync-Safe audit results into audio file tags.
-
-Embeds compliance metadata as custom tags so a file carries its audit trail
-when shared with supervisors, music supervisors, or licensing portals.
-
-Tag schema version: 1.0
-
-Supported formats and tag frames:
-- MP3 / ID3:  TXXX custom frames + COMM comment
-- FLAC / OGG: Vorbis comment tags (same key names, lowercase)
-- MP4 / M4A:  freeform atoms under "----:SYNC_SAFE:..."
-- Unknown:    bytes returned unchanged; warning logged
-
-Design:
-- All I/O is in a tempfile.TemporaryDirectory with try/finally (no permanent
-  disk writes beyond the temp directory lifetime).
-- The injector never modifies existing title/artist tags — it only appends
-  SYNC_SAFE_* custom fields.
-- Returns the original bytes on any mutagen failure so the download
-  still works even if tagging is unsupported.
+services/tagging/_orchestrator.py
+TagInjector class — detects format and dispatches to _formats.py injectors.
 """
 from __future__ import annotations
 
@@ -31,28 +12,20 @@ from typing import Optional
 
 from core.models import AnalysisResult
 
+from ._formats import _inject_id3, _inject_mp4, _inject_vorbis
+
 _log = logging.getLogger(__name__)
 
-# Tag schema version — bump when the set of injected keys changes.
 _TAG_SCHEMA_VERSION: str = "1.0"
-
-# Verdicts that indicate a failing audit for the SYNC_SAFE_VERDICT tag.
 _FAIL_GRADES:    frozenset[str] = frozenset({"D", "F"})
 _AI_VERDICTS:    frozenset[str] = frozenset({"AI", "Likely AI"})
 
-
-# ---------------------------------------------------------------------------
-# Pure helpers
-# ---------------------------------------------------------------------------
 
 def _build_tag_values(result: AnalysisResult) -> dict[str, str]:
     """
     Derive the SYNC_SAFE_* tag dict from an AnalysisResult.
 
     Pure function — no I/O.
-
-    Returns:
-        Mapping of tag key (uppercase) → value string.
     """
     grade   = (result.compliance.grade or "") if result.compliance else ""
     verdict = result.forensics.verdict if result.forensics else ""
@@ -62,7 +35,6 @@ def _build_tag_values(result: AnalysisResult) -> dict[str, str]:
         {f.issue_type for f in result.compliance.flags}
     ) if result.compliance else []
 
-    # Three-level sync verdict: PASS / CAUTION / FAIL
     if grade in _FAIL_GRADES or (result.compliance and result.compliance.hard_flags) or verdict in _AI_VERDICTS:
         sync_verdict = "FAIL"
     elif grade in ("A", "B") and verdict not in _AI_VERDICTS:
@@ -87,52 +59,6 @@ def _build_tag_values(result: AnalysisResult) -> dict[str, str]:
     }
 
 
-# ---------------------------------------------------------------------------
-# Format-specific writers
-# ---------------------------------------------------------------------------
-
-def _inject_id3(path: Path, tags: dict[str, str]) -> None:
-    """Inject TXXX custom frames and a COMM comment into an ID3/MP3 file."""
-    from mutagen.id3 import COMM, ID3, TXXX, error as ID3Error  # type: ignore[import]
-
-    try:
-        id3 = ID3(str(path))
-    except ID3Error:
-        id3 = ID3()
-
-    for key, value in tags.items():
-        id3.add(TXXX(encoding=3, desc=key, text=[value]))
-
-    summary = tags.get("SYNC_SAFE_SUMMARY", "")
-    if summary:
-        id3.add(COMM(encoding=3, lang="eng", desc="Sync-Safe Report", text=[summary]))
-
-    id3.save(str(path), v2_version=3)
-
-
-def _inject_vorbis(path: Path, tags: dict[str, str]) -> None:
-    """Inject Vorbis comment tags into a FLAC or OGG file."""
-    from mutagen import File as MutagenFile  # type: ignore[import]
-
-    audio_file = MutagenFile(str(path))
-    if audio_file is None:
-        raise ValueError(f"mutagen could not open {path.name} for tag writing")
-    for key, value in tags.items():
-        audio_file[key.lower()] = [value]  # Vorbis keys are lowercase
-    audio_file.save()
-
-
-def _inject_mp4(path: Path, tags: dict[str, str]) -> None:
-    """Inject freeform atoms into an MP4/M4A file."""
-    from mutagen.mp4 import MP4, MP4FreeForm  # type: ignore[import]
-
-    audio_file = MP4(str(path))
-    for key, value in tags.items():
-        atom_key = f"----:SYNC_SAFE:{key}"
-        audio_file[atom_key] = [MP4FreeForm(value.encode("utf-8"))]
-    audio_file.save()
-
-
 def _detect_format(raw: bytes) -> Optional[str]:
     """
     Detect audio container format from magic bytes.
@@ -150,10 +76,6 @@ def _detect_format(raw: bytes) -> Optional[str]:
         return "mp4"
     return None
 
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 class TagInjector:
     """
