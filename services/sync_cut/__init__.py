@@ -1,5 +1,5 @@
-from ._orchestrator import (
-    SyncCutAnalyzer,
+from ._orchestrator import SyncCutAnalyzer
+from ._pure import (
     _build_note,
     _contains_chorus,
     _intro_end,
