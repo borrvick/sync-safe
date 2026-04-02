@@ -1286,6 +1286,7 @@ def _render_lyric_section(result: AnalysisResult) -> None:
     for f in flags:
         flags_by_ts.setdefault(f.timestamp_s, []).append(f)
 
+    _render_theme_mood(result)
     _render_authorship_banner(authorship)
 
     col_lyr, col_audit = st.columns([55, 45], gap="large")
@@ -1298,6 +1299,56 @@ def _render_lyric_section(result: AnalysisResult) -> None:
 # ---------------------------------------------------------------------------
 # Lyric section sub-renderers (extracted to keep each function under 40 lines)
 # ---------------------------------------------------------------------------
+
+def _render_theme_mood(result: AnalysisResult) -> None:
+    """Render the Theme & Mood card. Silently skips when theme_mood is None."""
+    tm = result.theme_mood
+    if tm is None:
+        return
+
+    # Mood badge colour: use CSS variables from the existing theme palette
+    mood_colors: dict[str, str] = {
+        "Uplifting":  "var(--ok)",
+        "Energetic":  "var(--ok)",
+        "Romantic":   "#F5A623",
+        "Melancholic": "var(--muted)",
+        "Nostalgic":  "var(--muted)",
+        "Chill":      "var(--accent)",
+        "Dark":       "var(--danger)",
+        "Intense":    "var(--danger)",
+    }
+    mood_color = mood_colors.get(tm.mood, "var(--accent)")
+    enriched_badge = (
+        ' <span title="Enriched by Groq LLM" style="'
+        'font-size:0.65rem;background:var(--accent);color:#000;'
+        'border-radius:3px;padding:1px 5px;margin-left:6px;">✦ enriched</span>'
+        if tm.groq_enriched else ""
+    )
+
+    # Theme chips
+    theme_chips = "".join(
+        f'<span style="display:inline-block;margin:2px 4px 2px 0;padding:3px 10px;'
+        f'border-radius:12px;font-size:0.78rem;background:var(--surface-2);'
+        f'color:var(--text);border:1px solid var(--border-hr);">'
+        f'{html_mod.escape(t)}</span>'
+        for t in tm.themes
+    ) or '<span style="color:var(--muted);font-size:0.82rem;">—</span>'
+
+    st.markdown(
+        f'<div style="margin-bottom:18px;">'
+        f'<div style="font-size:0.72rem;color:var(--dim);text-transform:uppercase;'
+        f'letter-spacing:.06em;margin-bottom:6px;">Theme &amp; Mood</div>'
+        f'<div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;">'
+        f'<span style="font-size:0.95rem;font-weight:600;color:{mood_color};">'
+        f'{html_mod.escape(tm.mood)}</span>'
+        f'<span style="color:var(--dim);font-size:0.8rem;">{tm.confidence:.0%} confidence</span>'
+        f'{enriched_badge}'
+        f'</div>'
+        f'<div style="margin-top:6px;">{theme_chips}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
 
 def _render_authorship_banner(authorship: Optional["AuthorshipResult"]) -> None:
     if not authorship:
