@@ -17,15 +17,15 @@ from core.models import ComplianceFlag
 _CLR_BRAND: str    = "#F5A623"
 _CLR_EXPLICIT: str = "#FF3060"
 _CLR_VIOLENCE: str = "#FF6B35"
-_CLR_LOCATION: str = "#4FC3F7"
+_CLR_LOCATION: str = "#60A5FA"   # blue — geographic references, not inherently harmful
 _CLR_NEEDS_REVIEW: str = "#C8E86A"
 
 ISSUE_META: dict[str, dict] = {
     "BRAND":    {"icon": "🏢", "color": _CLR_BRAND},
     "EXPLICIT": {"icon": "🔞", "color": _CLR_EXPLICIT},
+    "LOCATION": {"icon": "📍", "color": _CLR_LOCATION},
     "VIOLENCE": {"icon": "⚠️",  "color": _CLR_VIOLENCE},
     "DRUGS":    {"icon": "💊", "color": _CLR_EXPLICIT},
-    "LOCATION": {"icon": "📍", "color": _CLR_LOCATION},
 }
 
 # ── Authorship verdict → display color ───────────────────────────────────────

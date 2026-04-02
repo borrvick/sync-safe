@@ -141,9 +141,10 @@ class PipelineLogger:
         """Log successful completion of a pipeline step."""
         self._write(event="step_end", step=step, duration_s=round(duration_s, 2))
 
-    def step_error(self, step: str, error: str) -> None:
+    def step_error(self, step: str, error: str, context: dict | None = None) -> None:
         """Log a non-fatal step failure (step degraded to None)."""
-        self._write(event="step_error", step=step, error=error)
+        self._write(event="step_error", step=step, error=error,
+                    **({"context": context} if context else {}))
 
     def info(self, event: str, **fields: Any) -> None:
         """Log a custom informational event with arbitrary structured fields."""
