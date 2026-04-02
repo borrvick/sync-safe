@@ -1,5 +1,5 @@
-from ._orchestrator import (
-    Compliance,
+from ._orchestrator import Compliance
+from ._pure import (
     _NER_ISSUE_MAP,
     _NER_RECOMMENDATIONS,
     _build_windows,
