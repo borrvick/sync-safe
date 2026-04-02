@@ -22,7 +22,7 @@ from core.models import (
     StingResult,
     StructureResult,
 )
-from services.platform_export import (
+from services.export import (
     PLATFORM_SCHEMAS,
     _extract_track_data,
     _to_platform_row,

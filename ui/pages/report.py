@@ -33,8 +33,8 @@ from core.models import (
     StructureResult,
     TranscriptSegment,
 )
-from services.platform_export import PLATFORM_SCHEMAS, to_platform_csv
-from services.tag_injector import TagInjector
+from services.export import PLATFORM_SCHEMAS, to_platform_csv
+from services.tagging import TagInjector
 from ui.components import ISSUE_META, authorship_color, eq_bars, fmt_ts, issue_pill
 
 

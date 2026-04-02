@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from services.pro_lookup import _infer_pro, _parse_first_recording
+from services.legal import _infer_pro, _parse_first_recording
 
 
 # ---------------------------------------------------------------------------

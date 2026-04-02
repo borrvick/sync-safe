@@ -170,8 +170,8 @@ class TestResolveYoutubeUrl:
         mock_result = MagicMock()
         mock_result.stdout = "https://www.youtube.com/watch?v=dQw4w9WgXcQ\n"
 
-        with patch("services.discovery.subprocess.run", return_value=mock_result), \
-             patch("services.discovery._find_binary", return_value="/usr/bin/yt-dlp"):
+        with patch("services.discovery._orchestrator.subprocess.run", return_value=mock_result), \
+             patch("services.discovery._orchestrator._find_binary", return_value="/usr/bin/yt-dlp"):
             url = _resolve_youtube_url("Rick Astley", "Never Gonna Give You Up")
 
         assert url == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
@@ -180,25 +180,25 @@ class TestResolveYoutubeUrl:
         mock_result = MagicMock()
         mock_result.stdout = ""
 
-        with patch("services.discovery.subprocess.run", return_value=mock_result), \
-             patch("services.discovery._find_binary", return_value="/usr/bin/yt-dlp"):
+        with patch("services.discovery._orchestrator.subprocess.run", return_value=mock_result), \
+             patch("services.discovery._orchestrator._find_binary", return_value="/usr/bin/yt-dlp"):
             assert _resolve_youtube_url("Unknown", "Track") is None
 
     def test_returns_none_on_non_https_output(self):
         mock_result = MagicMock()
         mock_result.stdout = "not-a-url"
 
-        with patch("services.discovery.subprocess.run", return_value=mock_result), \
-             patch("services.discovery._find_binary", return_value="/usr/bin/yt-dlp"):
+        with patch("services.discovery._orchestrator.subprocess.run", return_value=mock_result), \
+             patch("services.discovery._orchestrator._find_binary", return_value="/usr/bin/yt-dlp"):
             assert _resolve_youtube_url("Artist", "Track") is None
 
     def test_returns_none_on_subprocess_exception(self):
-        with patch("services.discovery.subprocess.run", side_effect=FileNotFoundError), \
-             patch("services.discovery._find_binary", return_value="/usr/bin/yt-dlp"):
+        with patch("services.discovery._orchestrator.subprocess.run", side_effect=FileNotFoundError), \
+             patch("services.discovery._orchestrator._find_binary", return_value="/usr/bin/yt-dlp"):
             assert _resolve_youtube_url("Artist", "Track") is None
 
     def test_returns_none_when_binary_not_found(self):
-        with patch("services.discovery._find_binary", return_value=None):
+        with patch("services.discovery._orchestrator._find_binary", return_value=None):
             assert _resolve_youtube_url("Artist", "Track") is None
 
 
@@ -228,10 +228,10 @@ class TestDiscovery:
         mock_resp.raise_for_status.return_value = None
 
         with patch.object(get_settings(), "lastfm_api_key", "fakekey"), \
-             patch("services.discovery.get_settings") as mock_settings, \
-             patch("services.discovery.requests.get", return_value=mock_resp), \
-             patch("services.discovery.subprocess.run", side_effect=self._mock_yt_run), \
-             patch("services.discovery._find_binary", return_value="/usr/bin/yt-dlp"):
+             patch("services.discovery._orchestrator.get_settings") as mock_settings, \
+             patch("services.discovery._orchestrator.requests.get", return_value=mock_resp), \
+             patch("services.discovery._orchestrator.subprocess.run", side_effect=self._mock_yt_run), \
+             patch("services.discovery._orchestrator._find_binary", return_value="/usr/bin/yt-dlp"):
 
             mock_settings.return_value.lastfm_api_key = "fakekey"
             svc     = Discovery()
@@ -243,14 +243,14 @@ class TestDiscovery:
         assert results[0].youtube_url == "https://www.youtube.com/watch?v=fake123"
 
     def test_raises_configuration_error_without_api_key(self):
-        with patch("services.discovery.get_settings") as mock_settings:
+        with patch("services.discovery._orchestrator.get_settings") as mock_settings:
             mock_settings.return_value.lastfm_api_key = ""
             svc = Discovery()
             with pytest.raises(ConfigurationError):
                 svc.find_similar("Any Title", "Any Artist")
 
     def test_returns_empty_for_empty_inputs(self):
-        with patch("services.discovery.get_settings") as mock_settings:
+        with patch("services.discovery._orchestrator.get_settings") as mock_settings:
             mock_settings.return_value.lastfm_api_key = "fakekey"
             svc = Discovery()
             assert svc.find_similar("", "") == []
@@ -262,10 +262,10 @@ class TestDiscovery:
         mock_yt = MagicMock()
         mock_yt.stdout = ""
 
-        with patch("services.discovery.get_settings") as mock_settings, \
-             patch("services.discovery.requests.get", return_value=mock_resp), \
-             patch("services.discovery.subprocess.run", return_value=mock_yt), \
-             patch("services.discovery._find_binary", return_value="/usr/bin/yt-dlp"):
+        with patch("services.discovery._orchestrator.get_settings") as mock_settings, \
+             patch("services.discovery._orchestrator.requests.get", return_value=mock_resp), \
+             patch("services.discovery._orchestrator.subprocess.run", return_value=mock_yt), \
+             patch("services.discovery._orchestrator._find_binary", return_value="/usr/bin/yt-dlp"):
 
             mock_settings.return_value.lastfm_api_key = "fakekey"
             svc     = Discovery()
@@ -387,8 +387,8 @@ class TestFuzzyLastfmRetry:
             "track": {"listeners": "1500000", "playcount": "10000000"}
         }
 
-        with patch("services.discovery.get_settings", return_value=self._make_settings()), \
-             patch("services.discovery.requests.get", side_effect=[low_resp, high_resp]):
+        with patch("services.discovery._orchestrator.get_settings", return_value=self._make_settings()), \
+             patch("services.discovery._orchestrator.requests.get", side_effect=[low_resp, high_resp]):
             svc = Discovery()
             result = svc.get_track_popularity(
                 "24K Magic (feat. Bruno Mars)", "Bruno Mars"
@@ -411,8 +411,8 @@ class TestFuzzyLastfmRetry:
             "track": {"listeners": "10", "playcount": "100"}
         }
 
-        with patch("services.discovery.get_settings", return_value=self._make_settings()), \
-             patch("services.discovery.requests.get", side_effect=[first_resp, lower_resp]):
+        with patch("services.discovery._orchestrator.get_settings", return_value=self._make_settings()), \
+             patch("services.discovery._orchestrator.requests.get", side_effect=[first_resp, lower_resp]):
             svc = Discovery()
             result = svc.get_track_popularity("Song (feat. X)", "Artist")
 
@@ -427,8 +427,8 @@ class TestFuzzyLastfmRetry:
             "track": {"listeners": "200", "playcount": "1000"}
         }
 
-        with patch("services.discovery.get_settings", return_value=self._make_settings()), \
-             patch("services.discovery.requests.get", return_value=resp) as mock_get:
+        with patch("services.discovery._orchestrator.get_settings", return_value=self._make_settings()), \
+             patch("services.discovery._orchestrator.requests.get", return_value=resp) as mock_get:
             svc = Discovery()
             svc.get_track_popularity("Blinding Lights", "The Weeknd")
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from services.stem_validator import (
+from services.stems import (
     compute_cancellation_db,
     compute_mid_side_ratio,
     compute_phase_correlation,

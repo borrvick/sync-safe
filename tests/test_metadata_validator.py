@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from services.metadata_validator import (
+from services.validation import (
     MetadataValidator,
     validate_isrc,
     validate_splits,

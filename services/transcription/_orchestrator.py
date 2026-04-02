@@ -32,7 +32,7 @@ from core.exceptions import ConfigurationError, ModelInferenceError
 from core.logging import PipelineLogger
 from core.models import AudioBuffer, TranscriptSegment
 from core.protocols import LyricsProvider
-from services.lyrics_provider import LRCLibClient
+from services.lyrics import LRCLibClient
 
 try:
     import spaces

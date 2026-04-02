@@ -22,7 +22,7 @@ from core.models import (
     IntroResult,
     StingResult,
 )
-from services.tag_injector import (
+from services.tagging import (
     TagInjector,
     _AI_VERDICTS,
     _build_tag_values,

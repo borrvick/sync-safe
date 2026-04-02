@@ -587,7 +587,7 @@ def render_loading(source: Any) -> None:
     log.step_start("authorship")
     try:
         with step_timeout(_STEP_TIMEOUT_S["authorship"], "authorship"):
-            from services.authorship import Authorship
+            from services.content import Authorship
             authorship = Authorship().analyze(transcript)
     except StepTimeoutError as exc:
         st.toast("⏱ Authorship check timed out — AI-lyric detection skipped.", icon="⚠️")
@@ -630,7 +630,7 @@ def render_loading(source: Any) -> None:
             from services.discovery import Discovery
             from services.legal import Legal
             from services.loudness import AudioQualityAnalyzer
-            from services.pro_lookup import ProLookup
+            from services.legal import ProLookup
             base_links    = Legal().get_links(title, artist)
             isrc, pro     = ProLookup().lookup(title, artist)
             legal         = base_links.model_copy(update={"isrc": isrc, "pro_match": pro})

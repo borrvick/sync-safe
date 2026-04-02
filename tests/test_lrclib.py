@@ -10,7 +10,7 @@ The LRCLib tests hit the live API; skip them with --offline flag.
 """
 from __future__ import annotations
 
-from services.lyrics_provider import LRCLibClient, _best_result, _parse_lrc
+from services.lyrics import LRCLibClient, _best_result, _parse_lrc
 
 # ---------------------------------------------------------------------------
 # Known-good test case (live API)
