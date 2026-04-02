@@ -758,6 +758,11 @@ class Settings(BaseSettings):
         default=None,
         description="HuggingFace token for private model access (optional).",
     )
+    groq_api_key: Optional[str] = Field(
+        default=None,
+        description="Groq API key for LLM inference (issue planning workflow). "
+                    "Get one at https://console.groq.com",
+    )
 
     # ---- MusicBrainz API (PRO lookup) -----------------------------------------
     # MusicBrainz requires a descriptive User-Agent for all API requests.
