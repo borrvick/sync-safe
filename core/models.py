@@ -295,6 +295,25 @@ class AuthorshipResult(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Theme & Mood
+# ---------------------------------------------------------------------------
+
+class ThemeMoodResult(BaseModel):
+    """Output of the theme and mood analysis stage."""
+
+    model_config = ConfigDict(frozen=True)
+
+    themes: list[str]               = Field(default_factory=list)
+    mood: str                       = ""
+    confidence: float               = 0.0
+    groq_enriched: bool             = False
+    raw_keywords: list[str]         = Field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.model_dump()
+
+
+# ---------------------------------------------------------------------------
 # Discovery & Legal
 # ---------------------------------------------------------------------------
 
@@ -483,6 +502,7 @@ class AnalysisResult(BaseModel):
     metadata_validation: Optional[MetadataValidationResult] = None
     sync_cuts: list[SyncCut]                                = Field(default_factory=list)
     stem_validation: Optional[StemValidationResult]         = None
+    theme_mood: Optional[ThemeMoodResult]                   = None
 
     def to_dict(self) -> dict[str, Any]:
         """
