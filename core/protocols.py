@@ -61,7 +61,7 @@ class AudioProvider(Protocol):
     """
     Load audio from any source into an in-memory AudioBuffer.
 
-    Implementations: services/ingestion.py
+    Implementations: services/ingestion/ (Ingestion class)
     Swap candidates:  S3 presigned URL fetch, SoundCloud API, local file path
     """
 
@@ -93,7 +93,7 @@ class LyricsProvider(Protocol):
     """
     Fetch synced lyrics for a known track title + artist.
 
-    Implementations: services/lyrics_provider.py (LRCLibClient)
+    Implementations: services/lyrics/ (LRCLibClient)
     Swap candidates:  Genius API, Musixmatch, local lyrics DB
     """
 
@@ -121,8 +121,8 @@ class TranscriptionProvider(Protocol):
     Transcribe audio to time-stamped text segments.
 
     Implementations:
-        services/transcription.py — LyricsOrchestrator (LRCLib → Whisper full-mix)
-        services/transcription.py — Transcription (Whisper-only, used as fallback)
+        services/transcription/ — LyricsOrchestrator (LRCLib → Whisper full-mix)
+        services/transcription/ — Transcription (Whisper-only, used as fallback)
     Swap candidates:  Deepgram, AssemblyAI, Azure Speech, Google STT
     """
 
@@ -156,7 +156,7 @@ class StructureAnalyzer(Protocol):
     """
     Detect tempo, key, structural sections, and beat grid.
 
-    Implementations: services/analysis.py (allin1 + librosa)
+    Implementations: services/analysis/ (allin1 + librosa)
     Swap candidates:  Essentia, madmom standalone, a custom trained model
     """
 
@@ -183,7 +183,7 @@ class ForensicsAnalyzer(Protocol):
     """
     Detect signals that suggest AI-generated or stock audio.
 
-    Implementations: services/forensics.py
+    Implementations: services/forensics/ (Forensics class)
     Swap candidates:  A trained binary classifier, an external detection API
     """
 
@@ -210,7 +210,7 @@ class ComplianceChecker(Protocol):
     """
     Apply editorial compliance rules to audio and its transcript.
 
-    Implementations: services/compliance.py (sync readiness rules)
+    Implementations: services/compliance/ (sync readiness rules)
     Swap candidates:  A different editorial standard, a paid compliance API
     """
 
@@ -246,7 +246,7 @@ class AuthorshipAnalyzer(Protocol):
     """
     Estimate whether lyrics were written by a human or AI.
 
-    Implementations: services/authorship.py (RoBERTa + linguistic signals)
+    Implementations: services/content/ (Authorship — RoBERTa + linguistic signals)
     Swap candidates:  GPTZero API, a fine-tuned model, a rules-only baseline
     """
 
@@ -300,7 +300,7 @@ class TrackDiscovery(Protocol):
     """
     Find commercially similar tracks for sync licensing reference.
 
-    Implementations: services/discovery.py (Last.fm + yt-dlp)
+    Implementations: services/discovery/ (Last.fm + yt-dlp)
     Swap candidates:  Spotify recommendations API, Soundcharts, internal DB
     """
 
@@ -330,7 +330,7 @@ class LegalLinksProvider(Protocol):
     """
     Generate PRO (Performing Rights Organisation) repertory search links.
 
-    Implementations: services/legal.py (static URL templates, no network calls)
+    Implementations: services/legal/ (static URL templates, no network calls)
     Swap candidates:  A live licensing API (ASCAP ACE, BMI Repertoire, etc.)
     """
 
@@ -350,7 +350,7 @@ class SyncCutProvider(Protocol):
     """
     Suggest edit-point windows for standard ad/TV format durations.
 
-    Implementations: services/sync_cut.py (SyncCutAnalyzer)
+    Implementations: services/sync_cut/ (SyncCutAnalyzer)
     Swap candidates:  An ML-based edit detector, a manual cue-sheet override
     """
 
@@ -376,7 +376,7 @@ class TagInjectorProvider(Protocol):
     """
     Embed audit results into audio file tags.
 
-    Implementations: services/tag_injector.py (TagInjector)
+    Implementations: services/tagging/ (TagInjector)
     Swap candidates:  Cloud-based tag writing service, BWF metadata standard
     """
 
@@ -397,7 +397,7 @@ class PlatformExportProvider(Protocol):
     """
     Generate platform-specific catalog CSV bytes for a sync licensing portal.
 
-    Implementations: services/platform_export.py (to_platform_csv)
+    Implementations: services/export/ (to_platform_csv)
     Swap candidates:  Songtradr API, Musicstax, or a custom DAM integration
     """
 
@@ -420,7 +420,7 @@ class MetadataValidatorProvider(Protocol):
     """
     Validate pre-flight track rights metadata at sync intake.
 
-    Implementations: services/metadata_validator.py (MetadataValidator)
+    Implementations: services/validation/ (MetadataValidator)
     Swap candidates:  A paid metadata registry (AllTrack, DDEX, SoundExchange)
     """
 
@@ -447,7 +447,7 @@ class ProLookupProvider(Protocol):
     """
     Best-effort ISRC and PRO affiliation lookup from an external metadata source.
 
-    Implementations: services/pro_lookup.py (MusicBrainz recordings API)
+    Implementations: services/legal/ (ProLookup — MusicBrainz recordings API)
     Swap candidates:  Songkick, AcousticBrainz, or a paid licensing data provider.
     """
 
