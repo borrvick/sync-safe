@@ -29,6 +29,8 @@ from ._labels import MOOD_LABELS, THEME_TAXONOMY
 _GROQ_MAX_CHARS: int = 2000
 # Groq model to use for enrichment
 _GROQ_MODEL: str = "llama3-8b-8192"
+# Empirical word-frequency score ceiling for confidence normalisation (0–1)
+_CONFIDENCE_CEILING: float = 0.05
 
 
 class ThemeMoodAnalyzer:
@@ -141,8 +143,8 @@ def _keyword_analyze(text: str) -> ThemeMoodResult:
     all_kw += [kw for kws in THEME_TAXONOMY.values() for kw in kws]
     raw_keywords = sorted({kw for kw in all_kw if kw in word_set or kw in text.lower()})[:20]
 
-    # Confidence: normalise top mood score to a 0–1 range (empirical ceiling ~0.05)
-    confidence = min(1.0, best_mood_score / 0.05)
+    # Confidence: normalise top mood score to a 0–1 range
+    confidence = min(1.0, best_mood_score / _CONFIDENCE_CEILING)
 
     return ThemeMoodResult(
         themes=themes,

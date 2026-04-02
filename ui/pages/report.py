@@ -64,6 +64,19 @@ _TAGGED_MIME_MAP: dict[str, str] = {
 # Verdict threshold is CONSTANTS.INFRASONIC_ENERGY_RATIO_AI_MIN (currently 0.0 / DISABLED).
 _INFRASONIC_WARN_DISPLAY: float = 0.005
 
+# Mood → CSS variable colour map for the Theme & Mood card.
+# Uses existing palette variables; Romantic uses --issue-brand (warm amber #F5A623).
+_MOOD_COLORS: dict[str, str] = {
+    "Uplifting":   "var(--ok)",
+    "Energetic":   "var(--ok)",
+    "Romantic":    "var(--issue-brand)",
+    "Melancholic": "var(--muted)",
+    "Nostalgic":   "var(--muted)",
+    "Chill":       "var(--accent)",
+    "Dark":        "var(--danger)",
+    "Intense":     "var(--danger)",
+}
+
 
 def _boundary_val(v: float, fmt: str = ".5f", unavail: str = "N/A") -> str:
     """Format a spectral boundary signal score; return 'N/A' for the -1.0 sentinel."""
@@ -1306,18 +1319,7 @@ def _render_theme_mood(result: AnalysisResult) -> None:
     if tm is None:
         return
 
-    # Mood badge colour: use CSS variables from the existing theme palette
-    mood_colors: dict[str, str] = {
-        "Uplifting":  "var(--ok)",
-        "Energetic":  "var(--ok)",
-        "Romantic":   "#F5A623",
-        "Melancholic": "var(--muted)",
-        "Nostalgic":  "var(--muted)",
-        "Chill":      "var(--accent)",
-        "Dark":       "var(--danger)",
-        "Intense":    "var(--danger)",
-    }
-    mood_color = mood_colors.get(tm.mood, "var(--accent)")
+    mood_color = _MOOD_COLORS.get(tm.mood, "var(--accent)")
     enriched_badge = (
         ' <span title="Enriched by Groq LLM" style="'
         'font-size:0.65rem;background:var(--accent);color:#000;'
