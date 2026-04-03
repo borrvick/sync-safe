@@ -119,6 +119,15 @@ class TestLoadUpload:
             self.svc.load(_make_upload(large))
 
 
+class TestLoadDirect:
+    def setup_method(self):
+        self.svc = Ingestion()
+
+    def test_rejects_http_direct_audio_url(self):
+        with pytest.raises(ValidationError, match="HTTPS"):
+            self.svc.load("http://cdn.example.com/track.mp3")
+
+
 # ---------------------------------------------------------------------------
 # Ingestion.load — YouTube path
 # ---------------------------------------------------------------------------

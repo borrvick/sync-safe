@@ -59,6 +59,54 @@ class TestValidateUrl:
         result = validate_url(url)
         assert result == url.strip()
 
+    def test_valid_tiktok(self):
+        assert validate_url("https://www.tiktok.com/@user/video/123456")
+
+    def test_valid_tiktok_short(self):
+        assert validate_url("https://vm.tiktok.com/abc123/")
+
+    def test_valid_instagram(self):
+        assert validate_url("https://www.instagram.com/reel/abc123/")
+
+    def test_valid_facebook(self):
+        assert validate_url("https://www.facebook.com/watch?v=123456")
+
+    def test_valid_facebook_short(self):
+        assert validate_url("https://fb.watch/abc123/")
+
+    def test_valid_soundcloud(self):
+        assert validate_url("https://soundcloud.com/artist/track")
+
+    def test_valid_bandcamp_subdomain(self):
+        assert validate_url("https://artist.bandcamp.com/track/song")
+
+    def test_allowed_hosts_covers_all_platform_sets(self):
+        """
+        _ALLOWED_HOSTS in security.py must be a superset of every platform
+        host set defined in _pure.py. This test catches drift when a new
+        platform is added to one place but not the other.
+        """
+        from utils.security import _ALLOWED_HOSTS
+        from services.ingestion._pure import (
+            _YOUTUBE_HOSTS,
+            _SOUNDCLOUD_HOSTS,
+            _TIKTOK_HOSTS,
+            _INSTAGRAM_HOSTS,
+            _FACEBOOK_HOSTS,
+        )
+        all_platform_hosts = (
+            _YOUTUBE_HOSTS
+            | _SOUNDCLOUD_HOSTS
+            | _TIKTOK_HOSTS
+            | _INSTAGRAM_HOSTS
+            | _FACEBOOK_HOSTS
+        )
+        missing = all_platform_hosts - _ALLOWED_HOSTS
+        assert not missing, (
+            f"Hosts in _pure.py platform sets but missing from _ALLOWED_HOSTS: {missing}. "
+            "Add them to utils/security.py _ALLOWED_HOSTS."
+        )
+
 
 # ---------------------------------------------------------------------------
 # sanitize_shell_arg

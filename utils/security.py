@@ -10,6 +10,9 @@ from urllib.parse import urlparse
 
 # ---------------------------------------------------------------------------
 # Allowlisted hostnames for yt-dlp-routed downloads
+#
+# Must stay in sync with the platform host sets in services/ingestion/_pure.py.
+# A test in tests/test_security.py enforces this — add new platforms there too.
 # ---------------------------------------------------------------------------
 _ALLOWED_HOSTS = frozenset({
     # YouTube
@@ -18,12 +21,25 @@ _ALLOWED_HOSTS = frozenset({
     "youtu.be",
     "music.youtube.com",
     "m.youtube.com",
-    # Bandcamp (subdomains matched separately in ingestion via _BANDCAMP_HOSTS)
+    # Bandcamp (subdomains matched separately below via endswith check)
     "bandcamp.com",
     # SoundCloud
     "soundcloud.com",
     "www.soundcloud.com",
     "on.soundcloud.com",
+    # TikTok
+    "tiktok.com",
+    "www.tiktok.com",
+    "vm.tiktok.com",
+    "m.tiktok.com",
+    # Instagram
+    "instagram.com",
+    "www.instagram.com",
+    # Facebook
+    "facebook.com",
+    "www.facebook.com",
+    "fb.com",
+    "fb.watch",
 })
 
 # Control characters (excluding normal whitespace) and null bytes

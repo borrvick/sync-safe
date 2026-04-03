@@ -121,6 +121,13 @@ class Ingestion:
 
     def _load_direct(self, url: str) -> AudioBuffer:
         """Download a direct audio URL into an AudioBuffer."""
+        # Direct audio URLs are not host-allowlisted (any CDN is valid) but must
+        # use HTTPS to prevent cleartext transport and HTTP-based SSRF.
+        if _urlparse(url).scheme != "https":
+            raise ValidationError(
+                "Direct audio URLs must use HTTPS.",
+                context={"url": url},
+            )
         max_bytes = CONSTANTS.MAX_UPLOAD_BYTES
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "sync-safe/1.0"})
