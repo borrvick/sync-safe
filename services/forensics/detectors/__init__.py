@@ -1,5 +1,5 @@
 """
-services/forensics/analyzers/__init__.py
+services/forensics/detectors/__init__.py
 Re-exports all domain analyzers for convenient import from the package.
 """
 from .base import BaseAnalyzer

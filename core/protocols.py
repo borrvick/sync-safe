@@ -15,6 +15,7 @@ Design rules:
 
 Swap guide:
   AudioProvider      → swap yt-dlp for a direct S3 fetch or SoundCloud API
+  YtDlpProvider      → swap yt-dlp + ffmpeg for Piped API, RapidAPI, or yt-dlp-server
   TranscriptionProvider → swap Whisper for Deepgram, AssemblyAI, or Azure STT
   StructureAnalyzer  → swap allin1 for a custom BPM/section detector
   ForensicsAnalyzer  → swap the librosa heuristics for a trained classifier
@@ -463,5 +464,60 @@ class ProLookupProvider(Protocol):
 
         Returns:
             (isrc, pro_match) tuple — both None when no match found or on error.
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
+# yt-dlp subprocess boundary
+# ---------------------------------------------------------------------------
+
+class YtDlpProvider(Protocol):
+    """
+    Download audio, fetch engagement metrics, and resolve YouTube URLs.
+
+    Implementations: services/ingestion/_ytdlp.py (YtDlpClient)
+    Swap candidates:  Piped API, RapidAPI YouTube endpoint, yt-dlp-server,
+                      or any paid audio-download service.
+
+    All three methods are on one Protocol because they share the same binary
+    dependency and swap together — you wouldn't replace only one of them.
+    """
+
+    def download_audio(self, url: str, sample_rate: int) -> bytes:
+        """
+        Download audio from a URL and transcode to WAV bytes.
+
+        Args:
+            url:         Source URL (YouTube, SoundCloud, etc.)
+            sample_rate: Target WAV sample rate in Hz.
+
+        Returns:
+            Raw WAV bytes (16-bit PCM mono).
+
+        Raises:
+            AudioSourceError: if the download or transcode fails.
+        """
+        ...
+
+    def fetch_engagement(self, url: str) -> dict[str, int]:
+        """
+        Fetch per-platform engagement metrics for a URL.
+
+        Never raises — engagement is always supplementary.
+
+        Returns:
+            Dict of engagement field names to integer values (may be empty).
+        """
+        ...
+
+    def search_url(self, artist: str, title: str) -> Optional[str]:
+        """
+        Resolve a YouTube watch URL for the given artist + title.
+
+        No audio is downloaded; only metadata is fetched.
+
+        Returns:
+            YouTube watch URL string, or None on any failure.
         """
         ...

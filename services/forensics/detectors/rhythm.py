@@ -1,5 +1,5 @@
 """
-services/forensics/analyzers/rhythm.py
+services/forensics/detectors/rhythm.py
 RhythmAnalyzer — IBI groove, loop cross-correlation, loop autocorrelation,
 and sub-beat grid deviation.
 
@@ -34,8 +34,11 @@ class RhythmAnalyzer:
     """
 
     def process(self, data: _AudioData, bundle: _SignalBundle) -> None:
-        bundle.ibi_variance, bundle.spectral_slop = self._groove(data.y, data.sr)
-        bundle.loop_score                          = self._loops(data.y, data.sr)
+        import librosa
+        # Beat tracking is expensive — run once and share between _groove and _loops.
+        tempo, beat_frames = librosa.beat.beat_track(y=data.y, sr=data.sr)
+        bundle.ibi_variance, bundle.spectral_slop = self._groove(data.y, data.sr, beat_frames)
+        bundle.loop_score                          = self._loops(data.y, data.sr, tempo)
         bundle.loop_autocorr_score                 = compute_loop_autocorrelation_score(
             data.y, data.sr,
             CONSTANTS.LOOP_PEAK_COUNT_THRESHOLD,
@@ -47,9 +50,13 @@ class RhythmAnalyzer:
     # IBI + spectral slop (shares beat-tracker result)
     # ------------------------------------------------------------------
 
-    def _groove(self, y: np.ndarray, sr: int) -> tuple[float, float]:
+    def _groove(self, y: np.ndarray, sr: int, beat_frames: np.ndarray) -> tuple[float, float]:
         """
         Compute inter-beat interval variance and spectral slop ratio.
+
+        Args:
+            beat_frames: Pre-computed beat frames from process() — avoids a
+                         second beat_track call.
 
         Returns:
             (ibi_variance, spectral_slop)
@@ -61,7 +68,6 @@ class RhythmAnalyzer:
         try:
             import librosa
 
-            _, beat_frames  = librosa.beat.beat_track(y=y, sr=sr)
             beat_times_ms   = librosa.frames_to_time(beat_frames, sr=sr) * 1000.0
 
             if len(beat_times_ms) < 2:
@@ -86,9 +92,13 @@ class RhythmAnalyzer:
     # Loop cross-correlation
     # ------------------------------------------------------------------
 
-    def _loops(self, y: np.ndarray, sr: int) -> float:
+    def _loops(self, y: np.ndarray, sr: int, tempo: np.ndarray) -> float:
         """
         Cross-correlate 4-bar spectral fingerprints across the track.
+
+        Args:
+            tempo: Pre-computed tempo from process() — avoids a second
+                   beat_track call.
 
         Returns:
             Maximum cosine similarity (0.0–1.0). 0.0 when track is too short.
@@ -97,10 +107,7 @@ class RhythmAnalyzer:
             ModelInferenceError: on librosa failure.
         """
         try:
-            import librosa
-
-            tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-            bpm      = float(tempo) if np.ndim(tempo) == 0 else float(tempo[0])
+            bpm = float(tempo) if np.ndim(tempo) == 0 else float(tempo[0])
 
             if not (CONSTANTS.LOOP_BPM_MIN <= bpm <= CONSTANTS.LOOP_BPM_MAX):
                 return 0.0

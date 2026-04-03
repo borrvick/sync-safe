@@ -1,5 +1,5 @@
 """
-services/forensics/analyzers/base.py
+services/forensics/detectors/base.py
 BaseAnalyzer Protocol — all concrete analyzers implement this interface.
 """
 from __future__ import annotations

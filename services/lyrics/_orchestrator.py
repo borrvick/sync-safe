@@ -1,5 +1,5 @@
 """
-services/lyrics/_client.py
+services/lyrics/_orchestrator.py
 LRCLib lyrics lookup — implements LyricsProvider protocol.
 
 Tries to fetch synced (LRC-format) lyrics from the free, open LRCLib API

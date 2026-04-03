@@ -1,28 +1,20 @@
 """
 services/ingestion/_metadata.py
-YouTube oEmbed metadata and platform engagement fetching via yt-dlp.
+YouTube oEmbed metadata fetching (HTTP only — no yt-dlp dependency).
+
+Engagement metrics have moved to YtDlpClient.fetch_engagement()
+(services/ingestion/_ytdlp.py) where all subprocess calls are co-located.
 """
 from __future__ import annotations
 
 import json
-import shlex
-import subprocess
 import urllib.request
 from urllib.parse import quote
 
 from ._pure import _artist_from_uploader, _clean_title, _split_artist_title
 
-# Engagement fields requested from yt-dlp --print for popularity signals.
-_ENGAGEMENT_FIELDS: list[str] = [
-    "view_count",
-    "like_count",
-    "share_count",
-    "repost_count",
-    "channel_follower_count",
-]
 
-
-def _fetch_youtube_metadata(url: str, ytdlp_bin: str) -> dict[str, str]:
+def _fetch_youtube_metadata(url: str) -> dict[str, str]:
     """
     Fetch title and artist via YouTube's public oEmbed API.
 
@@ -53,41 +45,3 @@ def _fetch_youtube_metadata(url: str, ytdlp_bin: str) -> dict[str, str]:
         return {"title": _clean_title(title_raw), "artist": artist}
     except Exception:  # noqa: BLE001 — metadata is always best-effort
         return {"title": "", "artist": ""}
-
-
-def _fetch_platform_engagement(url: str, ytdlp_bin: str) -> dict[str, int]:
-    """
-    Fetch per-platform engagement metrics for a URL via yt-dlp --print.
-
-    Never raises — engagement data is always supplementary.
-    """
-    print_template = "\n".join(f"%({f})s" for f in _ENGAGEMENT_FIELDS)
-    try:
-        result = subprocess.run(
-            [
-                ytdlp_bin,
-                "--quiet",
-                "--no-warnings",
-                "--no-playlist",
-                "--print", print_template,
-                shlex.quote(url),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        if result.returncode != 0:
-            return {}
-
-        lines = result.stdout.splitlines()
-        metrics: dict[str, int] = {}
-        for field, raw in zip(_ENGAGEMENT_FIELDS, lines):
-            raw = raw.strip()
-            if raw and raw not in ("NA", "None", "none"):
-                try:
-                    metrics[field] = int(float(raw.replace(",", "")))
-                except ValueError:
-                    pass
-        return metrics
-    except Exception:  # noqa: BLE001
-        return {}

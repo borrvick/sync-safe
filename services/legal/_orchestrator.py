@@ -1,5 +1,5 @@
 """
-services/legal.py
+services/legal/_orchestrator.py
 PRO repertory search link generator — implements LegalLinksProvider.
 
 Generates ASCAP, BMI, and SESAC search URLs for a given title and artist.

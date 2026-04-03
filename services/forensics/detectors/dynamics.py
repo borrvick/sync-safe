@@ -1,5 +1,5 @@
 """
-services/forensics/analyzers/dynamics.py
+services/forensics/detectors/dynamics.py
 DynamicsAnalyzer — performance dynamics and vocal-path signals.
 
 Signals:

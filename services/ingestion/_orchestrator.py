@@ -7,63 +7,26 @@ No temporary files are written to disk.
 """
 from __future__ import annotations
 
-import shutil
-import subprocess
-import sys
 import urllib.error
 import urllib.request
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 from typing import Union
 from urllib.parse import urlparse as _urlparse
 
 from core.config import CONSTANTS, Settings, get_settings
-from core.exceptions import AudioSourceError, ConfigurationError, ValidationError
+from core.exceptions import AudioSourceError, ValidationError
 from core.models import AudioBuffer
+from core.protocols import YtDlpProvider
 from utils.security import validate_url
 
-from ._metadata import _fetch_platform_engagement, _fetch_youtube_metadata
+from ._metadata import _fetch_youtube_metadata
 from ._pure import (
     _check_size,
     _classify_url,
     _label_from_url,
     _wav_info,
 )
-
-
-def _find_binary(name: str) -> str:
-    """
-    Resolve a system binary by name.
-
-    Search order:
-      1. The active venv's bin/ directory (sys.executable parent)
-      2. PATH via shutil.which.
-      3. The pip --user bin directory (macOS / Linux fallback).
-
-    Raises:
-        ConfigurationError: if the binary cannot be found anywhere.
-    """
-    import site
-
-    venv_bin = Path(sys.executable).parent / name
-    if venv_bin.exists():
-        return str(venv_bin)
-
-    path_bin = shutil.which(name)
-    if path_bin:
-        return path_bin
-
-    user_bin = Path(site.getuserbase()) / "bin" / name
-    if user_bin.exists():
-        return str(user_bin)
-
-    raise ConfigurationError(
-        f"Required binary '{name}' not found.",
-        context={
-            "binary": name,
-            "suggestion": f"pip install {name}",
-            "searched": [str(venv_bin), path_bin, str(user_bin)],
-        },
-    )
+from ._ytdlp import YtDlpClient
 
 
 class Ingestion:
@@ -74,10 +37,17 @@ class Ingestion:
 
     Constructor injection: pass a Settings instance to override defaults,
     e.g. in tests or when a paid tier raises the upload size ceiling.
+    Pass a YtDlpProvider to swap the download backend — e.g. for a paid
+    service or in integration tests that stub the subprocess calls.
     """
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        ytdlp_client: YtDlpProvider | None = None,
+    ) -> None:
         self._settings = settings or get_settings()
+        self._ytdlp    = ytdlp_client or YtDlpClient()
 
     # ------------------------------------------------------------------
     # Public interface (AudioProvider protocol)
@@ -129,96 +99,21 @@ class Ingestion:
                 context={"url": url},
             ) from exc
 
-        ytdlp_bin  = _find_binary("yt-dlp")
-        ffmpeg_bin = _find_binary("ffmpeg")
+        track_metadata = _fetch_youtube_metadata(url)
+        track_metadata.update(self._ytdlp.fetch_engagement(url))
 
-        track_metadata = _fetch_youtube_metadata(url, ytdlp_bin)
-        track_metadata.update(_fetch_platform_engagement(url, ytdlp_bin))
+        wav_bytes = self._ytdlp.download_audio(url, CONSTANTS.SAMPLE_RATE)
 
-        ytdlp_cmd = [
-            ytdlp_bin,
-            "--quiet",
-            "--no-warnings",
-            "--format", "bestaudio/best",
-            "--output", "-",
-            "--no-playlist",
-            "--extractor-args", "youtube:player_client=android",
-            url,
-        ]
+        _check_size(len(wav_bytes), self._settings.max_upload_mb)
+        track_metadata.update(_wav_info(wav_bytes))
 
-        ffmpeg_cmd = [
-            ffmpeg_bin,
-            "-hide_banner",
-            "-loglevel", "error",
-            "-i", "pipe:0",
-            "-f", "wav",
-            "-ar", str(CONSTANTS.SAMPLE_RATE),
-            "-ac", "1",
-            "-acodec", "pcm_s16le",
-            "pipe:1",
-        ]
-
-        ytdlp_proc: subprocess.Popen | None = None
-        ffmpeg_proc: subprocess.Popen | None = None
-        try:
-            ytdlp_proc = subprocess.Popen(
-                ytdlp_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            ffmpeg_proc = subprocess.Popen(
-                ffmpeg_cmd,
-                stdin=ytdlp_proc.stdout,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-
-            if ytdlp_proc.stdout:
-                ytdlp_proc.stdout.close()
-
-            wav_bytes, ffmpeg_err = ffmpeg_proc.communicate()
-            ytdlp_proc.wait()
-
-            if ytdlp_proc.returncode not in (0, None):
-                _, ytdlp_err = ytdlp_proc.communicate()
-                raise AudioSourceError(
-                    "yt-dlp failed to download audio.",
-                    context={
-                        "url": url,
-                        "exit_code": ytdlp_proc.returncode,
-                        "stderr": ytdlp_err.decode(errors="replace").strip(),
-                    },
-                )
-            if ffmpeg_proc.returncode != 0:
-                raise AudioSourceError(
-                    "ffmpeg failed to transcode audio.",
-                    context={
-                        "url": url,
-                        "exit_code": ffmpeg_proc.returncode,
-                        "stderr": ffmpeg_err.decode(errors="replace").strip(),
-                    },
-                )
-            if not wav_bytes:
-                raise AudioSourceError(
-                    "Audio download produced empty output.",
-                    context={"url": url},
-                )
-
-            _check_size(len(wav_bytes), self._settings.max_upload_mb)
-            track_metadata.update(_wav_info(wav_bytes))
-
-            return AudioBuffer(
-                raw=wav_bytes,
-                sample_rate=CONSTANTS.SAMPLE_RATE,
-                label=_label_from_url(url),
-                metadata=track_metadata,
-                source=source_label,  # type: ignore[arg-type]
-            )
-
-        finally:
-            for proc in (ytdlp_proc, ffmpeg_proc):
-                if proc and proc.poll() is None:
-                    proc.kill()
+        return AudioBuffer(
+            raw=wav_bytes,
+            sample_rate=CONSTANTS.SAMPLE_RATE,
+            label=_label_from_url(url),
+            metadata=track_metadata,
+            source=source_label,  # type: ignore[arg-type]
+        )
 
     # ------------------------------------------------------------------
     # Private: direct HTTP audio download

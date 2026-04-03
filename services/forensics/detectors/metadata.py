@@ -1,5 +1,5 @@
 """
-services/forensics/analyzers/metadata.py
+services/forensics/detectors/metadata.py
 MetadataAnalyzer — C2PA manifest check + SynthID-style watermark scan.
 
 Both signals operate at the file/header level:

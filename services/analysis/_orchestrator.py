@@ -25,6 +25,7 @@ import tempfile
 import numpy as np
 
 from core.config import CONSTANTS, ModelParams
+from core.device import clear_mps_cache, resolve_device
 from core.exceptions import ModelInferenceError
 from core.models import AudioBuffer, Section, StructureResult
 
@@ -137,14 +138,12 @@ class Analysis:
 
         tmp_dir: str | None = None
         try:
-            import torch
-
             tmp_dir = tempfile.mkdtemp()
             tmp_path = os.path.join(tmp_dir, "audio.wav")
             with open(tmp_path, "wb") as fh:
                 fh.write(raw)
 
-            device = self._resolve_device()
+            device = resolve_device(self._params.demucs_device)
             _patch_allin1_metrical()
             result = allin1.analyze(
                 tmp_path,
@@ -169,11 +168,7 @@ class Analysis:
             # If the chosen device was MPS, clear the cache and retry once on CPU
             # before giving up — this fixes the intermittent allin1 failure pattern.
             if device == "mps":
-                try:
-                    import torch
-                    torch.mps.empty_cache()
-                except Exception:
-                    pass
+                clear_mps_cache()
                 try:
                     result = allin1.analyze(
                         tmp_path,
@@ -286,26 +281,5 @@ class Analysis:
         except Exception:  # noqa: BLE001 — metadata is always best-effort
             return {"title": "", "artist": ""}
 
-    # ------------------------------------------------------------------
-    # Private: device resolution
-    # ------------------------------------------------------------------
-
-    def _resolve_device(self) -> str:
-        """
-        Return the best available torch device string.
-
-        Respects ModelParams.demucs_device when explicitly set (e.g. in tests).
-        Auto-detection order: MPS (Apple Silicon) → CPU.
-        CUDA is handled by the @spaces.GPU decorator on HF Spaces.
-        """
-        if self._params.demucs_device is not None:
-            return self._params.demucs_device
-        try:
-            import torch
-            if torch.backends.mps.is_available():
-                return "mps"
-        except Exception:
-            pass
-        return "cpu"
 
 

@@ -1,5 +1,5 @@
 """
-services/forensics/analyzers/monitoring.py
+services/forensics/detectors/monitoring.py
 MonitoringAnalyzer — pending signals awaiting cross-dataset calibration.
 
 Signals in this group return their sentinel -1.0 / 0.0 values when gated
@@ -47,17 +47,21 @@ class MonitoringAnalyzer:
     """
 
     def process(self, data: _AudioData, bundle: _SignalBundle) -> None:
+        # Load at 44.1 kHz once — shared between decoder_peak and ultrasonic.
+        audio_44k, sr_44k = self._load_44k(data.raw)
         bundle.kurtosis_variability   = compute_kurtosis_variability(
             data.y, data.sr, CONSTANTS.KURTOSIS_N_MELS
         )
         bundle.decoder_peak_score     = compute_decoder_peak_score(
-            *self._load_44k(data.raw),
+            audio_44k, sr_44k,
             CONSTANTS.DECODER_PEAK_WINDOW_HZ,
             CONSTANTS.DECODER_PEAK_PROMINENCE_DB,
             CONSTANTS.DECODER_PEAK_REGULARITY_MAX,
             CONSTANTS.DECODER_PEAK_MIN_COUNT,
         )
-        bundle.ultrasonic_noise_ratio      = self._ultrasonic(data.raw, bundle.compressed_source)
+        bundle.ultrasonic_noise_ratio      = self._ultrasonic(
+            audio_44k, sr_44k, data.raw, bundle.compressed_source
+        )
         bundle.infrasonic_energy_ratio     = compute_infrasonic_energy_ratio(data.y, data.sr)
         bundle.phase_coherence_differential = self._phase_coherence(data.raw, bundle.compressed_source)
 
@@ -77,12 +81,24 @@ class MonitoringAnalyzer:
                 context={"original_error": str(exc)},
             ) from exc
 
-    def _ultrasonic(self, raw: bytes, compressed_source: bool) -> float:
+    def _ultrasonic(
+        self,
+        audio_44k: np.ndarray,
+        sr: int,
+        raw: bytes,
+        compressed_source: bool,
+    ) -> float:
         """
         Ultrasonic noise plateau (20–22 kHz).
 
         Gated on upload-only and native SR ≥ 40 kHz.
         Resampling a 16 kHz file cannot create real content above its 8 kHz Nyquist.
+
+        Args:
+            audio_44k: Pre-loaded mono 44.1 kHz array from process() — avoids
+                       a second full decode.
+            sr:        Sample rate of audio_44k.
+            raw:       Raw bytes used only for the cheap native-SR probe.
         """
         if compressed_source:
             return -1.0
@@ -90,12 +106,12 @@ class MonitoringAnalyzer:
         try:
             import librosa
 
+            # Cheap 1-second probe to confirm native SR ≥ 40 kHz before analysing.
             _, native_sr = librosa.load(io.BytesIO(raw), sr=None, mono=True, duration=1.0)
             if native_sr < 40_000:
                 return -1.0
 
-            audio, sr = librosa.load(io.BytesIO(raw), sr=_SYNTHID_LOAD_SR, mono=True)
-            return compute_ultrasonic_noise_ratio(audio, sr)
+            return compute_ultrasonic_noise_ratio(audio_44k, sr)
 
         except (OSError, ValueError, RuntimeError) as exc:
             raise ModelInferenceError(

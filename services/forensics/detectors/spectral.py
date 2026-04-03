@@ -1,5 +1,5 @@
 """
-services/forensics/analyzers/spectral.py
+services/forensics/detectors/spectral.py
 SpectralAnalyzer — frequency-domain AI signals computed from the standard-SR array.
 
 Signals:

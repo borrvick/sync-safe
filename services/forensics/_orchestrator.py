@@ -20,7 +20,7 @@ from ._aggregators import (
 from ._audio import _AudioData, load_audio
 from ._bundle import _SignalBundle
 from ._pure import segment_ai_probabilities
-from .analyzers import (
+from .detectors import (
     DynamicsAnalyzer,
     MetadataAnalyzer,
     MonitoringAnalyzer,

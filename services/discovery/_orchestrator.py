@@ -35,6 +35,8 @@ import requests
 from core.config import CONSTANTS, get_settings
 from core.exceptions import AudioSourceError, ConfigurationError
 from core.models import PopularityResult, TrackCandidate
+from core.protocols import YtDlpProvider
+from services.ingestion._ytdlp import YtDlpClient
 
 from ._pure import _normalise_lastfm, _normalise_views, _parse_track_list
 
@@ -52,12 +54,19 @@ class Discovery:
 
     Implements: TrackDiscovery protocol (core/protocols.py)
 
+    Constructor injection: pass a YtDlpProvider to swap the YouTube URL
+    resolution backend — e.g. for a paid service or in integration tests
+    that stub subprocess calls.
+
     Usage:
         service  = Discovery()
         tracks   = service.find_similar("Blinding Lights", "The Weeknd")
         for t in tracks:
             print(t.title, t.artist, t.youtube_url)
     """
+
+    def __init__(self, ytdlp_client: YtDlpProvider | None = None) -> None:
+        self._ytdlp = ytdlp_client or YtDlpClient()
 
     # ------------------------------------------------------------------
     # Public interface (TrackDiscovery protocol)
@@ -94,7 +103,7 @@ class Discovery:
 
         candidates: list[TrackCandidate] = []
         for i, (sim_artist, sim_title) in enumerate(pairs):
-            yt_url = _resolve_youtube_url(sim_artist, sim_title)
+            yt_url = self._ytdlp.search_url(sim_artist, sim_title)
             # similarity is rank-based (1.0 → 1/n range) since Last.fm doesn't
             # expose a numeric score in the getSimilar response we consume
             similarity = round(1.0 - (i / max(len(pairs), 1)) * 0.5, 3)

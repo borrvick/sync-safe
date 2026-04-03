@@ -128,10 +128,10 @@ class TestFetchYoutubeAudio:
 
     def setup_method(self):
         self.svc = Ingestion()
-        # _fetch_platform_engagement uses subprocess.run; patch it to a no-op
-        # so these tests don't require yt-dlp on PATH.
+        # YtDlpClient.fetch_engagement uses subprocess.run; patch it to a no-op
+        # so these tests don't require yt-dlp on PATH to resolve engagement metrics.
         self._run_patcher = patch(
-            "services.ingestion._orchestrator.subprocess.run",
+            "services.ingestion._ytdlp.subprocess.run",
             return_value=MagicMock(returncode=1, stdout=""),
         )
         self._run_patcher.start()
@@ -143,7 +143,7 @@ class TestFetchYoutubeAudio:
         wav = b"RIFF\x00\x00\x00\x00WAVEfmt "
         ytdlp_mock, ffmpeg_mock = _make_popen_mock(wav_data=wav)
 
-        with patch("services.ingestion._orchestrator.subprocess.Popen",
+        with patch("services.ingestion._ytdlp.subprocess.Popen",
                    side_effect=[ytdlp_mock, ffmpeg_mock]):
             buf = self.svc.load(self.VALID_URL)
 
@@ -154,7 +154,7 @@ class TestFetchYoutubeAudio:
     def test_raises_audio_source_error_on_ffmpeg_failure(self):
         ytdlp_mock, ffmpeg_mock = _make_popen_mock(ffmpeg_returncode=1)
 
-        with patch("services.ingestion._orchestrator.subprocess.Popen",
+        with patch("services.ingestion._ytdlp.subprocess.Popen",
                    side_effect=[ytdlp_mock, ffmpeg_mock]):
             with pytest.raises(AudioSourceError, match="ffmpeg"):
                 self.svc.load(self.VALID_URL)
@@ -162,7 +162,7 @@ class TestFetchYoutubeAudio:
     def test_raises_audio_source_error_on_ytdlp_failure(self):
         ytdlp_mock, ffmpeg_mock = _make_popen_mock(ytdlp_returncode=1)
 
-        with patch("services.ingestion._orchestrator.subprocess.Popen",
+        with patch("services.ingestion._ytdlp.subprocess.Popen",
                    side_effect=[ytdlp_mock, ffmpeg_mock]):
             with pytest.raises(AudioSourceError, match="yt-dlp"):
                 self.svc.load(self.VALID_URL)
@@ -170,7 +170,7 @@ class TestFetchYoutubeAudio:
     def test_raises_audio_source_error_on_empty_output(self):
         ytdlp_mock, ffmpeg_mock = _make_popen_mock(wav_data=b"")
 
-        with patch("services.ingestion._orchestrator.subprocess.Popen",
+        with patch("services.ingestion._ytdlp.subprocess.Popen",
                    side_effect=[ytdlp_mock, ffmpeg_mock]):
             with pytest.raises(AudioSourceError, match="empty"):
                 self.svc.load(self.VALID_URL)
@@ -190,7 +190,7 @@ class TestFetchYoutubeAudio:
         ytdlp_mock.poll.return_value = None
         ffmpeg_mock.poll.return_value = None
 
-        with patch("services.ingestion._orchestrator.subprocess.Popen",
+        with patch("services.ingestion._ytdlp.subprocess.Popen",
                    side_effect=[ytdlp_mock, ffmpeg_mock]):
             with pytest.raises(AudioSourceError):
                 self.svc.load(self.VALID_URL)

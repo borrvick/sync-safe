@@ -1,4 +1,4 @@
-from ._client import LRCLibClient
+from ._orchestrator import LRCLibClient
 from ._pure import _best_result, _parse_lrc
 
 __all__ = [

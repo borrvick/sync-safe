@@ -11,7 +11,6 @@ Five checks, one class:
 """
 from __future__ import annotations
 
-import io
 import re
 
 import numpy as np
@@ -113,10 +112,10 @@ class Compliance:
         Raises:
             ModelInferenceError: if the NLI model fails to load.
         """
-        raw = audio.raw
+        y, sr = audio.to_array(CONSTANTS.SAMPLE_RATE)
 
-        sting     = self._check_sting(raw)
-        evolution = self._check_energy_evolution(raw, beats)
+        sting     = self._check_sting(y, sr)
+        evolution = self._check_energy_evolution(y, sr, beats)
         intro     = self._check_intro(sections, transcript)
         flags     = self._audit_lyrics(transcript)
 
@@ -135,24 +134,15 @@ class Compliance:
     # ------------------------------------------------------------------
 
     @spaces.GPU
-    def _check_sting(self, raw: bytes) -> StingResult:
+    def _check_sting(self, audio: np.ndarray, sr: int) -> StingResult:
         """
         Classify the track ending as sting, fade, or cut.
 
-        Raises:
-            ModelInferenceError: on librosa load failure.
+        Args:
+            audio: Pre-decoded mono array at CONSTANTS.SAMPLE_RATE.
+            sr:    Sample rate of the decoded array.
         """
-        try:
-            import librosa
-
-            audio, sr = librosa.load(
-                io.BytesIO(raw), sr=CONSTANTS.SAMPLE_RATE, mono=True
-            )
-        except Exception as exc:
-            raise ModelInferenceError(
-                "Sting check: audio load failed.",
-                context={"original_error": str(exc)},
-            ) from exc
+        import librosa
 
         if len(audio) < sr * 4:
             # Too short — report as cut (neutral), no flag
@@ -226,25 +216,17 @@ class Compliance:
 
     @spaces.GPU
     def _check_energy_evolution(
-        self, raw: bytes, beats: list[float]
+        self, audio: np.ndarray, sr: int, beats: list[float]
     ) -> EnergyEvolutionResult:
         """
         Verify spectral contrast evolves across every 4-bar window.
 
-        Raises:
-            ModelInferenceError: on librosa load failure.
+        Args:
+            audio: Pre-decoded mono array at CONSTANTS.SAMPLE_RATE.
+            sr:    Sample rate of the decoded array.
+            beats: allin1 beat timestamps; falls back to librosa if sparse.
         """
-        try:
-            import librosa
-
-            audio, sr = librosa.load(
-                io.BytesIO(raw), sr=CONSTANTS.SAMPLE_RATE, mono=True
-            )
-        except Exception as exc:
-            raise ModelInferenceError(
-                "Energy evolution check: audio load failed.",
-                context={"original_error": str(exc)},
-            ) from exc
+        import librosa
 
         # Fall back to librosa beat tracking when beats are absent or sparse
         if not beats or len(beats) < 8:
