@@ -1839,15 +1839,25 @@ def _render_sync_cuts(result: AnalysisResult) -> None:
         "letter-spacing:.12em;text-transform:uppercase;color:var(--dim);"
         "padding-bottom:4px;border-bottom:1px solid var(--border);"
     )
+    _conf_header = (
+        f"<div style='{_mono_hdr}'>Confidence"
+        f'<span class="tip-wrap"><span class="tip-icon" role="button" tabindex="0" aria-label="More information">?</span>'
+        f'<span class="tip-box">How well this edit window fits sync placement conventions. '
+        f'Scored on 5 equal criteria (+20% each): starts after the intro, '
+        f'start lands on a section boundary, end lands on a section boundary, '
+        f'contains a chorus or hook, end snaps to a bar grid. '
+        f'100% = perfect on all five. 60%+ is recommended for placement.</span>'
+        f'</span></div>'
+    )
     for col, label in (
         (h_target, "Target"),
         (h_start,  "Start ▶"),
         (h_end,    "End"),
         (h_actual, "Actual"),
-        (h_conf,   "Confidence"),
         (h_note,   "Note"),
     ):
         col.markdown(f"<div style='{_mono_hdr}'>{label}</div>", unsafe_allow_html=True)
+    h_conf.markdown(_conf_header, unsafe_allow_html=True)
 
     _mono_cell = (
         "font-family:JetBrains Mono,monospace;font-size:.78rem;"
