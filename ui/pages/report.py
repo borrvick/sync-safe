@@ -153,7 +153,7 @@ def render_report(
     _render_sync_snapshot(result)
 
     with st.expander("Track Overview", expanded=True):
-        _section_info(
+        _section_tooltip(
             "Basic track metadata and detected arrangement structure. Shows title, artist, BPM, "
             "musical key, and duration alongside the section map (intro, verse, chorus, bridge, "
             "outro) detected by the allin1 structural analysis model."
@@ -165,7 +165,7 @@ def render_report(
             _render_structure_card(result.structure)
 
     with st.expander("Authenticity Audit", expanded=True):
-        _section_info(
+        _section_tooltip(
             "Multi-signal analysis to assess whether the track shows signs of AI generation. "
             "Checks C2PA content credentials (cryptographic DAW/AI provenance), beat-grid timing "
             "variance (perfect quantization is an AI signal), vocal centroid stability (AI vocals "
@@ -176,7 +176,7 @@ def render_report(
         _render_forensics_card(result.forensics, source=result.audio.source)
 
     with st.expander("Structural Repetition", expanded=True):
-        _section_info(
+        _section_tooltip(
             "Measures how much the track repeats itself across its arrangement. "
             "High repetition can limit sync editability — if every section sounds identical, "
             "editors have fewer natural cut points. Scored using cross-correlation of 4-bar "
@@ -187,7 +187,7 @@ def render_report(
 
     if result.sync_cuts:
         with st.expander("Sync Edit Points", expanded=False):
-            _section_info(
+            _section_tooltip(
                 "Automatically suggested edit windows for 15s, 30s, and 60s placements. "
                 "Each window is scored on five criteria: starts after the intro, opens on a "
                 "section boundary, closes on a section boundary, contains a chorus or hook, "
@@ -197,7 +197,7 @@ def render_report(
             _render_sync_cuts(result)
 
     with st.expander("Sync Readiness Checks", expanded=True):
-        _section_info(
+        _section_tooltip(
             "Gallo-Method compliance checks for sync submission readiness. Covers: sting detection "
             "(sharp energy drop at track end for bumper/sting use), 4–8 bar energy evolution "
             "(tracks must build or change — flat energy fails), intro timing (intro must not "
@@ -208,7 +208,7 @@ def render_report(
         _render_audio_quality_card(result.audio_quality)
 
     with st.expander("Discovery & Licensing", expanded=True):
-        _section_info(
+        _section_tooltip(
             "Popularity tier, rights data, and similar track recommendations. Popularity is a "
             "blended 0–100 score derived from Last.fm listeners, platform engagement (views, "
             "likes), and Spotify popularity — used to estimate sync fee ranges. Rights lookup "
@@ -218,7 +218,7 @@ def render_report(
         _render_legal_and_discovery(result)
 
     with st.expander("Lyrics & Content Audit", expanded=True):
-        _section_info(
+        _section_tooltip(
             "Full lyric transcription via Whisper with timestamped compliance flagging. "
             "Scans for explicit language (Detoxify toxicity scoring + profanity word list), "
             "brand/trademark mentions (curated keyword list), geographic references that may "
@@ -335,12 +335,14 @@ def _compute_sync_verdict(
     return verdict, color, categories
 
 
-def _section_info(text: str) -> None:
-    """Render a dim description line at the top of an expander section."""
+def _section_tooltip(text: str) -> None:
+    """Render a right-aligned ? tooltip at the top of an expander section."""
     st.markdown(
-        f"<div style='font-family:Figtree,sans-serif;font-size:.78rem;"
-        f"color:var(--dim);margin-bottom:14px;line-height:1.5;'>"
-        f"{html_mod.escape(text)}</div>",
+        f"<div style='display:flex;justify-content:flex-end;margin:-8px 0 6px;'>"
+        f"<span class='tip-wrap'>"
+        f"<span class='tip-icon' role='button' tabindex='0' aria-label='More information'>?</span>"
+        f"<span class='tip-box' style='left:auto;right:0;'>{html_mod.escape(text)}</span>"
+        f"</span></div>",
         unsafe_allow_html=True,
     )
 
