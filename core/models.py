@@ -202,6 +202,9 @@ class ForensicsResult(BaseModel):
     is_vocal: bool = False                       # True → pyin detected vocal content; routes vocal scoring path
     c2pa_origin: str = ""                        # "ai" | "daw" | "unknown" | "" (no manifest)
 
+    # Blended Repetition Index: 0.6 * loop_score + 0.4 * loop_autocorr_score (see #144)
+    repetition_index: Optional[float] = None   # None → forensics skipped or pre-#144 result
+
     ai_segments: list[AiSegment] = Field(default_factory=list)  # per-window heatmap data
 
     flags: list[str]        = Field(default_factory=list)  # human-readable flag labels

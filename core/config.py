@@ -61,6 +61,14 @@ class SystemConstants:
     # Cross-correlation score above this → likely stock loop (sync readiness)
     LOOP_SCORE_CEILING: float = 0.98
 
+    # ---- Repetition Index (blended loop signal for UI display) ----------------
+    # repetition_index = WEIGHT_LOOP * loop_score + WEIGHT_AUTOCORR * loop_autocorr_score
+    # Weights reflect signal hierarchy: cross-corr is more discriminative for AI loops.
+    REPETITION_INDEX_WEIGHT_LOOP: float     = 0.6
+    REPETITION_INDEX_WEIGHT_AUTOCORR: float = 0.4
+    REPETITION_INDEX_HIGH: float            = 0.75   # >= → "High"
+    REPETITION_INDEX_MODERATE: float        = 0.45   # >= → "Moderate"; < → "Low"
+
     # Frequency above which spectral energy is checked for AI artefacts ("slop")
     SPECTRAL_SLOP_HZ: int = 16_000
 

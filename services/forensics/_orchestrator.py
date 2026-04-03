@@ -97,12 +97,21 @@ class Forensics:
         forensic_notes = _build_forensic_notes(bundle, verdict)
         ai_segments    = self._compute_ai_segments(data)
 
+        repetition_index = round(
+            min(1.0, max(0.0,
+                CONSTANTS.REPETITION_INDEX_WEIGHT_LOOP     * bundle.loop_score
+                + CONSTANTS.REPETITION_INDEX_WEIGHT_AUTOCORR * bundle.loop_autocorr_score,
+            )),
+            3,
+        )
+
         return ForensicsResult(
             c2pa_flag=bundle.c2pa_flag,
             c2pa_origin=bundle.c2pa_label,
             ibi_variance=bundle.ibi_variance,
             loop_score=bundle.loop_score,
             loop_autocorr_score=bundle.loop_autocorr_score,
+            repetition_index=repetition_index,
             spectral_slop=bundle.spectral_slop,
             synthid_score=float(bundle.synthid_bins),
             centroid_instability_score=bundle.centroid_instability_score,

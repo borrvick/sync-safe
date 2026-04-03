@@ -576,6 +576,80 @@ def _render_structure_card(sr: Optional[StructureResult]) -> None:
             unsafe_allow_html=True,
         )
 
+    # Section stats summary row (#134)
+    stats = _build_section_stats(sections)
+    if stats:
+        st.markdown(
+            f"<div style='font-family:\"Figtree\",sans-serif;font-size:.76rem;"
+            f"color:var(--dim);margin-top:10px;'>{html_mod.escape(stats)}</div>",
+            unsafe_allow_html=True,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Repetition Index helpers (#144, #141)
+# ---------------------------------------------------------------------------
+
+def _repetition_index_label(ri: Optional[float]) -> tuple[str, str]:
+    """Return (label, color) for a repetition index value."""
+    if ri is None:
+        return ("—", "var(--dim)")
+    if ri >= CONSTANTS.REPETITION_INDEX_HIGH:
+        return ("High", "var(--danger)")
+    if ri >= CONSTANTS.REPETITION_INDEX_MODERATE:
+        return ("Moderate", "var(--grade-c)")
+    return ("Low", "var(--grade-b)")
+
+
+def _sync_editability_badge(ri: Optional[float]) -> Optional[tuple[str, str, str]]:
+    """Return (label, detail, color) or None if index unavailable."""
+    if ri is None:
+        return None
+    if ri >= CONSTANTS.REPETITION_INDEX_HIGH:
+        return ("Loop-friendly", "Easy to extend or trim for ad spots", "var(--accent)")
+    if ri >= CONSTANTS.REPETITION_INDEX_MODERATE:
+        return ("Moderate Loop Structure", "Versatile for most placements", "var(--grade-c)")
+    return ("Organic Flow", "Better suited for narrative and documentary", "var(--grade-b)")
+
+
+# ---------------------------------------------------------------------------
+# Section stats (#134)
+# ---------------------------------------------------------------------------
+
+def _build_section_stats(sections: list[Section]) -> str:
+    """
+    Build a one-line summary string for the sections list.
+
+    Pure function — no I/O.  Returns "" when sections is empty or total
+    duration is zero (prevents div-by-zero and renders nothing).
+    """
+    if not sections:
+        return ""
+    total = sum(s.end - s.start for s in sections)
+    if total <= 0:
+        return ""
+
+    n       = len(sections)
+    avg_s   = total / n
+    chorus_dur = sum(
+        s.end - s.start for s in sections
+        if any(k in s.label.lower() for k in ("chorus", "hook", "refrain"))
+    )
+    inst_dur = sum(
+        s.end - s.start for s in sections
+        if any(k in s.label.lower() for k in ("instrumental", "break", "intro", "outro"))
+    )
+    chorus_pct = round(chorus_dur / total * 100)
+    inst_pct   = round(inst_dur   / total * 100)
+
+    parts: list[str] = [f"{n} section{'s' if n != 1 else ''}"]
+    if chorus_pct > 0:
+        parts.append(f"{chorus_pct}% chorus")
+    if inst_pct > 0:
+        parts.append(f"{inst_pct}% instrumental")
+    parts.append(f"Avg {avg_s:.0f}s/section")
+    return " · ".join(parts)
+
 
 # ---------------------------------------------------------------------------
 # AI probability heatmap helpers
@@ -863,6 +937,11 @@ def _render_production_analysis_card(fr: Optional[ForensicsResult], source: str 
     )
     autocorr_fmt = f"{autocorr_num} ({autocorr_label})"
 
+    # Blended Repetition Index headline (#144)
+    ri        = fr.repetition_index
+    ri_label, ri_color = _repetition_index_label(ri)
+    ri_pct    = f"{ri:.0%}" if ri is not None else "—"
+
     st.markdown(f"""
     <div class="sig">
       <div class="sig-head">Structural Repetition</div>
@@ -871,6 +950,22 @@ def _render_production_analysis_card(fr: Optional[ForensicsResult], source: str 
         Measures how repetitive this track's structure is. High scores indicate the
         production relies heavily on looping sections — common in modern pop and hip-hop.
         This is independent of AI detection and does not indicate AI generation on its own.
+      </div>
+      <div style="display:flex;align-items:center;gap:18px;margin-bottom:14px;">
+        <div>
+          <div style="font-family:'Chakra Petch',monospace;font-size:.54rem;font-weight:600;
+                      letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:4px;">
+            Repetition Index</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:1.6rem;font-weight:700;
+                      color:{ri_color};line-height:1;">{ri_pct}
+            <span style="font-family:'Chakra Petch',monospace;font-size:.7rem;font-weight:500;
+                         color:{ri_color};margin-left:6px;">{ri_label}</span>
+          </div>
+          <div style="margin-top:6px;height:4px;border-radius:2px;background:var(--border-hr);width:120px;overflow:hidden;">
+            <div style="height:4px;border-radius:2px;background:{ri_color};width:120px;
+                        transform:scaleX({ri or 0.0:.3f});transform-origin:left;transition:transform .3s;"></div>
+          </div>
+        </div>
       </div>
       <div class="sig-row">
         <span class="sk">Section Similarity
@@ -890,6 +985,20 @@ def _render_production_analysis_card(fr: Optional[ForensicsResult], source: str 
       </div>
     </div>
     """, unsafe_allow_html=True)
+
+    # Sync-editability badge (#141)
+    badge = _sync_editability_badge(ri)
+    if badge:
+        badge_label, badge_detail, badge_color = badge
+        st.markdown(
+            f"<div style='border-left:3px solid {badge_color};padding:6px 12px;"
+            f"margin-bottom:12px;background:{badge_color}0d;border-radius:0 6px 6px 0;'>"
+            f"<span style='font-family:\"Chakra Petch\",monospace;font-size:.72rem;font-weight:600;"
+            f"color:{badge_color};'>{html_mod.escape(badge_label)}</span>"
+            f"<span style='font-family:\"Figtree\",sans-serif;font-size:.74rem;color:var(--dim);"
+            f"margin-left:8px;'>· {html_mod.escape(badge_detail)}</span></div>",
+            unsafe_allow_html=True,
+        )
 
     # ── Spectral boundary signals (monitoring mode — not yet in verdict) ─────
     infra  = fr.infrasonic_energy_ratio
