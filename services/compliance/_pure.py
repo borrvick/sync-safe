@@ -32,11 +32,12 @@ _MIN_SEGMENT_CHARS: int = 20
 _GRADE_ISSUE_TYPES: frozenset[str] = frozenset({"EXPLICIT", "VIOLENCE", "DRUGS"})
 
 # NER entity labels mapped to our issue types.
-# ORG → BRAND: trademarked company/product names (Nike, Spotify, etc.)
+# ORG is intentionally excluded: en_core_web_sm produces too many false positives
+# on song lyrics (poetic phrases, slang, song titles mis-classified as companies).
+# Brand detection is handled exclusively by the curated data/brand_keywords.py list.
 # GPE → LOCATION: geo-political entities (countries, cities, regions) that may
 #   create placement restrictions in international licensing contexts.
 _NER_ISSUE_MAP: dict[str, IssueType] = {
-    "ORG":  "BRAND",
     "GPE":  "LOCATION",
 }
 

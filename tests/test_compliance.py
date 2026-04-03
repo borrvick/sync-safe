@@ -337,15 +337,17 @@ class TestCheckIntro:
 # ---------------------------------------------------------------------------
 
 class TestNerIssueMap:
-    def test_org_maps_to_brand(self):
-        assert _NER_ISSUE_MAP["ORG"] == "BRAND"
+    def test_org_not_in_map(self):
+        # ORG intentionally excluded — en_core_web_sm produces too many false
+        # positives on song lyrics; brand detection uses data/brand_keywords.py
+        assert "ORG" not in _NER_ISSUE_MAP
 
     def test_gpe_maps_to_location(self):
         assert _NER_ISSUE_MAP["GPE"] == "LOCATION"
 
     def test_no_unexpected_keys(self):
-        # Only ORG and GPE should be mapped — other spaCy labels are ignored
-        assert set(_NER_ISSUE_MAP.keys()) == {"ORG", "GPE"}
+        # Only GPE should be mapped — ORG excluded, other spaCy labels ignored
+        assert set(_NER_ISSUE_MAP.keys()) == {"GPE"}
 
     def test_brand_recommendation_present(self):
         assert "BRAND" in _NER_RECOMMENDATIONS
