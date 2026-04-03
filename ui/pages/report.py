@@ -970,7 +970,11 @@ def _render_audio_quality_card(aq: Optional["AudioQualityResult"]) -> None:
       <div>
         <div style="font-family:'Chakra Petch',monospace;font-size:.5rem;font-weight:600;
                     letter-spacing:.18em;text-transform:uppercase;color:var(--dim);
-                    margin-bottom:4px;">Dialogue Compatibility</div>
+                    margin-bottom:4px;">Dialogue Compatibility
+          <span class="tip-wrap"><span class="tip-icon">?</span>
+            <span class="tip-box">How well this track sits under spoken dialogue or voiceover. Measured as the fraction of spectral energy sitting <em>outside</em> the 300–3000 Hz speech range. "Dialogue-Ready" (≥70%) means the track leans into bass or high-frequency texture — a VO will cut through clearly. "Dialogue-Heavy" (&lt;40%) means most energy competes directly with the human voice — expect muddiness without a stem mix or significant EQ.</span>
+          </span>
+        </div>
         <div style="font-family:'Chakra Petch',monospace;font-size:1.1rem;font-weight:700;
                     color:{dial_color};">{html_mod.escape(aq.dialogue_label)}</div>
       </div>
