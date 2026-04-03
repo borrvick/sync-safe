@@ -701,7 +701,7 @@ def _render_forensics_card(fr: Optional[ForensicsResult], source: str = "file") 
       </div>
       <div class="sig-row">
         <span class="sk">C2PA Manifest
-          <span class="tip-wrap"><span class="tip-icon">?</span>
+          <span class="tip-wrap"><span class="tip-icon" role="button" tabindex="0" aria-label="More information">?</span>
             <span class="tip-box">Content Credentials standard (C2PA) — a cryptographic signature embedded by some DAWs and AI tools. "Born-AI (Certified)": a hard certified signal the track was machine-generated. "DAW Origin (Verified)": manifest confirms creation in a known DAW (Logic Pro, Ableton, Pro Tools, etc.) — strong human-origin signal. "Manifest Present (Unknown Origin)": credentials exist but the software agent is unrecognised. "No C2PA Manifest": neutral — most files have none.</span>
           </span>
         </span>
@@ -709,7 +709,7 @@ def _render_forensics_card(fr: Optional[ForensicsResult], source: str = "file") 
       </div>
       <div class="sig-row">
         <span class="sk">IBI Variance (ms²)
-          <span class="tip-wrap"><span class="tip-icon">?</span>
+          <span class="tip-wrap"><span class="tip-icon" role="button" tabindex="0" aria-label="More information">?</span>
             <span class="tip-box">Inter-Beat Interval variance — measures millisecond-level timing drift between beats. Near-zero (&lt;0.5 ms²) = machine-quantized grid (AI/loop signal). High variance (&gt;90 ms²) = natural human feel and micro-timing variation — an organic signal, not AI.</span>
           </span>
         </span>
@@ -717,7 +717,7 @@ def _render_forensics_card(fr: Optional[ForensicsResult], source: str = "file") 
       </div>
       <div class="sig-row">
         <span class="sk">Groove Profile
-          <span class="tip-wrap"><span class="tip-icon">?</span>
+          <span class="tip-wrap"><span class="tip-icon" role="button" tabindex="0" aria-label="More information">?</span>
             <span class="tip-box">Derived from IBI variance. "Perfect Quantization" = machine-grid locked (&lt;0.5 ms²) — AI/loop signal. "Human Micro-timing" = natural drift (0.5–90 ms²). "Human-Feel Timing" = high micro-variation (&gt;90 ms²) — organic signal indicating human performance or humanized production.</span>
           </span>
         </span>
@@ -725,7 +725,7 @@ def _render_forensics_card(fr: Optional[ForensicsResult], source: str = "file") 
       </div>
       <div class="sig-row">
         <span class="sk">Centroid Instability
-          <span class="tip-wrap"><span class="tip-icon">?</span>
+          <span class="tip-wrap"><span class="tip-icon" role="button" tabindex="0" aria-label="More information">?</span>
             <span class="tip-box">Measures spectral centroid coefficient-of-variation within each sustained note. AI vocoders shift upper partials erratically mid-note — the source of the "glassy/hollow/formant-shifting" artifact heard in AI covers. Human vibrato modulates all partials together, keeping the centroid relatively stable. A score above 0.08 flags suspected formant drift. Scores of –1 mean no sustained intervals were found (e.g. full-instrumental or very quiet sections).</span>
           </span>
         </span>
@@ -733,7 +733,7 @@ def _render_forensics_card(fr: Optional[ForensicsResult], source: str = "file") 
       </div>
       <div class="sig-row">
         <span class="sk">Spectral Slop
-          <span class="tip-wrap"><span class="tip-icon">?</span>
+          <span class="tip-wrap"><span class="tip-icon" role="button" tabindex="0" aria-label="More information">?</span>
             <span class="tip-box">Checks for anomalous energy above 16 kHz relative to the full spectrum. AI generators often leak noise in the ultrasonic range. A high-frequency ratio &gt;15% triggers this flag.</span>
           </span>
         </span>
@@ -741,7 +741,7 @@ def _render_forensics_card(fr: Optional[ForensicsResult], source: str = "file") 
       </div>
       <div class="sig-row">
         <span class="sk">HF Phase Coherence
-          <span class="tip-wrap"><span class="tip-icon">?</span>
+          <span class="tip-wrap"><span class="tip-icon" role="button" tabindex="0" aria-label="More information">?</span>
             <span class="tip-box">Scans 18–22 kHz for phase-locked spectral bins that may indicate an AI watermark (e.g. SynthID). Confidence scales with the number of coherent bins found.</span>
           </span>
         </span>
@@ -812,7 +812,7 @@ def _render_production_analysis_card(fr: Optional[ForensicsResult], source: str 
       </div>
       <div class="sig-row">
         <span class="sk">Section Similarity
-          <span class="tip-wrap"><span class="tip-icon">?</span>
+          <span class="tip-wrap"><span class="tip-icon" role="button" tabindex="0" aria-label="More information">?</span>
             <span class="tip-box">Compares 4-bar spectral sections across the track. High score means sections sound near-identical — the production leans heavily on a repeating musical phrase.</span>
           </span>
         </span>
@@ -820,7 +820,7 @@ def _render_production_analysis_card(fr: Optional[ForensicsResult], source: str 
       </div>
       <div class="sig-row">
         <span class="sk">Rhythmic Regularity
-          <span class="tip-wrap"><span class="tip-icon">?</span>
+          <span class="tip-wrap"><span class="tip-icon" role="button" tabindex="0" aria-label="More information">?</span>
             <span class="tip-box">Measures how regularly the beat pattern repeats. High score means the rhythm locks to a tight, consistent cycle — typical of loop-based production.</span>
           </span>
         </span>
@@ -850,7 +850,7 @@ def _render_production_analysis_card(fr: Optional[ForensicsResult], source: str 
       </div>
       <div class="sig-row">
         <span class="sk">Infrasonic Ratio (&lt;20 Hz)
-          <span class="tip-wrap"><span class="tip-icon">?</span>
+          <span class="tip-wrap"><span class="tip-icon" role="button" tabindex="0" aria-label="More information">?</span>
             <span class="tip-box">Energy fraction in 1–20 Hz. Real microphones cannot capture sub-sonic frequencies. AI diffusion can leave DC bias or rumble here. Values above ~0.5% are elevated.</span>
           </span>
         </span>
@@ -858,7 +858,7 @@ def _render_production_analysis_card(fr: Optional[ForensicsResult], source: str 
       </div>
       <div class="sig-row">
         <span class="sk">Ultrasonic Ratio (20–22 kHz)
-          <span class="tip-wrap"><span class="tip-icon">?</span>
+          <span class="tip-wrap"><span class="tip-icon" role="button" tabindex="0" aria-label="More information">?</span>
             <span class="tip-box">Energy fraction in 20–22 kHz band. Only computed for uploads with native SR ≥ 40 kHz. Human masters are shelf-filtered above 18–20 kHz. N/A for YouTube or low-SR files.</span>
           </span>
         </span>
@@ -866,7 +866,7 @@ def _render_production_analysis_card(fr: Optional[ForensicsResult], source: str 
       </div>
       <div class="sig-row">
         <span class="sk">Phase Coherence Δ (LF−HF)
-          <span class="tip-wrap"><span class="tip-icon">?</span>
+          <span class="tip-wrap"><span class="tip-icon" role="button" tabindex="0" aria-label="More information">?</span>
             <span class="tip-box">LF inter-channel coherence minus HF coherence. AI diffusion can generate low and high frequencies as separate events, making HF phase incoherent while LF stays stable. Positive = AI pattern; N/A for mono sources.</span>
           </span>
         </span>
@@ -971,7 +971,7 @@ def _render_audio_quality_card(aq: Optional["AudioQualityResult"]) -> None:
         <div style="font-family:'Chakra Petch',monospace;font-size:.5rem;font-weight:600;
                     letter-spacing:.18em;text-transform:uppercase;color:var(--dim);
                     margin-bottom:4px;">Dialogue Compatibility
-          <span class="tip-wrap"><span class="tip-icon">?</span>
+          <span class="tip-wrap"><span class="tip-icon" role="button" tabindex="0" aria-label="More information">?</span>
             <span class="tip-box">How well this track sits under spoken dialogue or voiceover. Measured as the fraction of spectral energy sitting <em>outside</em> the 300–3000 Hz speech range. "Dialogue-Ready" (≥70%) means the track leans into bass or high-frequency texture — a VO will cut through clearly. "Dialogue-Heavy" (&lt;40%) means most energy competes directly with the human voice — expect muddiness without a stem mix or significant EQ.</span>
           </span>
         </div>
@@ -1487,7 +1487,7 @@ def _render_audit_column(flags: list[ComplianceFlag], grade: str) -> None:
     st.markdown(f"""
     <div class="sig" style="margin-bottom:16px;">
       <div class="sig-head">Sync Compliance Grade
-        <span class="tip-wrap" style="margin-left:6px;"><span class="tip-icon">?</span>
+        <span class="tip-wrap" style="margin-left:6px;"><span class="tip-icon" role="button" tabindex="0" aria-label="More information">?</span>
           <span class="tip-box">Sync readiness scoring for sync licensing.<br><br>
           <strong>A</strong> — Fully clean. Clear for submission in any context.<br>
           <strong>B</strong> — Advisory flags only. Director's placement call — no hard blockers.<br>
