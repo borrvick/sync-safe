@@ -54,47 +54,6 @@ except ImportError:
             return fn
 
 
-<<<<<<< HEAD:services/compliance/_orchestrator.py
-=======
-# ---------------------------------------------------------------------------
-# Detoxify thresholds
-# ---------------------------------------------------------------------------
-
-# Detoxify score thresholds — sourced from CONSTANTS (core/config.py).
-# All numeric values live there; references here are read-only aliases for brevity.
-_EXPLICIT_CONFIRMED: float = CONSTANTS.EXPLICIT_CONFIRMED
-_EXPLICIT_POTENTIAL: float = CONSTANTS.EXPLICIT_POTENTIAL
-_HARD_OBSCENE_THRESHOLD: float = CONSTANTS.EXPLICIT_HARD
-_VIOLENCE_CONFIRMED: float = CONSTANTS.VIOLENCE_CONFIRMED
-_VIOLENCE_POTENTIAL: float = CONSTANTS.VIOLENCE_POTENTIAL
-_HARD_THREAT_THRESHOLD: float = CONSTANTS.VIOLENCE_HARD
-_DRUGS_TOXIC_MIN: float = CONSTANTS.DRUGS_TOXIC_MIN
-
-# Number of segments in a sliding window used to confirm borderline scores
-_WINDOW_SIZE: int = 3
-
-# Segments shorter than this carry no classifiable signal
-_MIN_SEGMENT_CHARS: int = 20
-
-# Only these issue types count toward the A–F content grade
-_GRADE_ISSUE_TYPES: frozenset[str] = frozenset({"EXPLICIT", "VIOLENCE", "DRUGS"})
-
-# NER entity labels mapped to our issue types.
-# ORG → BRAND: trademarked company/product names (Nike, Spotify, etc.)
-# GPE → LOCATION: geo-political entities (countries, cities, regions) that may
-#   create placement restrictions in international licensing contexts.
-_NER_ISSUE_MAP: dict[str, IssueType] = {
-    "ORG":  "BRAND",
-    "GPE":  "LOCATION",
-}
-
-_NER_RECOMMENDATIONS: dict[IssueType, str] = {
-    "BRAND":    "Confirm explicit brand clearance with rights holder.",
-    "LOCATION": "Geographic reference — verify placement restrictions for international markets.",
-}
-
-
->>>>>>> origin/feature/lyrics-moderator-audit:services/compliance.py
 class Compliance:
     """
     Applies sync readiness compliance rules to audio and lyrics.
