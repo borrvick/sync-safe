@@ -67,13 +67,25 @@ class Authorship:
         lines     = [seg.text.strip() for seg in transcript if seg.text.strip()]
         full_text = "\n".join(lines)
 
-        if len(lines) < 4 or len(full_text) < 80:
+        if not lines or len(full_text) < 80:
+            # Whisper returned nothing (or only whitespace) — likely instrumental
             return AuthorshipResult(
                 verdict="Insufficient data",
                 signal_count=0,
                 roberta_score=None,
-                feature_notes=["Not enough lyric content to analyse."],
+                feature_notes=[],
                 scores={},
+                skip_reason="instrumental",
+            )
+
+        if len(lines) < 4:
+            return AuthorshipResult(
+                verdict="Insufficient data",
+                signal_count=0,
+                roberta_score=None,
+                feature_notes=[],
+                scores={},
+                skip_reason="too_short",
             )
 
         burst = _burstiness(lines)
@@ -92,12 +104,16 @@ class Authorship:
 
         verdict = _compute_verdict(ai_signals)
 
+        # 4–7 lines: analysis runs but data is sparse — flag as advisory
+        skip_reason = "short" if len(lines) < 8 else None
+
         return AuthorshipResult(
             verdict=verdict,
             signal_count=ai_signals,
             roberta_score=round(rob, 3) if rob is not None else None,
             feature_notes=feature_notes,
             scores=scores,
+            skip_reason=skip_reason,
         )
 
     # ------------------------------------------------------------------

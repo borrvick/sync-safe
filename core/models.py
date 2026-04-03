@@ -321,6 +321,7 @@ class AuthorshipResult(BaseModel):
     roberta_score: Optional[float]      = None  # None when model not run or insufficient data
     feature_notes: list[str]            = Field(default_factory=list)
     scores: dict[str, Optional[float]]  = Field(default_factory=dict)
+    skip_reason: Optional[str]          = None  # "instrumental" | "too_short" | "short" | None
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()

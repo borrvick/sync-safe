@@ -1322,6 +1322,12 @@ def _render_legal_and_discovery(result: AnalysisResult) -> None:
               </div>
             </div>""", unsafe_allow_html=True)
 
+        if result.legal.isrc:
+            st.caption(
+                "ISRC (International Standard Recording Code) — unique identifier for this recording. "
+                "Paste directly into library delivery systems, clearance forms, or CMS metadata fields."
+            )
+
         for name, url in [("ASCAP", result.legal.ascap), ("BMI", result.legal.bmi), ("SESAC", result.legal.sesac)]:
             if url:
                 st.link_button(f"Search {name} →", url, use_container_width=True)
@@ -1353,6 +1359,13 @@ def _render_legal_and_discovery(result: AnalysisResult) -> None:
               {btn}
             </div>"""
         st.markdown(f"<div class='sig' style='padding:18px;'>{rows}</div>", unsafe_allow_html=True)
+        if len(result.similar_tracks) < 3:
+            n = len(result.similar_tracks)
+            st.caption(
+                f"Only {n} strong match{'es' if n != 1 else ''} found. "
+                "Similar tracks data is richer for mainstream catalog — "
+                "try a well-known reference track for a fuller comparison set."
+            )
     else:
         st.markdown(
             "<div style='color:var(--dim);font-size:.84rem;'>No similar tracks found.</div>",
@@ -1431,6 +1444,20 @@ def _render_theme_mood(result: AnalysisResult) -> None:
     )
 
 
+_AUTHORSHIP_SYNC_NOTES: dict[str, str] = {
+    "Likely Human":      "Full clearance path — no additional verification needed.",
+    "Uncertain":         "Recommend writer verification before submission.",
+    "Likely AI":         "Check licensing terms — generated content may require separate disclosure.",
+    "Insufficient data": "",
+}
+
+_AUTHORSHIP_SKIP_MESSAGES: dict[str, str] = {
+    "instrumental": "Instrumental track — no lyric authorship check performed.",
+    "too_short":    "Limited lyric data — results may not be representative.",
+    "short":        "Note: short lyric content — treat signals as indicative only.",
+}
+
+
 def _render_authorship_banner(authorship: Optional["AuthorshipResult"]) -> None:
     if not authorship:
         return
@@ -1441,6 +1468,7 @@ def _render_authorship_banner(authorship: Optional["AuthorshipResult"]) -> None:
     rob_str  = f"Classifier: {a_rob:.0%} AI probability · " if a_rob is not None else ""
     n_sig    = authorship.signal_count
     sig_str  = f"{n_sig} lyric flag{'s' if n_sig != 1 else ''}"
+    sync_note = _AUTHORSHIP_SYNC_NOTES.get(av, "")
 
     def _note_html(note: str) -> str:
         arrow      = "✓" if "✓" in note else "▲"
@@ -1452,7 +1480,13 @@ def _render_authorship_banner(authorship: Optional["AuthorshipResult"]) -> None:
             f"color:{note_color};'>{note}</span></div>"
         )
 
-    notes_html = "".join(_note_html(n) for n in a_notes)
+    notes_html  = "".join(_note_html(n) for n in a_notes)
+    sync_suffix = (
+        f"<div style='font-family:\"Figtree\",sans-serif;font-size:.72rem;"
+        f"color:var(--dim);margin-top:8px;padding-top:8px;"
+        f"border-top:1px solid {av_color}22;'>{html_mod.escape(sync_note)}</div>"
+        if sync_note else ""
+    )
     st.markdown(f"""
     <div style="border:1px solid {av_color}22;border-radius:10px;background:{av_color}08;
                 padding:14px 18px;margin-bottom:18px;">
@@ -1468,8 +1502,14 @@ def _render_authorship_banner(authorship: Optional["AuthorshipResult"]) -> None:
         </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 18px;">{notes_html}</div>
+      {sync_suffix}
     </div>
     """, unsafe_allow_html=True)
+
+    # Tiered advisory message based on why analysis was limited (#165)
+    skip_msg = _AUTHORSHIP_SKIP_MESSAGES.get(authorship.skip_reason or "", "")
+    if skip_msg:
+        st.caption(skip_msg)
 
 
 def _render_lyric_column(
