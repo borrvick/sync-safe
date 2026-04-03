@@ -1,0 +1,92 @@
+# data/eval_audio_dirs.yaml
+#
+# Directory references for lofcz evaluation and future classifier benchmarking.
+# Paths reference the external Sound Library volume — do NOT hardcode these in scripts.
+#
+# Each entry:
+#   path:        absolute directory path
+#   source:      descriptive name for the pack/dataset
+#   notes:       what kind of audio, any caveats
+#   glob:        optional filename pattern (default: *.wav and *.mp3)
+#   recursive:   glob subdirectories (default: true)
+#   min_dur_s:   minimum file duration in seconds to include (0 = all files)
+
+ai:
+  - path: /Volumes/Sound Library/FakeMusicCaps/audioldm2
+    source: FakeMusicCaps
+    notes: AudioLDM2-generated music WAVs
+    min_dur_s: 0
+
+  - path: /Volumes/Sound Library/FakeMusicCaps/MusicGen_medium
+    source: FakeMusicCaps
+    notes: MusicGen-medium generated music WAVs
+    min_dur_s: 0
+
+  - path: /Volumes/Sound Library/FakeMusicCaps/musicldm
+    source: FakeMusicCaps
+    notes: MusicLDM-generated music WAVs
+    min_dur_s: 0
+
+  - path: /Volumes/Sound Library/FakeMusicCaps/mustango
+    source: FakeMusicCaps
+    notes: Mustango-generated music WAVs
+    min_dur_s: 0
+
+  - path: /Volumes/Sound Library/FakeMusicCaps/stable_audio_open
+    source: FakeMusicCaps
+    notes: Stable Audio Open generated music WAVs
+    min_dur_s: 0
+
+  - path: /Volumes/Sound Library/SonicsCal/mp3s
+    source: SonicsCal
+    notes: Suno + Udio AI-generated MP3s
+    glob: "fake_*.mp3"
+    min_dur_s: 0
+
+  - path: /Volumes/Sound Library/sonics/ai_audio/fake_songs
+    source: SonicsCal (extended)
+    notes: Additional Suno + Udio AI-generated MP3s
+    min_dur_s: 0
+human:
+  - path: /Volumes/Sound Library/Samples from Mars
+    source: Samples from Mars
+    notes: Full master tracks (01*.wav, 150-200s each) — real professional recordings
+    glob: "01*.wav"
+    recursive: false
+    min_dur_s: 30
+  - path: "/Volumes/Sound Library/Splice/sounds/packs/Oliver Power Tools Sample Pack"
+    source: Oliver Power Tools
+    notes: Real production loops and one-shots from Oliver (Splice)
+    min_dur_s: 0
+  - path: "/Volumes/Sound Library/Splice/sounds/packs/Oliver Power Tools Sample Pack II"
+    source: Oliver Power Tools II
+    notes: Real production loops and one-shots from Oliver (Splice)
+    min_dur_s: 0
+  - path: "/Volumes/Sound Library/Splice/sounds/packs/Oliver Power Tools Sample Pack III"
+    source: Oliver Power Tools III
+    notes: Real production loops and one-shots from Oliver (Splice)
+    min_dur_s: 0
+  - path: "/Volumes/Sound Library/Splice/sounds/packs/Oliver Power Tools Decades - 80's"
+    source: "Oliver Power Tools Decades 80s"
+    notes: Real 80s-style production samples from Oliver (Splice)
+    min_dur_s: 0
+  - path: "/Volumes/Sound Library/Splice/sounds/packs/Oliver Power Tools Decades - 90's"
+    source: "Oliver Power Tools Decades 90s"
+    notes: Real 90s-style production samples from Oliver (Splice)
+    min_dur_s: 0
+  - path: "/Volumes/Sound Library/Splice/sounds/packs/Oliver Power Tools Decades - 00's"
+    source: "Oliver Power Tools Decades 00s"
+    notes: Real 00s-style production samples from Oliver (Splice)
+    min_dur_s: 0
+
+  - path: /Volumes/Sound Library/Get in Order/DRIVE
+    source: Get in Order (DRIVE)
+    notes: Original full-track master recordings (Full Track.wav per song)
+    glob: "Full Track.wav"
+    min_dur_s: 30
+
+  - path: /Volumes/Sound Library/Get in Order/Kahone_LIVE_Stems(For Learning)
+    source: Get in Order (Live Stems)
+    notes: Live performance stems — use Backing_Tracks.wav for full-mix reference
+    glob: "Backing_Tracks.wav"
+    min_dur_s: 30
