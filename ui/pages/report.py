@@ -951,13 +951,26 @@ def _render_audio_quality_card(aq: Optional["AudioQualityResult"]) -> None:
         <div style="font-family:'Chakra Petch',monospace;font-size:1.6rem;
                     font-weight:700;color:var(--text);">{aq.integrated_lufs:.1f}</div>
         <div style="font-family:'JetBrains Mono',monospace;font-size:.65rem;
-                    color:var(--dim);">LUFS integrated</div>
+                    color:var(--dim);">LUFS integrated
+          <span class="tip-wrap"><span class="tip-icon" role="button" tabindex="0" aria-label="More information">?</span>
+            <span class="tip-box">Integrated loudness measured across the full track (ITU-R BS.1770-4). Streaming platforms automatically normalize to their target — the closer your master is to that target, the less processing is applied and the more consistent it sounds across platforms. –14 LUFS is the sweet spot for Spotify and YouTube.</span>
+          </span>
+        </div>
         <div style="margin-left:auto;font-family:'JetBrains Mono',monospace;
                     font-size:.65rem;color:{peak_color};">
           {html_mod.escape(peak_label)}{html_mod.escape(peak_warn)}
+          <span class="tip-wrap"><span class="tip-icon" role="button" tabindex="0" aria-label="More information">?</span>
+            <span class="tip-box">True peak level — the highest sample amplitude in the track. Anything above –1.0 dBFS risks inter-sample distortion after lossy encoding (AAC, MP3). A clipping warning means the master needs a limiter pass before streaming delivery.</span>
+          </span>
         </div>
       </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">{platform_cells}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;">{platform_cells}</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:.58rem;color:var(--dim);">
+        Platform delta
+        <span class="tip-wrap"><span class="tip-icon" role="button" tabindex="0" aria-label="More information">?</span>
+          <span class="tip-box">How far your track sits from each platform's loudness target. Negative (–) = platform turns you up. Positive (+) = platform turns you down. Values within ±1 LU are negligible. A large positive value (e.g. +8 LU for Broadcast) means you need a separate quieter master for that delivery format.</span>
+        </span>
+      </div>
     </div>
     """, unsafe_allow_html=True)
 
