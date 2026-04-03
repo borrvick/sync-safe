@@ -229,6 +229,7 @@ def render_report(
         _render_lyric_section(result)
 
     _render_export_buttons(result)
+    _render_raw_data_link()
     _render_footer()
 
 
@@ -2076,6 +2077,14 @@ def _render_tagged_download(result: AnalysisResult, track_slug: str) -> None:
         )
     except Exception as exc:  # noqa: BLE001 — UI boundary
         st.error(f"Tag injection failed: {exc}")
+
+
+def _render_raw_data_link() -> None:
+    """Render a navigation button to the Raw Data page."""
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("View Raw Data →", help="See every pipeline data point and download as CSV"):
+        st.session_state.page = "raw_data"
+        st.rerun()
 
 
 def _render_footer() -> None:

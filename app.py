@@ -144,18 +144,21 @@ st.markdown(_THEME_FAB, unsafe_allow_html=True)
 components.html(_THEME_JS, height=0, scrolling=False)
 
 # ── Session state defaults ────────────────────────────────────────────────────
-# audio:    AudioBuffer | None — ingested on landing page submit
-# analysis: AnalysisResult | None — computed on first report page render
-# page:     "landing" | "loading" | "report" | "how_it_works" | "legal"
+# audio:        AudioBuffer | None — ingested on landing page submit
+# analysis:     AnalysisResult | None — computed on first report page render
+# track_report: TrackReport | None — built lazily by raw_data page
+# page:         "landing" | "loading" | "report" | "raw_data" | "how_it_works" | "legal"
 # start_time, player_key — Audio State Manager (clickable timestamps)
 
 for key, default in [
-    ("page",        "landing"),
-    ("source",      None),
-    ("audio",       None),
-    ("analysis",    None),
-    ("start_time",  0),
-    ("player_key",  0),
+    ("page",            "landing"),
+    ("source",          None),
+    ("audio",           None),
+    ("analysis",        None),
+    ("track_report",        None),
+    ("_report_analysis_id", None),
+    ("start_time",          0),
+    ("player_key",          0),
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -197,7 +200,7 @@ if st.session_state.page == "loading":
     render_loading(st.session_state.source)
     st.stop()
 
-# ── Report page ───────────────────────────────────────────────────────────────
+# ── Report + Raw Data pages (both require a completed analysis) ───────────────
 
 audio    = st.session_state.audio
 analysis = st.session_state.analysis
@@ -205,6 +208,17 @@ analysis = st.session_state.analysis
 if audio is None or analysis is None:
     st.session_state.page = "landing"
     st.rerun()
+    st.stop()
+
+if st.session_state.page == "raw_data":
+    # Clear cached report when a new analysis lands so stale data isn't shown.
+    if st.session_state.get("track_report") is not None:
+        result_id = id(analysis)
+        if st.session_state.get("_report_analysis_id") != result_id:
+            st.session_state["track_report"] = None
+    st.session_state["_report_analysis_id"] = id(analysis)
+    from ui.pages.raw_data import render_raw_data
+    render_raw_data(analysis)
     st.stop()
 
 from ui.pages.report import render_report
