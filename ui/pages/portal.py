@@ -72,7 +72,7 @@ def render_portal() -> None:
                     label_visibility="collapsed",
                 )
                 st.markdown("""
-                <div style="display:flex;align-items:center;gap:5px;margin:6px 0 10px;flex-wrap:wrap;">
+                <div style="display:flex;align-items:center;gap:6px;margin:6px 0 10px;flex-wrap:wrap;">
                   <span style="font-family:'JetBrains Mono',monospace;font-size:.5rem;
                                color:var(--dim);letter-spacing:.08em;text-transform:uppercase;
                                margin-right:2px;">Accepts</span>
