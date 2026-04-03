@@ -545,23 +545,29 @@ def render_loading(source: Any) -> None:
         _advance("transcription", t0)
 
     # ── Step 4: Forensics ─────────────────────────────────────────────────
+    # Restricted to direct file uploads only — compressed/transcoded sources
+    # (YouTube, SoundCloud, etc.) destroy the high-frequency spectral signals
+    # the detector relies on, producing unreliable results.
     _tick("Forensic Scan", "forensics")
     t0 = time.time()
     forensics = None
     log.step_start("forensics")
-    try:
-        with step_timeout(_STEP_TIMEOUT_S["forensics"], "forensics"):
-            from services.forensics import Forensics
-            forensics = Forensics().analyze(audio)
-    except StepTimeoutError as exc:
-        st.toast("⏱ Forensic scan timed out — AI-detection unavailable.", icon="⚠️")
-        _advance("forensics", t0, error=str(exc))
-    except SyncSafeError as exc:
-        _advance("forensics", t0, error=str(exc))
-    except Exception as exc:  # noqa: BLE001 — UI boundary
-        _advance("forensics", t0, error=str(exc))
-    else:
+    if audio.source != "file":
         _advance("forensics", t0)
+    else:
+        try:
+            with step_timeout(_STEP_TIMEOUT_S["forensics"], "forensics"):
+                from services.forensics import Forensics
+                forensics = Forensics().analyze(audio)
+        except StepTimeoutError as exc:
+            st.toast("⏱ Forensic scan timed out — AI-detection unavailable.", icon="⚠️")
+            _advance("forensics", t0, error=str(exc))
+        except SyncSafeError as exc:
+            _advance("forensics", t0, error=str(exc))
+        except Exception as exc:  # noqa: BLE001 — UI boundary
+            _advance("forensics", t0, error=str(exc))
+        else:
+            _advance("forensics", t0)
 
     # ── Step 5: Compliance ────────────────────────────────────────────────
     _tick("Compliance Audit", "compliance")
@@ -659,12 +665,7 @@ def render_loading(source: Any) -> None:
             legal         = base_links.model_copy(update={"isrc": isrc, "pro_match": pro})
             popularity    = Discovery().get_track_popularity(
                 title, artist,
-                platform_metrics={
-                    k: v for k, v in (audio.metadata or {}).items()
-                    if k in ("view_count", "like_count", "share_count",
-                             "repost_count", "channel_follower_count")
-                    and isinstance(v, int)
-                },
+                platform_metrics=dict(audio.engagement),
             )
             audio_quality = AudioQualityAnalyzer().analyze(audio)
     except StepTimeoutError as exc:

@@ -62,6 +62,7 @@ class AudioBuffer(BaseModel):
     sample_rate: int = Field(default=22_050)
     label: str = Field(default="")                          # display name shown in the UI
     metadata: dict[str, str] = Field(default_factory=dict)  # title, artist from ingestion
+    engagement: dict[str, int] = Field(default_factory=dict)  # view_count, like_count, etc. from yt-dlp
     source: AudioSource = Field(default="file")             # "youtube" = lossy MP3 transcode; "file" = direct upload
 
     def to_bytesio(self) -> io.BytesIO:

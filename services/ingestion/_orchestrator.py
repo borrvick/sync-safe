@@ -100,7 +100,7 @@ class Ingestion:
             ) from exc
 
         track_metadata = _fetch_youtube_metadata(url)
-        track_metadata.update(self._ytdlp.fetch_engagement(url))
+        engagement     = self._ytdlp.fetch_engagement(url)
 
         wav_bytes = self._ytdlp.download_audio(url, CONSTANTS.SAMPLE_RATE)
 
@@ -112,6 +112,7 @@ class Ingestion:
             sample_rate=CONSTANTS.SAMPLE_RATE,
             label=_label_from_url(url),
             metadata=track_metadata,
+            engagement=engagement,
             source=source_label,  # type: ignore[arg-type]
         )
 
