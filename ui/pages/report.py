@@ -153,6 +153,11 @@ def render_report(
     _render_sync_snapshot(result)
 
     with st.expander("Track Overview", expanded=True):
+        _section_info(
+            "Basic track metadata and detected arrangement structure. Shows title, artist, BPM, "
+            "musical key, and duration alongside the section map (intro, verse, chorus, bridge, "
+            "outro) detected by the allin1 structural analysis model."
+        )
         c_left, c_right = st.columns([1, 1], gap="large")
         with c_left:
             _render_metadata_card(result.structure, result.audio.metadata)
@@ -160,23 +165,67 @@ def render_report(
             _render_structure_card(result.structure)
 
     with st.expander("Authenticity Audit", expanded=True):
+        _section_info(
+            "Multi-signal analysis to assess whether the track shows signs of AI generation. "
+            "Checks C2PA content credentials (cryptographic DAW/AI provenance), beat-grid timing "
+            "variance (perfect quantization is an AI signal), vocal centroid stability (AI vocals "
+            "drift erratically mid-note), high-frequency spectral noise, and loop/sample repetition. "
+            "Only available for direct file uploads — compressed streaming sources destroy the "
+            "high-frequency signals this detector relies on."
+        )
         _render_forensics_card(result.forensics, source=result.audio.source)
 
     with st.expander("Structural Repetition", expanded=True):
+        _section_info(
+            "Measures how much the track repeats itself across its arrangement. "
+            "High repetition can limit sync editability — if every section sounds identical, "
+            "editors have fewer natural cut points. Scored using cross-correlation of 4-bar "
+            "windows and section-to-section similarity. A lower repetition index means more "
+            "dynamic range in the arrangement and more flexibility for picture editors."
+        )
         _render_production_analysis_card(result.forensics)
 
     if result.sync_cuts:
         with st.expander("Sync Edit Points", expanded=False):
+            _section_info(
+                "Automatically suggested edit windows for 15s, 30s, and 60s placements. "
+                "Each window is scored on five criteria: starts after the intro, opens on a "
+                "section boundary, closes on a section boundary, contains a chorus or hook, "
+                "and ends on a bar grid. Confidence 60%+ is recommended. "
+                "Click a Start timestamp to seek the audio player to that position."
+            )
             _render_sync_cuts(result)
 
     with st.expander("Sync Readiness Checks", expanded=True):
+        _section_info(
+            "Gallo-Method compliance checks for sync submission readiness. Covers: sting detection "
+            "(sharp energy drop at track end for bumper/sting use), 4–8 bar energy evolution "
+            "(tracks must build or change — flat energy fails), intro timing (intro must not "
+            "exceed the configured threshold), fade detection (gradual endings can bleed into "
+            "scene audio), and broadcast loudness with dialogue compatibility."
+        )
         _render_sync_readiness(result.compliance)
         _render_audio_quality_card(result.audio_quality)
 
     with st.expander("Discovery & Licensing", expanded=True):
+        _section_info(
+            "Popularity tier, rights data, and similar track recommendations. Popularity is a "
+            "blended 0–100 score derived from Last.fm listeners, platform engagement (views, "
+            "likes), and Spotify popularity — used to estimate sync fee ranges. Rights lookup "
+            "identifies the likely PRO (ASCAP, BMI, SESAC) and ISRC from MusicBrainz metadata. "
+            "Similar tracks are sourced from Last.fm's similarity graph with YouTube preview links."
+        )
         _render_legal_and_discovery(result)
 
     with st.expander("Lyrics & Content Audit", expanded=True):
+        _section_info(
+            "Full lyric transcription via Whisper with timestamped compliance flagging. "
+            "Scans for explicit language (Detoxify toxicity scoring + profanity word list), "
+            "brand/trademark mentions (curated keyword list), geographic references that may "
+            "affect international licensing, and drug/violence references. Also detects "
+            "theme and mood from lyric content. Flags are graded A–F and categorised as "
+            "deal-breakers, advisory, or supervisor review."
+        )
         _render_lyric_section(result)
 
     _render_export_buttons(result)
@@ -284,6 +333,16 @@ def _compute_sync_verdict(
         color   = "var(--grade-b)"
 
     return verdict, color, categories
+
+
+def _section_info(text: str) -> None:
+    """Render a dim description line at the top of an expander section."""
+    st.markdown(
+        f"<div style='font-family:Figtree,sans-serif;font-size:.78rem;"
+        f"color:var(--dim);margin-bottom:14px;line-height:1.5;'>"
+        f"{html_mod.escape(text)}</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def _render_sync_snapshot(result: AnalysisResult) -> None:
