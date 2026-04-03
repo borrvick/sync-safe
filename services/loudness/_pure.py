@@ -54,8 +54,8 @@ def _dialogue_score(y: np.ndarray, sr: int) -> float:
     freqs = librosa.fft_frequencies(sr=sr)
 
     dialogue_mask   = (freqs >= 300) & (freqs <= 3000)
-    total_energy    = float(stft.mean())
-    dialogue_energy = float(stft[dialogue_mask].mean())
+    total_energy    = float(stft.sum())
+    dialogue_energy = float(stft[dialogue_mask].sum())
 
     if total_energy < 1e-10:
         return 0.5  # silent track — neutral score
