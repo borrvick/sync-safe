@@ -579,7 +579,7 @@ def _render_structure_card(sr: Optional[StructureResult]) -> None:
                 if st.button(
                     f"{_fmt_ts(s.start)} – {_fmt_ts(s.end)}",
                     key=f"sec_{ts_s}_{html_mod.escape(s.label)}",
-                    help=f"Jump to {_fmt_ts(s.start)} in the audio player",
+                    help=_section_button_help(s.label, _fmt_ts(s.start)),
                     use_container_width=True,
                     type="secondary",
                 ):
@@ -662,8 +662,49 @@ def _copy_button(value: str, label: str = "Copy") -> None:
 
 
 # ---------------------------------------------------------------------------
-# Section timeline helpers (#133)
+# Section timeline helpers (#133, #139)
 # ---------------------------------------------------------------------------
+
+# Sync-relevance tips shown in the seek-button tooltip per section label (#139).
+# Keep tips concise — they appear in Streamlit's native help= popover.
+# ORDER MATTERS: more-specific keys (pre-chorus) must precede their substrings (chorus)
+# so the `key in lo` substring check hits the right entry first.
+_SECTION_SYNC_TIPS: dict[str, str] = {
+    "pre-chorus": "Pre-chorus — tension build; pairs well with rising action.",
+    "prechorus":  "Pre-chorus — tension build; pairs well with rising action.",
+    "chorus":     "Chorus — high energy, memorable; ideal for title cards and product moments.",
+    "hook":       "Hook — peak recall; works well for 15–30 s ad spots.",
+    "refrain":    "Refrain — emotional peak; strong for closing scenes.",
+    "drop":       "Drop — maximum energy release; great for action cuts.",
+    "intro":      "Intro — sets mood; good for scene-setting or cold opens.",
+    "verse":      "Verse — narrative texture; works for background / montage.",
+    "bridge":     "Bridge — contrast moment; useful for dramatic scene pivots.",
+    "build":      "Build — rising energy; effective for trailer ramp-ups.",
+    "outro":      "Outro — resolution; works for credits or fade-outs.",
+    "fade":       "Fade — soft exit; good for end-of-scene transitions.",
+    "coda":       "Coda — final statement; suits closing moments.",
+    "instrumental": "Instrumental — no lyrics; easier dialogue clearance.",
+    "break":      "Break — rhythmic pause; good for VO-over sections.",
+    "solo":       "Solo — featured melody; high impact for short bursts.",
+    "interlude":  "Interlude — transitional; good for scene cuts.",
+}
+
+
+def _section_sync_tip(label: str) -> str:
+    """Return a sync-relevance tip for a section label, or empty string if unknown."""
+    lo = label.lower()
+    for key, tip in _SECTION_SYNC_TIPS.items():
+        if key in lo:
+            return tip
+    return ""
+
+
+def _section_button_help(label: str, start_fmt: str) -> str:
+    """Combine seek action and sync tip for the section button help= text."""
+    tip = _section_sync_tip(label)
+    seek = f"Jump to {start_fmt} in the audio player"
+    return f"{seek}\n\n{tip}" if tip else seek
+
 
 def _section_label_color(label: str) -> str:
     """Map a section label keyword to a CSS variable for the timeline bar."""
@@ -1386,6 +1427,39 @@ _POPULARITY_TIER_COLORS: dict[str, str] = {
     "Global":     "var(--accent)",           # orange — defined in styles.py
 }
 
+# Tier score ranges used to infer position-within-tier confidence (#113).
+# Derived from CONSTANTS so boundaries stay in sync with services/discovery.py.
+_TIER_RANGES: dict[str, tuple[int, int]] = {
+    "Emerging":   (0,                              CONSTANTS.POPULARITY_REGIONAL_MIN - 1),
+    "Regional":   (CONSTANTS.POPULARITY_REGIONAL_MIN,    CONSTANTS.POPULARITY_MAINSTREAM_MIN - 1),
+    "Mainstream": (CONSTANTS.POPULARITY_MAINSTREAM_MIN,  CONSTANTS.POPULARITY_GLOBAL_MIN - 1),
+    "Global":     (CONSTANTS.POPULARITY_GLOBAL_MIN,      100),
+}
+
+
+def _tier_confidence_label(popularity_score: int, tier: str) -> Optional[str]:
+    """
+    Return '(strong)' / '(borderline)' sub-label based on position within the tier range.
+
+    Top 25 % of the range → 'strong'; bottom 25 % → 'borderline'; middle 50 % → None.
+    Returns None for unrecognised tiers or if score is outside the expected range.
+    Pure — no I/O.
+    """
+    bounds = _TIER_RANGES.get(tier)
+    if bounds is None:
+        return None
+    lo, hi = bounds
+    span = hi - lo
+    if span <= 0:
+        return None
+    # Clamp to [0, 1] — blending rounding can push scores fractionally outside bounds.
+    position = max(0.0, min(1.0, (popularity_score - lo) / span))
+    if position >= 0.75:
+        return "(strong)"
+    if position <= 0.25:
+        return "(borderline)"
+    return None
+
 
 def _popularity_signal_rows(pop: object) -> list[tuple[str, str, int, bool]]:
     """
@@ -1494,8 +1568,14 @@ def _render_popularity_card(result: AnalysisResult) -> None:
         return
 
     tier_color    = _POPULARITY_TIER_COLORS.get(pop.tier, "var(--dim)")
-    listeners_fmt = f"{pop.listeners:,}"
-    cost_fmt      = f"${pop.sync_cost_low:,} – ${pop.sync_cost_high:,}"
+    listeners_fmt   = f"{pop.listeners:,}"
+    cost_fmt        = f"${pop.sync_cost_low:,} – ${pop.sync_cost_high:,}"
+    confidence_lbl  = _tier_confidence_label(pop.popularity_score, pop.tier)
+    confidence_html = (
+        f"<div style=\"font-family:'JetBrains Mono',monospace;font-size:.58rem;"
+        f"color:var(--dim);margin-top:2px;\">{html_mod.escape(confidence_lbl)}</div>"
+        if confidence_lbl else ""
+    )
 
     st.markdown(f"""
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
@@ -1505,6 +1585,7 @@ def _render_popularity_card(result: AnalysisResult) -> None:
                     margin-bottom:6px;">Popularity</div>
         <div style="font-family:'Chakra Petch',monospace;font-size:1.2rem;font-weight:700;
                     color:{tier_color};">{pop.tier}</div>
+        {confidence_html}
         <div style="font-family:'JetBrains Mono',monospace;font-size:.6rem;
                     color:var(--muted);margin-top:4px;">{listeners_fmt} listeners</div>
       </div>
