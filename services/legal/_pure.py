@@ -5,7 +5,7 @@ Shared pure helpers for legal and PRO lookup — no network, no I/O.
 from __future__ import annotations
 
 from typing import Optional
-from urllib.parse import urlencode
+from urllib.parse import quote_plus, urlencode
 
 # ---------------------------------------------------------------------------
 # PRO inference table — ISO-3166-1 alpha-2 country codes → PRO name
@@ -36,6 +36,34 @@ _COUNTRY_PRO_MAP: dict[str, str] = {
 def _build_url(base_url: str, params: dict) -> str:
     """Append URL-encoded query parameters to a base URL string."""
     return f"{base_url}?{urlencode(params)}"
+
+
+def hfa_url(title: str, artist: str) -> str:
+    """HFA (Harry Fox Agency) mechanical rights search URL.
+
+    Args:
+        title:  Track title.
+        artist: Artist name.
+
+    Returns:
+        URL-encoded search URL for harryfox.com.
+    """
+    q = quote_plus(f"{title} {artist}".strip())
+    return f"https://www.harryfox.com/find_music?q={q}"
+
+
+def songfile_url(title: str, artist: str) -> str:
+    """Songfile (HFA mechanical licensing portal) search URL.
+
+    Args:
+        title:  Track title.
+        artist: Artist name.
+
+    Returns:
+        URL-encoded search URL for songfile.com.
+    """
+    q = quote_plus(f"{title} {artist}".strip())
+    return f"https://songfile.com/search?q={q}"
 
 
 def _infer_pro(country_code: str) -> Optional[str]:
