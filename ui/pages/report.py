@@ -1461,6 +1461,40 @@ def _tier_confidence_label(popularity_score: int, tier: str) -> Optional[str]:
     return None
 
 
+def _split_fee_band(low: int, high: int) -> tuple[int, int, int, int]:
+    """
+    Split a fee band into a narrower 'likely' range and a full 'possible' range.
+
+    Trims 20% from each end of the band to produce the middle-60% likely range.
+    Returns (likely_low, likely_high, possible_low, possible_high).
+    Pure — no I/O.
+    """
+    span = high - low
+    trim = int(span * 0.20)
+    return low + trim, high - trim, low, high
+
+
+def _sync_readiness_fee_modifier(
+    sting_pass: bool,
+    energy_pass: bool,
+    intro_pass: bool,
+) -> tuple[float, str]:
+    """
+    Return (multiplier, note_text) based on compliance check results (#112).
+
+    All three pass  → +15% uplift (plug-and-play).
+    Sting or intro fail → −20% discount (edit work expected).
+    Energy fails alone → no multiplier, advisory note only.
+    Pure — no I/O.
+    """
+    if sting_pass and energy_pass and intro_pass:
+        return (CONSTANTS.SYNC_READINESS_UPLIFT, "+15% · Plug-and-play: no edit work required")
+    if not sting_pass or not intro_pass:
+        return (CONSTANTS.SYNC_READINESS_DISCOUNT, "−20% · Edit work expected — may reduce offer")
+    # energy_pass is False but sting and intro are fine
+    return (1.0, "Advisory: energy evolution may need attention")
+
+
 def _popularity_signal_rows(pop: object) -> list[tuple[str, str, int, bool]]:
     """
     Build signal breakdown rows for the popularity card.
@@ -1567,14 +1601,43 @@ def _render_popularity_card(result: AnalysisResult) -> None:
         )
         return
 
-    tier_color    = _POPULARITY_TIER_COLORS.get(pop.tier, "var(--dim)")
-    listeners_fmt   = f"{pop.listeners:,}"
-    cost_fmt        = f"${pop.sync_cost_low:,} – ${pop.sync_cost_high:,}"
-    confidence_lbl  = _tier_confidence_label(pop.popularity_score, pop.tier)
+    tier_color     = _POPULARITY_TIER_COLORS.get(pop.tier, "var(--dim)")
+    listeners_fmt  = f"{pop.listeners:,}"
+    confidence_lbl = _tier_confidence_label(pop.popularity_score, pop.tier)
     confidence_html = (
         f"<div style=\"font-family:'JetBrains Mono',monospace;font-size:.58rem;"
         f"color:var(--dim);margin-top:2px;\">{html_mod.escape(confidence_lbl)}</div>"
         if confidence_lbl else ""
+    )
+
+    # Apply sync-readiness multiplier (#112) then split into likely/possible bands (#111)
+    comp = result.compliance
+    if comp:
+        mult, mod_note = _sync_readiness_fee_modifier(
+            sting_pass=not comp.sting.flag,
+            energy_pass=not comp.evolution.flag,
+            intro_pass=not comp.intro.flag,
+        )
+    else:
+        mult, mod_note = 1.0, ""
+    adj_low  = int(pop.sync_cost_low  * mult)
+    adj_high = int(pop.sync_cost_high * mult)
+    likely_low, likely_high, poss_low, poss_high = _split_fee_band(adj_low, adj_high)
+
+    likely_fmt   = f"${likely_low:,} – ${likely_high:,}"
+    possible_fmt = f"${poss_low:,} – ${poss_high:,}"
+
+    # Choose note color based on modifier direction
+    if mult > 1.0:
+        mod_color = "var(--ok)"
+    elif mult < 1.0:
+        mod_color = "var(--grade-c)"
+    else:
+        mod_color = "var(--muted)"
+    mod_html = (
+        f"<div style=\"font-family:'Figtree',sans-serif;font-size:.62rem;"
+        f"color:{mod_color};margin-top:3px;\">{html_mod.escape(mod_note)}</div>"
+        if mod_note else ""
     )
 
     st.markdown(f"""
@@ -1594,9 +1657,12 @@ def _render_popularity_card(result: AnalysisResult) -> None:
                     letter-spacing:.18em;text-transform:uppercase;color:var(--dim);
                     margin-bottom:6px;">Est. Sync Fee</div>
         <div style="font-family:'Chakra Petch',monospace;font-size:.95rem;font-weight:700;
-                    color:var(--text);">{cost_fmt}</div>
+                    color:var(--text);">{likely_fmt}</div>
         <div style="font-family:'Figtree',sans-serif;font-size:.7rem;color:var(--muted);
-                    margin-top:4px;">Industry estimates 2024–2026.</div>
+                    margin-top:2px;">Likely · Possible: {possible_fmt}</div>
+        {mod_html}
+        <div style="font-family:'Figtree',sans-serif;font-size:.62rem;color:var(--dim);
+                    margin-top:2px;">Industry estimates 2024–2026.</div>
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -2463,9 +2529,9 @@ def _render_sync_cuts(result: AnalysisResult) -> None:
     Start timestamps are rendered as st.button so clicking seeks the audio
     player to that position (same pattern as lyric audit timestamps).
     """
-    # Column header row
-    h_target, h_start, h_end, h_actual, h_conf, h_note = st.columns(
-        [0.7, 0.8, 0.8, 0.7, 1.4, 2], gap="small"
+    # Column header row — added Copy column (#149)
+    h_target, h_start, h_end, h_actual, h_conf, h_note, h_copy = st.columns(
+        [0.7, 0.8, 0.8, 0.7, 1.4, 2, 0.6], gap="small"
     )
     _mono_hdr = (
         "font-family:JetBrains Mono,monospace;font-size:.6rem;font-weight:600;"
@@ -2488,6 +2554,7 @@ def _render_sync_cuts(result: AnalysisResult) -> None:
         (h_end,    "End"),
         (h_actual, "Actual"),
         (h_note,   "Note"),
+        (h_copy,   "Copy"),
     ):
         col.markdown(f"<div style='{_mono_hdr}'>{label}</div>", unsafe_allow_html=True)
     h_conf.markdown(_conf_header, unsafe_allow_html=True)
@@ -2498,8 +2565,8 @@ def _render_sync_cuts(result: AnalysisResult) -> None:
     )
     for cut in result.sync_cuts:
         ts_s = int(cut.start_s)
-        c_target, c_start, c_end, c_actual, c_conf, c_note = st.columns(
-            [0.7, 0.8, 0.8, 0.7, 1.4, 2], gap="small"
+        c_target, c_start, c_end, c_actual, c_conf, c_note, c_copy = st.columns(
+            [0.7, 0.8, 0.8, 0.7, 1.4, 2, 0.6], gap="small"
         )
         c_target.markdown(
             f"<div style='{_mono_cell}font-weight:600;color:var(--text);'>{cut.duration_s}s</div>",
@@ -2533,6 +2600,19 @@ def _render_sync_cuts(result: AnalysisResult) -> None:
             f"color:var(--muted);padding-top:6px;'>{html_mod.escape(cut.note)}</div>",
             unsafe_allow_html=True,
         )
+        # Copy popover — st.code provides built-in copy icon (#149)
+        with c_copy:
+            with st.popover("⧉", help="Copy timestamps or DAW marker text"):
+                ts_str     = f"{fmt_ts(int(cut.start_s))}–{fmt_ts(int(cut.end_s))}"
+                marker_str = (
+                    f"Start: {fmt_ts(int(cut.start_s))} | "
+                    f"End: {fmt_ts(int(cut.end_s))} | "
+                    f"{cut.duration_s}s | {cut.note}"
+                )
+                st.caption("Timestamps")
+                st.code(ts_str, language=None)
+                st.caption("DAW marker")
+                st.code(marker_str, language=None)
 
     st.caption(
         "Edit windows are beat-aligned and scored on: post-intro start, section-boundary "

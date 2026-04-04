@@ -246,6 +246,11 @@ class SystemConstants:
     SYNC_COST_MAINSTREAM: tuple[int, int]  = (15_000, 100_000)
     SYNC_COST_GLOBAL: tuple[int, int]      = (50_000, 500_000)
 
+    # Sync-readiness fee modifier multipliers (#112).
+    # Applied to the displayed fee range when all/some compliance checks pass.
+    SYNC_READINESS_UPLIFT: float   = 1.15   # all 3 checks pass → +15%
+    SYNC_READINESS_DISCOUNT: float = 0.80   # sting or intro fails → −20%
+
     # ---- Forensics: IBI / Groove ----------------------------------------------
     # IBI variance below this → "Perfect Quantization" AI signal.
     # FakeMusicCaps calibration 2026-03-23: AI median IBI variance (621) is
