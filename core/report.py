@@ -95,6 +95,7 @@ class TrackReport(BaseModel):
     ibi_variance: float                     = 1.0
     loop_score: float                       = 0.0
     loop_autocorr_score: float              = 0.0
+    repetition_index: Optional[float]       = None   # blended 0.6*loop + 0.4*autocorr
     spectral_slop: float                    = 0.0
     synthid_score: float                    = 0.0
     centroid_instability_score: float       = -1.0
