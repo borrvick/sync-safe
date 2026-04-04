@@ -379,6 +379,16 @@ class AudioQualityResult(BaseModel):
     # True peak warning
     true_peak_warning: bool     # True if true peak > TRUE_PEAK_WARN_DBFS
 
+    # Gain adjustment to reach each platform target (negative = turn down, positive = turn up)
+    gain_spotify_db:     float  # dB to apply to hit Spotify target (-delta_spotify)  (#94)
+    gain_apple_music_db: float  # dB to apply to hit Apple Music target               (#94)
+    gain_youtube_db:     float  # dB to apply to hit YouTube target                   (#94)
+    gain_broadcast_db:   float  # dB to apply to hit broadcast target                 (#94)
+
+    # Top-line loudness verdict (#95)
+    loudness_verdict: str       # "Broadcast-ready" | "Streaming-hot" | "Streaming-ready" |
+                                # "Needs mastering" | "Clipping risk"
+
     # Dialogue-readiness
     dialogue_score: float       # 0.0–1.0; fraction of energy outside 300–3 kHz band
     dialogue_label: str         # "Dialogue-Ready" | "Mixed" | "Dialogue-Heavy"

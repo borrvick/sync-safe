@@ -194,6 +194,15 @@ class SystemConstants:
     # True peak warning threshold — exceeding causes clipping on loudness-normalised playback
     TRUE_PEAK_WARN_DBFS: float = -1.0
 
+    # Loudness verdict classification thresholds (#95)
+    LOUDNESS_BROADCAST_DELTA_MAX: float = 2.0    # ±LU from broadcast target → "Broadcast-ready"
+    LOUDNESS_STREAMING_HOT_MIN: float   = -14.0  # above Spotify/YT target → will be turned down
+    LOUDNESS_NEEDS_MASTERING_MAX: float = -20.0  # below this → too quiet for any platform
+
+    # Gain adjustment display color thresholds — used in report UI (#94)
+    GAIN_OK_THRESHOLD_DB: float   = 1.0   # |gain| ≤ this → green (negligible adjustment)
+    GAIN_WARN_THRESHOLD_DB: float = 4.0   # |gain| ≤ this → amber (moderate); above → red
+
     # Dialogue-ready score thresholds (0.0–1.0)
     # Score = fraction of energy OUTSIDE the 300–3000 Hz dialogue competition band.
     # Higher = sits more cleanly under voiceover.

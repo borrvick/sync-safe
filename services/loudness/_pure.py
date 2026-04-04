@@ -64,6 +64,28 @@ def _dialogue_score(y: np.ndarray, sr: int) -> float:
     return round(float(max(0.0, min(1.0, 1.0 - competition_ratio))), 3)
 
 
+def _classify_loudness(
+    integrated_lufs: float,
+    true_peak_warning: bool,
+    delta_broadcast: float,
+) -> str:
+    """
+    Return a top-line loudness verdict string (#95).
+
+    Priority order: clipping risk > broadcast-ready > streaming-hot > needs mastering > streaming-ready.
+    Pure function — no I/O.
+    """
+    if true_peak_warning:
+        return "Clipping risk"
+    if abs(delta_broadcast) <= CONSTANTS.LOUDNESS_BROADCAST_DELTA_MAX:
+        return "Broadcast-ready"
+    if integrated_lufs > CONSTANTS.LOUDNESS_STREAMING_HOT_MIN:
+        return "Streaming-hot"
+    if integrated_lufs < CONSTANTS.LOUDNESS_NEEDS_MASTERING_MAX:
+        return "Needs mastering"
+    return "Streaming-ready"
+
+
 def _classify_dialogue(score: float) -> str:
     """
     Map a dialogue score to a human-readable label using CONSTANTS thresholds.
