@@ -552,6 +552,23 @@ def _render_structure_card(sr: Optional[StructureResult]) -> None:
     </div>
     """, unsafe_allow_html=True)
 
+    # Section timeline bar (#133)
+    if sections:
+        total_dur = sum(s.end - s.start for s in sections)
+        if total_dur > 0:
+            blocks = "".join(
+                f"<div style='flex:{max(0.01, (s.end - s.start) / total_dur):.4f};"
+                f"background:{_section_label_color(s.label)};height:100%;border-radius:2px;'"
+                f" title=\"{html_mod.escape(s.label)} ({int(s.end - s.start)}s)\"></div>"
+                for s in sections
+            )
+            st.markdown(
+                f"<div style='display:flex;gap:2px;height:8px;border-radius:4px;"
+                f"overflow:hidden;margin-bottom:14px;'"
+                f" role='img' aria-label='Section arrangement timeline'>{blocks}</div>",
+                unsafe_allow_html=True,
+            )
+
     # Sections rendered as Streamlit columns so timestamps are clickable buttons
     if sections:
         for s in sections:
@@ -590,6 +607,77 @@ def _render_structure_card(sr: Optional[StructureResult]) -> None:
             f"color:var(--dim);margin-top:10px;'>{html_mod.escape(stats)}</div>",
             unsafe_allow_html=True,
         )
+
+
+# ---------------------------------------------------------------------------
+# Clipboard copy button (#119, #125)
+# ---------------------------------------------------------------------------
+
+def _copy_button(value: str, label: str = "Copy") -> None:
+    """
+    Render a clipboard copy button using st.components.v1.html().
+
+    st.markdown() HTML silently strips <script> tags (browser innerHTML
+    security model). components.html() runs in a real sandboxed iframe
+    where navigator.clipboard.writeText() is accessible.
+
+    Uses JSON-encoded strings for both the value and label in JS so any
+    special characters cannot break JS string literals. The visible button
+    text uses html.escape() to defend against any HTML in the label arg.
+
+    Colour note: hex values (#F5640A = --accent, #6ECC8A = --grade-b) are
+    hardcoded because CSS custom properties do not cross the iframe boundary.
+    Update these if the theme palette changes in styles.py.
+    """
+    import streamlit.components.v1 as components
+
+    js_value   = _json.dumps(value)          # safe for embedding in JS
+    js_label   = _json.dumps(label)          # safe for embedding in JS
+    html_label = html_mod.escape(label)      # safe for embedding in HTML body
+    components.html(
+        f"""<button
+            id="cb"
+            onclick="navigator.clipboard.writeText({js_value}).then(function(){{
+              var b=document.getElementById('cb');
+              b.textContent='\u2713 Copied';
+              b.style.color='#6ECC8A';
+              b.style.borderColor='rgba(110,204,138,.5)';
+              setTimeout(function(){{
+                b.textContent={js_label};
+                b.style.color='#F5640A';
+                b.style.borderColor='rgba(245,100,10,.35)';
+              }},1500);
+            }}).catch(function(){{
+              document.getElementById('cb').textContent='Copy failed';
+            }})"
+            style="background:transparent;border:1px solid rgba(245,100,10,.35);
+                   border-radius:6px;color:#F5640A;font-family:monospace;
+                   font-size:.62rem;font-weight:600;letter-spacing:.08em;
+                   padding:4px 10px;cursor:pointer;white-space:nowrap;
+                   text-transform:uppercase;transition:color .15s,border-color .15s;"
+        >{html_label}</button>""",
+        height=36,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Section timeline helpers (#133)
+# ---------------------------------------------------------------------------
+
+def _section_label_color(label: str) -> str:
+    """Map a section label keyword to a CSS variable for the timeline bar."""
+    lo = label.lower()
+    if any(k in lo for k in ("chorus", "hook", "refrain", "drop")):
+        return "var(--accent)"
+    if "intro" in lo:
+        return "var(--issue-location)"
+    if any(k in lo for k in ("outro", "fade", "coda", "end")):
+        return "var(--muted)"
+    if any(k in lo for k in ("bridge", "pre-chorus", "prechorus", "build")):
+        return "var(--grade-c)"
+    if any(k in lo for k in ("instrumental", "break", "solo", "interlude")):
+        return "var(--grade-b)"
+    return "var(--dim)"  # verse and unrecognised labels
 
 
 # ---------------------------------------------------------------------------
@@ -1438,8 +1526,10 @@ def _render_legal_and_discovery(result: AnalysisResult) -> None:
     if result.legal:
         # ISRC + inferred PRO badge (only shown when MusicBrainz returned a hit)
         if result.legal.isrc or result.legal.pro_match:
-            isrc_text = html_mod.escape(result.legal.isrc or "—")
-            pro_text  = html_mod.escape(result.legal.pro_match or "Unknown")
+            isrc_val  = result.legal.isrc or ""
+            pro_val   = result.legal.pro_match or "Unknown"
+            isrc_text = html_mod.escape(isrc_val or "—")
+            pro_text  = html_mod.escape(pro_val)
             st.markdown(f"""
             <div class="sig" style="padding:14px 18px;margin-bottom:12px;display:flex;
                          flex-wrap:wrap;gap:18px;align-items:center;">
@@ -1456,6 +1546,23 @@ def _render_legal_and_discovery(result: AnalysisResult) -> None:
                             color:var(--accent);">{pro_text}</div>
               </div>
             </div>""", unsafe_allow_html=True)
+
+            # Copy buttons (#119) — need components.html() for JS clipboard access
+            _col_isrc, _col_pro, _col_note, _ = st.columns([1, 1, 1.6, 2])
+            if isrc_val:
+                with _col_isrc:
+                    _copy_button(isrc_val, "Copy ISRC")
+            with _col_pro:
+                _copy_button(pro_val, "Copy PRO")
+            clearance_note = (
+                f"ISRC: {isrc_val or '—'}\n"
+                f"PRO: {pro_val}\n"
+                f"ASCAP: {result.legal.ascap or '—'}\n"
+                f"BMI: {result.legal.bmi or '—'}\n"
+                f"SESAC: {result.legal.sesac or '—'}"
+            )
+            with _col_note:
+                _copy_button(clearance_note, "Copy clearance note")
 
         if result.legal.isrc:
             st.caption(
@@ -1508,6 +1615,13 @@ def _render_legal_and_discovery(result: AnalysisResult) -> None:
               {btn}
             </div>"""
         st.markdown(f"<div class='sig' style='padding:18px;'>{rows}</div>", unsafe_allow_html=True)
+
+        # Copy search list (#125) — one click copies "Title — Artist" per line
+        search_list = "\n".join(
+            f"{t.title} — {t.artist}" for t in result.similar_tracks
+        )
+        _copy_button(search_list, "Copy search list")
+
         if len(result.similar_tracks) < 3:
             n = len(result.similar_tracks)
             st.caption(

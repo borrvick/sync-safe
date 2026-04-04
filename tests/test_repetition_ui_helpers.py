@@ -1,10 +1,11 @@
 """
 tests/test_repetition_ui_helpers.py
 
-Unit tests for the three pure UI helpers introduced in issues #134, #141, #144:
+Unit tests for the pure UI helpers introduced in issues #133, #134, #141, #144:
   - _repetition_index_label(ri)   → (label, color)
   - _sync_editability_badge(ri)   → (label, detail, color) | None
   - _build_section_stats(sections) → str
+  - _section_label_color(label)   → CSS variable string
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ from core.models import Section
 from ui.pages.report import (
     _build_section_stats,
     _repetition_index_label,
+    _section_label_color,
     _sync_editability_badge,
 )
 
@@ -179,3 +181,68 @@ class TestBuildSectionStats:
         ]
         stats = _build_section_stats(sections)
         assert " · " in stats
+
+
+# ---------------------------------------------------------------------------
+# _section_label_color
+# ---------------------------------------------------------------------------
+
+class TestSectionLabelColor:
+    def test_chorus_returns_accent(self):
+        assert _section_label_color("chorus") == "var(--accent)"
+
+    def test_hook_returns_accent(self):
+        assert _section_label_color("hook") == "var(--accent)"
+
+    def test_refrain_returns_accent(self):
+        assert _section_label_color("refrain") == "var(--accent)"
+
+    def test_drop_returns_accent(self):
+        assert _section_label_color("drop") == "var(--accent)"
+
+    def test_intro_returns_issue_location(self):
+        assert _section_label_color("intro") == "var(--issue-location)"
+
+    def test_outro_returns_muted(self):
+        assert _section_label_color("outro") == "var(--muted)"
+
+    def test_fade_returns_muted(self):
+        assert _section_label_color("fade out") == "var(--muted)"
+
+    def test_bridge_returns_grade_c(self):
+        assert _section_label_color("bridge") == "var(--grade-c)"
+
+    def test_pre_chorus_matches_chorus(self):
+        # Both "pre-chorus" and "prechorus" contain "chorus" so they hit the accent
+        # branch first — this is intentional (pre-choruses are chorus-adjacent energy)
+        assert _section_label_color("pre-chorus") == "var(--accent)"
+        assert _section_label_color("prechorus") == "var(--accent)"
+
+    def test_build_returns_grade_c(self):
+        assert _section_label_color("build") == "var(--grade-c)"
+
+    def test_instrumental_returns_grade_b(self):
+        assert _section_label_color("instrumental") == "var(--grade-b)"
+
+    def test_solo_returns_grade_b(self):
+        assert _section_label_color("solo") == "var(--grade-b)"
+
+    def test_interlude_returns_grade_b(self):
+        assert _section_label_color("interlude") == "var(--grade-b)"
+
+    def test_verse_returns_dim(self):
+        assert _section_label_color("verse") == "var(--dim)"
+
+    def test_unknown_returns_dim(self):
+        assert _section_label_color("unknown section") == "var(--dim)"
+
+    def test_case_insensitive(self):
+        assert _section_label_color("CHORUS") == _section_label_color("chorus")
+        assert _section_label_color("Verse") == _section_label_color("verse")
+
+    def test_returns_css_variable_string(self):
+        # All return values must be valid CSS var() references
+        for label in ("chorus", "intro", "outro", "bridge", "instrumental", "verse"):
+            result = _section_label_color(label)
+            assert result.startswith("var(--")
+            assert result.endswith(")")
