@@ -313,6 +313,16 @@ button[kind="secondary"]:hover, [data-testid="stBaseButton-secondary"]:hover {
 }
 .tip-wrap:hover .tip-box { display:block; }
 
+/* Section-header tooltips open downward — arrow flips to point upward (#201) */
+.section-tip-box::after {
+  top:auto; bottom:100%;
+  border-top-color:transparent; border-bottom-color:var(--tip-bg);
+}
+
+/* Expander inner containers must not clip absolutely-positioned tooltips (#201) */
+[data-testid="stExpander"] > div,
+[data-testid="stExpander"] > div > div { overflow: visible !important; }
+
 /* Verdicts */
 .verd {
   display:inline-flex; align-items:center; gap:7px; padding:5px 14px;

@@ -337,12 +337,18 @@ def _compute_sync_verdict(
 
 
 def _section_tooltip(text: str) -> None:
-    """Render a right-aligned ? tooltip at the top of an expander section."""
+    """Render a right-aligned ? tooltip at the top of an expander section.
+
+    Tooltip opens DOWNWARD (top: calc(100% + 8px)) so it is never clipped
+    by the expander container — expander bodies don't have infinite overflow
+    upward, causing upward-opening tooltips to disappear behind the summary.
+    """
     st.markdown(
-        f"<div style='display:flex;justify-content:flex-end;margin:-8px 0 6px;'>"
-        f"<span class='tip-wrap'>"
+        f"<div style='display:flex;justify-content:flex-end;margin:-8px 0 6px;overflow:visible;'>"
+        f"<span class='tip-wrap' style='overflow:visible;'>"
         f"<span class='tip-icon' role='button' tabindex='0' aria-label='More information'>?</span>"
-        f"<span class='tip-box' style='left:auto;right:0;'>{html_mod.escape(text)}</span>"
+        f"<span class='tip-box section-tip-box' style='left:auto;right:0;bottom:auto;"
+        f"top:calc(100% + 8px);'>{html_mod.escape(text)}</span>"
         f"</span></div>",
         unsafe_allow_html=True,
     )
@@ -1000,6 +1006,26 @@ def _render_production_analysis_card(fr: Optional[ForensicsResult], source: str 
             unsafe_allow_html=True,
         )
 
+    # Sync context note (#147) — threshold labels derived from CONSTANTS to prevent drift
+    if ri is not None:
+        _ri_high = int(CONSTANTS.REPETITION_INDEX_HIGH * 100)
+        _ri_mod  = int(CONSTANTS.REPETITION_INDEX_MODERATE * 100)
+        with st.expander("Sync placement context", expanded=False):
+            st.markdown(
+                "**What does this mean for sync placements?**\n\n"
+                f"The Repetition Index reflects how structurally uniform a track is across its "
+                f"arrangement. A **high** index (≥ {_ri_high}%) means most sections sound nearly "
+                f"identical — the track is easy to loop or extend for long-form ad spots or "
+                f"background placements, but may feel monotonous over a longer scene.\n\n"
+                f"A **moderate** index ({_ri_mod}–{_ri_high}%) is the most versatile range: enough "
+                f"variation to support narrative pacing, while still having recognisable motifs "
+                f"an editor can work around.\n\n"
+                f"A **low** index (< {_ri_mod}%) signals organic, evolving arrangement — well suited "
+                f"for documentary, drama, or any placement where the music needs to breathe and "
+                f"change with the picture. These tracks are harder to loop cleanly but reward "
+                f"editors who use the full duration."
+            )
+
     # ── Spectral boundary signals (monitoring mode — not yet in verdict) ─────
     infra  = fr.infrasonic_energy_ratio
     ultra  = fr.ultrasonic_noise_ratio
@@ -1462,9 +1488,23 @@ def _render_legal_and_discovery(result: AnalysisResult) -> None:
                 if t.youtube_url
                 else '<button disabled class="t-btn" style="opacity:.3;cursor:not-allowed;">No link</button>'
             )
+            sim_clamped = min(1.0, max(0.0, t.similarity))
+            sim_pct     = f"{sim_clamped:.0%}"
+            sim_bar     = f"{sim_clamped:.3f}"
             rows += f"""
             <div class="t-row">
-              <div><div class="t-art">{safe_artist}</div><div class="t-nm">{safe_title}</div></div>
+              <div style="flex:1;min-width:0;">
+                <div class="t-art">{safe_artist}</div>
+                <div class="t-nm">{safe_title}</div>
+                <div style="display:flex;align-items:center;gap:8px;margin-top:5px;">
+                  <div style="width:72px;height:3px;border-radius:2px;background:var(--border-hr);overflow:hidden;flex-shrink:0;">
+                    <div style="height:3px;border-radius:2px;background:var(--accent);width:72px;
+                                transform:scaleX({sim_bar});transform-origin:left;"></div>
+                  </div>
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:.62rem;
+                               color:var(--dim);">{sim_pct}</span>
+                </div>
+              </div>
               {btn}
             </div>"""
         st.markdown(f"<div class='sig' style='padding:18px;'>{rows}</div>", unsafe_allow_html=True)

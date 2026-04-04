@@ -124,6 +124,7 @@ class ReportExporter:
             ibi_variance                = forensics.ibi_variance if forensics else 1.0,
             loop_score                  = forensics.loop_score if forensics else 0.0,
             loop_autocorr_score         = forensics.loop_autocorr_score if forensics else 0.0,
+            repetition_index            = forensics.repetition_index if forensics else None,
             spectral_slop               = forensics.spectral_slop if forensics else 0.0,
             synthid_score               = forensics.synthid_score if forensics else 0.0,
             centroid_instability_score  = forensics.centroid_instability_score if forensics else -1.0,
