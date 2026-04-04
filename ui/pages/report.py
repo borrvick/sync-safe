@@ -1233,6 +1233,88 @@ _LUFS_PLATFORMS: list[tuple[str, str]] = [
     ("Broadcast",    "delta_broadcast"),
 ]
 
+# Verdict badge colors for each loudness verdict string (#95)
+_LOUDNESS_VERDICT_COLORS: dict[str, str] = {
+    "Broadcast-ready": "var(--ok)",
+    "Streaming-ready": "var(--ok)",
+    "Streaming-hot":   "var(--grade-c)",
+    "Needs mastering": "var(--issue-location)",
+    "Clipping risk":   "var(--danger)",
+}
+
+# (platform display name, gain_*_db attr, target LUFS) for gain table (#94)
+_GAIN_PLATFORMS: list[tuple[str, str, float]] = [
+    ("Spotify",      "gain_spotify_db",     CONSTANTS.LUFS_SPOTIFY),
+    ("Apple Music",  "gain_apple_music_db", CONSTANTS.LUFS_APPLE_MUSIC),
+    ("YouTube",      "gain_youtube_db",     CONSTANTS.LUFS_YOUTUBE),
+    ("Broadcast",    "gain_broadcast_db",   CONSTANTS.LUFS_BROADCAST),
+]
+
+
+def _lufs_to_bar_pct(lufs: float, scale_min: float = -40.0, scale_max: float = 0.0) -> float:
+    """Convert a LUFS value to a 0–100% position on the loudness profile bar."""
+    return max(0.0, min(100.0, (lufs - scale_min) / (scale_max - scale_min) * 100.0))
+
+
+def _render_loudness_profile_bar(aq: "AudioQualityResult") -> None:
+    """Horizontal LUFS bar with LRA range shading and Spotify target line (#98).
+
+    Scale: -40 LUFS (left) to 0 LUFS (right). Pure HTML/CSS — no matplotlib.
+    """
+    lufs        = aq.integrated_lufs
+    lra         = aq.loudness_range_lu
+    target_pct  = _lufs_to_bar_pct(CONSTANTS.LUFS_SPOTIFY)
+    center_pct  = _lufs_to_bar_pct(lufs)
+    lra_lo_pct  = _lufs_to_bar_pct(lufs - lra / 2.0)
+    lra_width   = max(0.0, _lufs_to_bar_pct(lufs + lra / 2.0) - lra_lo_pct)
+
+    verdict_color = _LOUDNESS_VERDICT_COLORS.get(aq.loudness_verdict, "var(--muted)")
+
+    st.markdown(
+        f"""<div style="margin:10px 0 4px;" aria-hidden="true">
+  <div style="position:relative;height:18px;border-radius:4px;
+              background:var(--border-hr);overflow:visible;">
+    <div style="position:absolute;left:{lra_lo_pct:.2f}%;width:{lra_width:.2f}%;
+                height:100%;background:var(--accent);opacity:.18;border-radius:3px;"></div>
+    <div style="position:absolute;left:{target_pct:.2f}%;top:-3px;bottom:-3px;
+                width:2px;background:var(--ok);opacity:.7;"
+         title="Spotify target (–14 LUFS)"></div>
+    <div style="position:absolute;left:{center_pct:.2f}%;top:50%;
+                transform:translate(-50%,-50%);width:10px;height:10px;
+                border-radius:50%;background:{verdict_color};
+                border:2px solid var(--bg);"></div>
+  </div>
+  <div style="display:flex;justify-content:space-between;
+              font-family:'JetBrains Mono',monospace;font-size:.52rem;
+              color:var(--dim);margin-top:3px;">
+    <span>–40 LUFS</span><span>–20</span><span>–10</span><span>0 LUFS</span>
+  </div>
+</div>""",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_gain_table(aq: "AudioQualityResult") -> None:
+    """Render per-platform gain adjustment recommendations (#94)."""
+    rows = ""
+    for name, attr, target in _GAIN_PLATFORMS:
+        gain = getattr(aq, attr)
+        color = "var(--ok)" if abs(gain) <= CONSTANTS.GAIN_OK_THRESHOLD_DB else ("var(--grade-c)" if abs(gain) <= CONSTANTS.GAIN_WARN_THRESHOLD_DB else "var(--danger)")
+        rows += (
+            f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:4px;'>"
+            f"<div style='font-family:JetBrains Mono,monospace;font-size:.6rem;"
+            f"color:var(--dim);width:80px;flex-shrink:0;'>{html_mod.escape(name)}</div>"
+            f"<div style='font-family:Chakra Petch,monospace;font-size:.75rem;"
+            f"font-weight:600;color:{color};width:60px;'>{gain:+.1f} dB</div>"
+            f"<div style='font-family:Figtree,sans-serif;font-size:.62rem;"
+            f"color:var(--dim);'>target {target:.0f} LUFS</div>"
+            f"</div>"
+        )
+    st.markdown(
+        f"<div style='margin:8px 0 4px;'>{rows}</div>",
+        unsafe_allow_html=True,
+    )
+
 
 def _render_audio_quality_card(aq: Optional["AudioQualityResult"]) -> None:
     """Render LUFS broadcast loudness and dialogue-readiness metrics."""
@@ -1252,6 +1334,16 @@ def _render_audio_quality_card(aq: Optional["AudioQualityResult"]) -> None:
             unsafe_allow_html=True,
         )
         return
+
+    # ── Verdict badge (#95) ────────────────────────────────────────────────
+    verdict_color = _LOUDNESS_VERDICT_COLORS.get(aq.loudness_verdict, "var(--muted)")
+    st.markdown(
+        f"<div style='display:inline-block;font-family:\"Chakra Petch\",monospace;"
+        f"font-size:.58rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;"
+        f"color:{verdict_color};border:1px solid {verdict_color};border-radius:3px;"
+        f"padding:2px 8px;margin-bottom:10px;'>{html_mod.escape(aq.loudness_verdict)}</div>",
+        unsafe_allow_html=True,
+    )
 
     # ── LUFS row ──────────────────────────────────────────────────────────
     peak_color  = "var(--danger)" if aq.true_peak_warning else "var(--ok)"
@@ -1300,6 +1392,13 @@ def _render_audio_quality_card(aq: Optional["AudioQualityResult"]) -> None:
       </div>
     </div>
     """, unsafe_allow_html=True)
+
+    # ── Loudness profile bar (#98) ─────────────────────────────────────────
+    _render_loudness_profile_bar(aq)
+
+    # ── Gain adjustments (#94) ────────────────────────────────────────────
+    with st.expander("Gain adjustments by platform", expanded=False):
+        _render_gain_table(aq)
 
     # ── Dialogue-ready row ────────────────────────────────────────────────
     dial_color = _DIALOGUE_LABEL_COLORS.get(aq.dialogue_label, "var(--muted)")

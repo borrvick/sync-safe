@@ -68,6 +68,11 @@ def _make_result(
         delta_youtube=0.0,
         delta_broadcast=9.0,
         true_peak_warning=False,
+        gain_spotify_db=0.0,
+        gain_apple_music_db=-2.0,
+        gain_youtube_db=0.0,
+        gain_broadcast_db=-9.0,
+        loudness_verdict="Streaming-ready",
         dialogue_score=0.75,
         dialogue_label="Dialogue-Ready",
     )

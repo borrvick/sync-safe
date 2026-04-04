@@ -142,6 +142,11 @@ def _full_result() -> AnalysisResult:
         delta_youtube=-0.5,
         delta_broadcast=-8.5,
         true_peak_warning=False,
+        gain_spotify_db=0.5,
+        gain_apple_music_db=2.5,
+        gain_youtube_db=0.5,
+        gain_broadcast_db=8.5,
+        loudness_verdict="Streaming-ready",
         dialogue_score=0.71,
         dialogue_label="Dialogue-Ready",
     )
