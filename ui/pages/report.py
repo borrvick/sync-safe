@@ -1720,40 +1720,138 @@ _AUTHORSHIP_SKIP_MESSAGES: dict[str, str] = {
     "short":        "Note: short lyric content — treat signals as indicative only.",
 }
 
+# Real-world context tooltip per signal type (#162)
+_AUTHORSHIP_SIGNAL_TOOLTIPS: dict[str, str] = {
+    "burstiness": (
+        "Burstiness measures variation in line length. Human writers naturally mix "
+        "short punchy lines with longer ones; AI tends to produce uniform line lengths. "
+        "A low CV (< 0.20) is a flag for machine-generated text."
+    ),
+    "vocabulary": (
+        "Unique word ratio measures vocabulary breadth. AI models often recycle a "
+        "limited vocabulary and produce lyrics with fewer distinct words than a human "
+        "songwriter drawing on lived experience."
+    ),
+    "rhyme": (
+        "Rhyme density measures how often consecutive line-pairs rhyme. Human lyrics "
+        "balance rhyme with off-rhyme and slant-rhyme; AI systems over-rhyme, producing "
+        "a sing-song feel that exceeds the threshold > 72% of consecutive pairs."
+    ),
+    "repetition": (
+        "Repetition score measures the fraction of lines that appear more than once. "
+        "High repetition is a hallmark of AI-generated lyrics — models reuse phrases "
+        "to pad length rather than introducing new imagery."
+    ),
+    "classifier": (
+        "The RoBERTa classifier was fine-tuned on human vs. AI-generated lyrics. "
+        "It evaluates the full text as a sequence and outputs a probability score. "
+        "Scores ≥ 70% contribute 2 AI signals; 50–69% contributes 1."
+    ),
+}
+
+
+def _authorship_signal_tooltip(note: str) -> str:
+    """Return tooltip text for an authorship signal note, or '' if unrecognised."""
+    lo = note.lower()
+    if "burstiness" in lo or "line length" in lo:
+        return _AUTHORSHIP_SIGNAL_TOOLTIPS["burstiness"]
+    if "vocabulary" in lo or "unique word" in lo:
+        return _AUTHORSHIP_SIGNAL_TOOLTIPS["vocabulary"]
+    if "rhyme" in lo:
+        return _AUTHORSHIP_SIGNAL_TOOLTIPS["rhyme"]
+    if "repetition" in lo:
+        return _AUTHORSHIP_SIGNAL_TOOLTIPS["repetition"]
+    if "classifier" in lo:
+        return _AUTHORSHIP_SIGNAL_TOOLTIPS["classifier"]
+    return ""
+
+
+def _authorship_confidence_score(authorship: "AuthorshipResult") -> Optional[float]:
+    """
+    Return a 0-1 confidence score for the authorship verdict direction.
+
+    For AI verdicts, high score = strong AI evidence.
+    For human verdicts, score is inverted so the bar reads as verdict confidence
+    (not raw AI probability) — e.g. roberta_score=0.10 → 0.90 confidence human.
+
+    Uses roberta_score when available; falls back to signal_count ratio.
+    Returns None for "Insufficient data" verdicts so the bar is hidden.
+    """
+    if authorship.verdict == "Insufficient data":
+        return None
+    is_human = authorship.verdict == "Likely Human"
+    if authorship.roberta_score is not None:
+        raw = authorship.roberta_score
+        return (1.0 - raw) if is_human else raw
+    raw = min(1.0, authorship.signal_count / CONSTANTS.AUTHORSHIP_MAX_SIGNALS)
+    return (1.0 - raw) if is_human else raw
+
 
 def _render_authorship_banner(authorship: Optional["AuthorshipResult"]) -> None:
     if not authorship:
         return
-    av       = authorship.verdict
-    av_color = authorship_color(av)
-    a_notes  = authorship.feature_notes
-    a_rob    = authorship.roberta_score
-    rob_str  = f"Classifier: {a_rob:.0%} AI probability · " if a_rob is not None else ""
-    n_sig    = authorship.signal_count
-    sig_str  = f"{n_sig} lyric flag{'s' if n_sig != 1 else ''}"
+    av        = authorship.verdict
+    av_color  = authorship_color(av)
+    a_notes   = authorship.feature_notes
+    a_rob     = authorship.roberta_score
+    rob_str   = f"Classifier: {a_rob:.0%} AI probability · " if a_rob is not None else ""
+    n_sig     = authorship.signal_count
+    sig_str   = f"{n_sig} lyric flag{'s' if n_sig != 1 else ''}"
     sync_note = _AUTHORSHIP_SYNC_NOTES.get(av, "")
+    confidence = _authorship_confidence_score(authorship)
 
     def _note_html(note: str) -> str:
+        """Render one signal bullet with an inline ? tooltip (#162)."""
         arrow      = "✓" if "✓" in note else "▲"
         note_color = "var(--muted)" if "✓" in note else "var(--text)"
+        tip_text   = _authorship_signal_tooltip(note)
+        tip_html   = (
+            f"<span class='tip-wrap' style='vertical-align:middle;'>"
+            f"<span class='tip-icon' role='button' tabindex='0' aria-label='More information'>?</span>"
+            f"<span class='tip-box' style='width:220px;'>{html_mod.escape(tip_text)}</span>"
+            f"</span>"
+            if tip_text else ""
+        )
         return (
             f"<div style='display:flex;align-items:center;gap:6px;padding:3px 0;'>"
             f"<span style='color:{av_color};font-size:.7rem;flex-shrink:0;'>{arrow}</span>"
             f"<span style='font-family:\"Figtree\",sans-serif;font-size:.76rem;"
-            f"color:{note_color};'>{note}</span></div>"
+            f"color:{note_color};'>{html_mod.escape(note)}</span>"
+            f"{tip_html}</div>"
         )
 
-    notes_html  = "".join(_note_html(n) for n in a_notes)
+    # Confidence progress bar (#159)
+    conf_bar_html = ""
+    if confidence is not None:
+        conf_pct = f"{confidence:.0%}"
+        conf_val = f"{confidence:.3f}"
+        conf_bar_html = (
+            f"<div style='margin-top:10px;'>"
+            f"<div style='font-family:\"Chakra Petch\",monospace;font-size:.52rem;font-weight:600;"
+            f"letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-bottom:4px;'>"
+            f"Ensemble Confidence</div>"
+            f"<div style='display:flex;align-items:center;gap:10px;'>"
+            f"<div style='flex:1;height:4px;border-radius:2px;background:var(--border-hr);overflow:hidden;'>"
+            f"<div style='height:4px;border-radius:2px;background:{av_color};width:100%;"
+            f"transform:scaleX({conf_val});transform-origin:left;transition:transform .3s;'></div>"
+            f"</div>"
+            f"<span style='font-family:\"JetBrains Mono\",monospace;font-size:.66rem;"
+            f"color:{av_color};min-width:32px;'>{conf_pct}</span>"
+            f"</div></div>"
+        )
+
     sync_suffix = (
         f"<div style='font-family:\"Figtree\",sans-serif;font-size:.72rem;"
         f"color:var(--dim);margin-top:8px;padding-top:8px;"
         f"border-top:1px solid {av_color}22;'>{html_mod.escape(sync_note)}</div>"
         if sync_note else ""
     )
+
+    # Verdict header — always visible (#163)
     st.markdown(f"""
     <div style="border:1px solid {av_color}22;border-radius:10px;background:{av_color}08;
-                padding:14px 18px;margin-bottom:18px;">
-      <div style="display:flex;align-items:center;gap:14px;margin-bottom:{'10px' if a_notes else '0'};">
+                padding:14px 18px;margin-bottom:6px;">
+      <div style="display:flex;align-items:center;gap:14px;">
         <div style="font-family:'JetBrains Mono',monospace;font-size:1.1rem;font-weight:700;
                     color:{av_color};flex-shrink:0;">{av}</div>
         <div>
@@ -1764,10 +1862,20 @@ def _render_authorship_banner(authorship: Optional["AuthorshipResult"]) -> None:
             {rob_str}Detects AI-written lyrics — independent of audio AI detection.</div>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 18px;">{notes_html}</div>
+      {conf_bar_html}
       {sync_suffix}
     </div>
     """, unsafe_allow_html=True)
+
+    # Collapsible signal details — collapsed by default to keep transcript prominent (#163)
+    if a_notes:
+        with st.expander("Signal details", expanded=False):
+            notes_html = "".join(_note_html(n) for n in a_notes)
+            st.markdown(
+                f"<div style='display:grid;grid-template-columns:1fr 1fr;gap:0 18px;'>"
+                f"{notes_html}</div>",
+                unsafe_allow_html=True,
+            )
 
     # Tiered advisory message based on why analysis was limited (#165)
     skip_msg = _AUTHORSHIP_SKIP_MESSAGES.get(authorship.skip_reason or "", "")

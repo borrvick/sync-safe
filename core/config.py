@@ -718,6 +718,7 @@ class SystemConstants:
     REPETITION_SCORE_THRESHOLD: float = 0.40   # above → high repetition (AI signal)
     AI_SIGNAL_COUNT_CERTAIN: int = 3           # signals ≥ this → "Likely AI"
     AI_SIGNAL_COUNT_UNCERTAIN: int = 1         # signals ≥ this → "Uncertain"
+    AUTHORSHIP_MAX_SIGNALS: int = 6            # 4 heuristics + up to 2 from RoBERTa
 
 
 # Module-level singleton — import directly, never instantiate.
