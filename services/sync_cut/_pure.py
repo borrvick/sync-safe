@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+from core.config import CONSTANTS
 from core.models import Section, SyncCut
 
 _log = logging.getLogger(__name__)
@@ -83,14 +84,49 @@ def _build_note(
     end_s: float,
     sections: list[Section],
 ) -> str:
-    """Compose a human-readable note string for a SyncCut."""
+    """
+    Compose a human-readable note string for a SyncCut (#154).
+
+    Lists every section that overlaps the window with its clipped timestamps.
+    Appends a bar-count annotation when the window exits mid-section.
+    Single-section windows are prefixed with 'Full' when the section is fully spanned.
+    """
     def _fmt(t: float) -> str:
         m, s = divmod(int(t), 60)
         return f"{m}:{s:02d}"
 
-    start_label = _section_at(start_s, sections) or "track"
-    end_label   = _section_at(end_s,   sections) or "track end"
-    return f"{start_label.capitalize()} at {_fmt(start_s)} → {end_label.capitalize()} at {_fmt(end_s)}"
+    overlapping = [
+        sec for sec in sections
+        if sec.start < end_s and sec.end > start_s
+    ]
+    if not overlapping:
+        return f"Track ({_fmt(start_s)}–{_fmt(end_s)})"
+
+    parts: list[str] = []
+    for sec in overlapping:
+        clip_start = max(sec.start, start_s)
+        clip_end   = min(sec.end,   end_s)
+        label      = sec.label.capitalize()
+
+        # A window exits mid-section when it ends more than one tolerance before the section end
+        cuts_before_end = clip_end < sec.end - CONSTANTS.SYNC_CUT_BOUNDARY_TOLERANCE_S
+        if cuts_before_end:
+            sec_dur  = sec.end - sec.start
+            cut_dur  = clip_end - sec.start
+            # Rough bar length — assume 4 beats, use section duration / 4 as a proxy
+            bar_s    = max(1.0, round(sec_dur / 4))
+            bars_in  = max(1, round(cut_dur / bar_s))
+            bar_word = "bar" if bars_in == 1 else "bars"
+            parts.append(
+                f"{label} ({_fmt(clip_start)}–{_fmt(clip_end)}) — cuts {bars_in} {bar_word} in"
+            )
+        else:
+            # Full span: window covers this section from its clip_start to its end
+            full_span = clip_start <= sec.start + CONSTANTS.SYNC_CUT_BOUNDARY_TOLERANCE_S
+            prefix = "Full " if (full_span and len(overlapping) == 1) else ""
+            parts.append(f"{prefix}{label} ({_fmt(clip_start)}–{_fmt(clip_end)})")
+
+    return " · ".join(parts)
 
 
 def _score_window(
