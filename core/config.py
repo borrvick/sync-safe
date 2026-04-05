@@ -203,6 +203,10 @@ class SystemConstants:
     GAIN_OK_THRESHOLD_DB: float   = 1.0   # |gain| ≤ this → green (negligible adjustment)
     GAIN_WARN_THRESHOLD_DB: float = 4.0   # |gain| ≤ this → amber (moderate); above → red
 
+    # PRO confidence scoring thresholds (#118)
+    PRO_CONFIDENCE_MB_SCORE_THRESHOLD: int = 80    # MusicBrainz score must exceed this for "score_ok"
+    PRO_CONFIDENCE_ARTIST_OVERLAP: float   = 0.90  # token overlap ratio must meet/exceed this
+
     # Dialogue-ready score thresholds (0.0–1.0)
     # Score = fraction of energy OUTSIDE the 300–3000 Hz dialogue competition band.
     # Higher = sits more cleanly under voiceover.

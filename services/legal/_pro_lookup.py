@@ -26,7 +26,7 @@ import requests
 from core.config import CONSTANTS, get_settings
 from services.discovery import _clean_title_for_lastfm
 
-from ._pure import _infer_pro, _parse_first_recording
+from ._pure import _compute_pro_confidence, _infer_pro, _parse_first_recording
 
 _log = logging.getLogger(__name__)
 
@@ -84,22 +84,34 @@ class ProLookup:
         isrc, pro = ProLookup().lookup("Blinding Lights", "The Weeknd")
     """
 
-    def lookup(self, title: str, artist: str) -> tuple[Optional[str], Optional[str]]:
+    def lookup(
+        self, title: str, artist: str,
+    ) -> tuple[Optional[str], Optional[str], Optional[str]]:
         """
-        Look up ISRC and inferred PRO affiliation via MusicBrainz.
+        Look up ISRC, inferred PRO affiliation, and confidence via MusicBrainz.
 
         Args:
             title:  Track title.
             artist: Artist name.
 
         Returns:
-            (isrc, pro_match) — both None if no confident match found or on error.
+            (isrc, pro_match, pro_confidence) — all None if no match or on error.
+            pro_confidence is 'High'|'Medium'|'Low' when pro_match is set, else None.
             This method never raises — PRO lookup is best-effort.
         """
         if not title.strip() or not artist.strip():
-            return None, None
+            return None, None, None
 
         settings = get_settings()
         headers  = {"User-Agent": settings.musicbrainz_app}
         data     = _mb_query_with_retry(title, artist, headers)
-        return _parse_first_recording(data)
+        isrc, pro, mb_score, mb_artist = _parse_first_recording(data)
+
+        if pro is None:
+            return isrc, None, None
+
+        # Confidence is "Low" when we have no MusicBrainz recording match — the PRO
+        # was inferred from the ISRC country prefix only.
+        is_country_only = (mb_score is None and mb_artist is None)
+        confidence = _compute_pro_confidence(mb_score, mb_artist, artist, is_country_only)
+        return isrc, pro, confidence
