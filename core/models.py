@@ -438,8 +438,9 @@ class TrackCandidate(BaseModel):
 
     title: str
     artist: str
-    youtube_url: Optional[str]  = None  # None when yt-dlp URL lookup fails
-    similarity: float           = 0.0   # 0.0–1.0; rank-derived from Last.fm order
+    youtube_url: Optional[str]   = None   # None when yt-dlp URL lookup fails
+    similarity: float            = 0.0    # 0.0–1.0; rank-derived from Last.fm order
+    popularity_tier: Optional[str] = None  # "Emerging"|"Regional"|"Mainstream"|"Global"; None if unknown (#124)
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
@@ -496,8 +497,9 @@ class LegalLinks(BaseModel):
     sesac: str  = ""
 
     # Populated by services/pro_lookup.py — None when MusicBrainz returns no hit
-    isrc: Optional[str]      = None  # e.g. "US-ABC-23-12345"
-    pro_match: Optional[str] = None  # e.g. "ASCAP/BMI (US)", "PRS (UK)"
+    isrc: Optional[str]           = None   # e.g. "US-ABC-23-12345"
+    pro_match: Optional[str]      = None   # e.g. "ASCAP/BMI (US)", "PRS (UK)"
+    pro_confidence: Optional[str] = None   # "High"|"Medium"|"Low"; None when pro_match is None (#118)
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()

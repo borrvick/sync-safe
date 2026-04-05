@@ -132,12 +132,12 @@ class TestClassifyPopularity:
 class TestParseTrackList:
     def test_parses_standard_payload(self):
         payload = [
-            {"name": "Creep", "artist": {"name": "Radiohead"}},
-            {"name": "High and Dry", "artist": {"name": "Radiohead"}},
+            {"name": "Creep", "artist": {"name": "Radiohead"}, "listeners": "5000000"},
+            {"name": "High and Dry", "artist": {"name": "Radiohead"}, "listeners": "2000000"},
         ]
         assert _parse_track_list(payload) == [
-            ("Radiohead", "Creep"),
-            ("Radiohead", "High and Dry"),
+            ("Radiohead", "Creep", 5_000_000),
+            ("Radiohead", "High and Dry", 2_000_000),
         ]
 
     def test_respects_max_similar_limit(self):
@@ -155,7 +155,12 @@ class TestParseTrackList:
 
     def test_handles_string_artist(self):
         payload = [{"name": "Song", "artist": "Solo Artist"}]
-        assert _parse_track_list(payload) == [("Solo Artist", "Song")]
+        assert _parse_track_list(payload) == [("Solo Artist", "Song", 0)]
+
+    def test_handles_missing_listeners(self):
+        payload = [{"name": "Track", "artist": {"name": "Artist"}}]
+        result = _parse_track_list(payload)
+        assert result[0][2] == 0
 
     def test_empty_list(self):
         assert _parse_track_list([]) == []

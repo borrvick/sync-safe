@@ -1827,6 +1827,32 @@ for negotiation, not a firm quote.
     )
 
 
+_PRO_CONFIDENCE_COLORS: dict[str, str] = {
+    "High":   "var(--ok)",
+    "Medium": "var(--grade-c)",
+    "Low":    "var(--dim)",
+}
+_PRO_CONFIDENCE_SUFFIX: dict[str, str] = {
+    "High":   "",
+    "Medium": "",
+    "Low":    " — inferred from ISRC",
+}
+
+
+def _pro_confidence_badge_html(confidence: Optional[str]) -> str:
+    """Return an inline HTML badge for PRO confidence, or empty string if None (#118)."""
+    if confidence is None:
+        return ""
+    color  = _PRO_CONFIDENCE_COLORS.get(confidence, "var(--dim)")
+    suffix = _PRO_CONFIDENCE_SUFFIX.get(confidence, "")
+    label  = html_mod.escape(f"{confidence} confidence{suffix}")
+    return (
+        f"<span style='font-family:Figtree,sans-serif;font-size:.58rem;"
+        f"color:{color};border:1px solid {color};border-radius:3px;"
+        f"padding:1px 6px;white-space:nowrap;'>{label}</span>"
+    )
+
+
 def _render_legal_and_discovery(result: AnalysisResult) -> None:
     _render_popularity_card(result)
 
@@ -1858,8 +1884,11 @@ def _render_legal_and_discovery(result: AnalysisResult) -> None:
               <div>
                 <div style="font-size:.58rem;font-weight:600;letter-spacing:.14em;
                             text-transform:uppercase;color:var(--dim);margin-bottom:4px;">Inferred PRO</div>
-                <div style="font-family:'Chakra Petch',monospace;font-size:.9rem;
-                            color:var(--accent);">{pro_text}</div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <div style="font-family:'Chakra Petch',monospace;font-size:.9rem;
+                              color:var(--accent);">{pro_text}</div>
+                  {_pro_confidence_badge_html(result.legal.pro_confidence)}
+                </div>
               </div>
             </div>""", unsafe_allow_html=True)
 
@@ -1923,6 +1952,15 @@ def _render_legal_and_discovery(result: AnalysisResult) -> None:
             sim_clamped = min(1.0, max(0.0, t.similarity))
             sim_pct     = f"{sim_clamped:.0%}"
             sim_bar     = f"{sim_clamped:.3f}"
+            tier_pill   = ""
+            if t.popularity_tier:
+                tc = _POPULARITY_TIER_COLORS.get(t.popularity_tier, "var(--dim)")
+                tier_pill = (
+                    f"<span style='font-family:Figtree,sans-serif;font-size:.55rem;"
+                    f"color:{tc};border:1px solid {tc};border-radius:3px;"
+                    f"padding:1px 5px;white-space:nowrap;'>"
+                    f"{html_mod.escape(t.popularity_tier)}</span>"
+                )
             rows += f"""
             <div class="t-row">
               <div style="flex:1;min-width:0;">
@@ -1935,6 +1973,7 @@ def _render_legal_and_discovery(result: AnalysisResult) -> None:
                   </div>
                   <span style="font-family:'JetBrains Mono',monospace;font-size:.62rem;
                                color:var(--dim);">{sim_pct}</span>
+                  {tier_pill}
                 </div>
               </div>
               {btn}

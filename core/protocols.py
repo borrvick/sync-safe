@@ -456,14 +456,15 @@ class ProLookupProvider(Protocol):
         self,
         title: str,
         artist: str,
-    ) -> tuple[Optional[str], Optional[str]]:
+    ) -> tuple[Optional[str], Optional[str], Optional[str]]:
         """
         Args:
             title:  Track title.
             artist: Artist name.
 
         Returns:
-            (isrc, pro_match) tuple — both None when no match found or on error.
+            (isrc, pro_match, pro_confidence) tuple — all None when no match found or on error.
+            pro_confidence is 'High'|'Medium'|'Low' when pro_match is set (#118).
         """
         ...
 
