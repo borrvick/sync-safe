@@ -33,7 +33,12 @@ from core.models import (
     StructureResult,
     TranscriptSegment,
 )
-from services.export import PLATFORM_SCHEMAS, to_platform_csv
+from services.export import (
+    PLATFORM_SCHEMAS,
+    to_analysis_json,
+    to_platform_csv,
+    to_section_markers_csv,
+)
 from services.legal import hfa_url, songfile_url
 from services.tagging import TagInjector
 from ui.components import ISSUE_META, authorship_color, eq_bars, fmt_ts, issue_pill
@@ -668,6 +673,18 @@ def _render_structure_card(sr: Optional[StructureResult]) -> None:
             f"<div style='font-family:\"Figtree\",sans-serif;font-size:.76rem;"
             f"color:var(--dim);margin-top:10px;'>{html_mod.escape(stats)}</div>",
             unsafe_allow_html=True,
+        )
+
+    # DAW-ready section markers CSV download (#138)
+    if sections:
+        markers_bytes = to_section_markers_csv(sections)
+        st.download_button(
+            label="⬇ Export Section Markers (DAW CSV)",
+            data=markers_bytes,
+            file_name="section-markers.csv",
+            mime="text/csv",
+            use_container_width=True,
+            help="Timecoded section markers for Reaper, Logic, and other DAW imports",
         )
 
 
@@ -2894,6 +2911,19 @@ def _render_export_buttons(result: AnalysisResult) -> None:
             st.caption("PDF export requires fpdf2 — install with `pip install fpdf2`.")
         except Exception as exc:  # noqa: BLE001 — UI boundary; PDF errors must not crash the report
             st.error(f"PDF generation failed: {exc}")
+
+    # JSON full-data export (#140, #123) — sections, rights, all pipeline outputs
+    st.download_button(
+        label="⬇ Download Full Report JSON",
+        data=to_analysis_json(result),
+        file_name=f"{track_slug}-report.json",
+        mime="application/json",
+        use_container_width=False,
+        help=(
+            "Complete pipeline output as JSON — includes sections, ISRC, PRO, "
+            "forensics, compliance flags, popularity, and sync cuts."
+        ),
+    )
 
     # Tagged file download — only available for direct uploads (not YouTube, which
     # produces a lossy MP3 transcode that is not re-exportable as a deliverable).

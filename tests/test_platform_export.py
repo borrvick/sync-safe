@@ -19,14 +19,21 @@ from core.models import (
     ForensicsResult,
     IntroResult,
     LegalLinks,
+    Section,
     StingResult,
     StructureResult,
 )
+import json
+
 from services.export import (
     PLATFORM_SCHEMAS,
+    SECTION_MARKERS_COLUMNS,
     _extract_track_data,
+    _section_rows,
     _to_platform_row,
+    to_analysis_json,
     to_platform_csv,
+    to_section_markers_csv,
 )
 
 
@@ -256,3 +263,102 @@ class TestPlatformExportErrors:
         out = to_platform_csv(result, "generic")
         rows = list(csv.DictReader(io.StringIO(out.decode("utf-8-sig"))))
         assert rows[0]["verdict"] == ""
+
+
+# ---------------------------------------------------------------------------
+# _section_rows / to_section_markers_csv (#138)
+# ---------------------------------------------------------------------------
+
+def _make_sections() -> list[Section]:
+    return [
+        Section(label="intro",   start=0.0,  end=10.0),
+        Section(label="verse",   start=10.0, end=40.0),
+        Section(label="chorus",  start=40.0, end=72.0),
+    ]
+
+
+class TestSectionRows:
+    def test_row_count_matches_sections(self) -> None:
+        rows = _section_rows(_make_sections())
+        assert len(rows) == 3
+
+    def test_marker_name_includes_index_and_label(self) -> None:
+        rows = _section_rows(_make_sections())
+        assert rows[0]["marker_name"] == "01 Intro"
+        assert rows[2]["marker_name"] == "03 Chorus"
+
+    def test_start_timecode_format(self) -> None:
+        rows = _section_rows(_make_sections())
+        assert rows[0]["start_timecode"] == "0:00.000"
+        assert rows[1]["start_timecode"] == "0:10.000"
+
+    def test_duration_s_correct(self) -> None:
+        rows = _section_rows(_make_sections())
+        assert rows[1]["duration_s"] == "30.000"  # verse 10→40
+
+    def test_chorus_color_is_blue(self) -> None:
+        rows = _section_rows(_make_sections())
+        assert rows[2]["color_hex"] == "#4A90D9"
+
+    def test_empty_sections_returns_empty_list(self) -> None:
+        assert _section_rows([]) == []
+
+
+class TestToSectionMarkersCsv:
+    def test_returns_bytes(self) -> None:
+        assert isinstance(to_section_markers_csv(_make_sections()), bytes)
+
+    def test_bom_present(self) -> None:
+        out = to_section_markers_csv(_make_sections())
+        assert out[:3] == b"\xef\xbb\xbf"
+
+    def test_header_matches_schema(self) -> None:
+        out    = to_section_markers_csv(_make_sections())
+        reader = csv.DictReader(io.StringIO(out.decode("utf-8-sig")))
+        assert set(reader.fieldnames or []) == set(SECTION_MARKERS_COLUMNS)
+
+    def test_row_count_matches_sections(self) -> None:
+        out  = to_section_markers_csv(_make_sections())
+        rows = list(csv.DictReader(io.StringIO(out.decode("utf-8-sig"))))
+        assert len(rows) == 3
+
+    def test_empty_sections_produces_header_only(self) -> None:
+        out    = to_section_markers_csv([])
+        reader = csv.DictReader(io.StringIO(out.decode("utf-8-sig")))
+        assert reader.fieldnames is not None
+        assert list(reader) == []
+
+
+# ---------------------------------------------------------------------------
+# to_analysis_json (#140, #123)
+# ---------------------------------------------------------------------------
+
+class TestToAnalysisJson:
+    def test_returns_bytes(self) -> None:
+        assert isinstance(to_analysis_json(_make_result()), bytes)
+
+    def test_valid_json(self) -> None:
+        data = json.loads(to_analysis_json(_make_result()))
+        assert isinstance(data, dict)
+
+    def test_sections_present(self) -> None:
+        result = AnalysisResult(
+            audio=AudioBuffer(raw=b"\x00" * 44, label="x"),
+            structure=StructureResult(
+                bpm=120.0, key="C",
+                sections=[Section(label="chorus", start=0.0, end=30.0)],
+                beats=[],
+            ),
+        )
+        data = json.loads(to_analysis_json(result))
+        assert data["structure"]["sections"][0]["label"] == "chorus"
+
+    def test_legal_rights_present(self) -> None:
+        result = _make_result(isrc="GB-XYZ-23-99999")
+        data   = json.loads(to_analysis_json(result))
+        assert data["legal"]["isrc"] == "GB-XYZ-23-99999"
+        assert data["legal"]["pro_match"] == "ASCAP (US)"
+
+    def test_raw_audio_excluded(self) -> None:
+        data = json.loads(to_analysis_json(_make_result()))
+        assert "raw" not in data.get("audio", {})

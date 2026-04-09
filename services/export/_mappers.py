@@ -4,9 +4,51 @@ Pure data-extraction and platform-mapping functions.
 """
 from __future__ import annotations
 
-from core.models import AnalysisResult
+from core.models import AnalysisResult, Section
 
-from ._schema import PLATFORM_SCHEMAS, _AI_VERDICTS
+from ._schema import PLATFORM_SCHEMAS, SECTION_MARKERS_COLUMNS, _AI_VERDICTS
+
+# Section label → hex color for DAW marker import (#138).
+# Colors chosen to align with the report timeline palette.
+_SECTION_COLOR_MAP: dict[str, str] = {
+    "chorus":       "#4A90D9",  # blue  (matches var(--accent))
+    "hook":         "#4A90D9",  # blue
+    "refrain":      "#4A90D9",  # blue
+    "verse":        "#7ED321",  # green
+    "bridge":       "#F5A623",  # amber
+    "intro":        "#9B59B6",  # purple
+    "outro":        "#95A5A6",  # grey
+    "pre-chorus":   "#E67E22",  # orange
+    "post-chorus":  "#E74C3C",  # red
+    "instrumental": "#1ABC9C",  # teal
+    "solo":         "#1ABC9C",  # teal
+    "break":        "#BDC3C7",  # light grey
+    "interlude":    "#BDC3C7",  # light grey
+}
+_SECTION_COLOR_DEFAULT: str = "#888888"
+
+
+def _format_timecode(seconds: float) -> str:
+    """Format seconds as M:SS.mmm for DAW marker import. Pure — no I/O."""
+    mins = int(seconds) // 60
+    secs = seconds - mins * 60
+    return f"{mins}:{secs:06.3f}"
+
+
+def _section_rows(sections: list[Section]) -> list[dict[str, str]]:
+    """Convert Section objects to DAW marker dicts. Pure — no I/O."""
+    rows: list[dict[str, str]] = []
+    for idx, sec in enumerate(sections, 1):
+        duration = round(sec.end - sec.start, 3)
+        color    = _SECTION_COLOR_MAP.get(sec.label.lower(), _SECTION_COLOR_DEFAULT)
+        rows.append({
+            "marker_name":    f"{idx:02d} {sec.label.title()}",
+            "start_timecode": _format_timecode(sec.start),
+            "end_timecode":   _format_timecode(sec.end),
+            "duration_s":     f"{duration:.3f}",
+            "color_hex":      color,
+        })
+    return rows
 
 
 def _extract_audio_fields(result: AnalysisResult) -> dict[str, str]:
