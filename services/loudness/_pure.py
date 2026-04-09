@@ -86,6 +86,20 @@ def _classify_loudness(
     return "Streaming-ready"
 
 
+def _compute_vo_headroom(dialogue_score: float, max_db: float) -> float:
+    """
+    Estimate available VO headroom in dB from the dialogue-readiness score (#92).
+
+    Maps a 0.0–1.0 dialogue score linearly onto a 0–max_db range.
+    A fully dialogue-ready track (score=1.0) offers max_db of headroom; a
+    dialogue-heavy track (score=0.0) offers none.
+
+    Pure function — no I/O.
+    """
+    clamped = max(0.0, min(1.0, dialogue_score))
+    return round(clamped * max_db, 1)
+
+
 def _classify_dialogue(score: float) -> str:
     """
     Map a dialogue score to a human-readable label using CONSTANTS thresholds.

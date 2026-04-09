@@ -6,6 +6,72 @@ from __future__ import annotations
 
 from core.models import Section
 
+# Canonical section label vocabulary (Harmonix dataset).
+# Any label produced by allin1 that is not in this set gets normalised below.
+HARMONIX_LABELS: frozenset[str] = frozenset({
+    "chorus", "verse", "bridge", "intro", "outro",
+    "pre-chorus", "post-chorus", "instrumental",
+    "solo", "break", "interlude", "hook", "refrain",
+})
+
+# Map common allin1 abbreviations / raw outputs → canonical Harmonix label.
+_LABEL_ALIASES: dict[str, str] = {
+    # single-letter allin1 shorthand
+    "c":    "chorus",
+    "v":    "verse",
+    "b":    "bridge",
+    "i":    "intro",
+    "o":    "outro",
+    "p":    "pre-chorus",
+    "s":    "solo",
+    # common variant spellings
+    "inst": "instrumental",
+    "instrumental break": "instrumental",
+    "prechorus": "pre-chorus",
+    "pre chorus": "pre-chorus",
+    "post chorus": "post-chorus",
+    "postchorus": "post-chorus",
+    # "refrain" and "hook" are in HARMONIX_LABELS — no alias needed; they return early.
+    "drop": "chorus",
+    "buildup": "pre-chorus",
+    "build up": "pre-chorus",
+    "build": "pre-chorus",
+    "fade": "outro",
+    "coda": "outro",
+    "ending": "outro",
+    "end": "outro",
+    "breakdown": "break",
+    "interlude": "break",
+    "ad lib": "outro",
+    "ad-lib": "outro",
+}
+
+
+def _normalize_section_label(label: str, index: int, total: int) -> str:
+    """
+    Normalise an allin1 section label to the canonical Harmonix vocabulary.
+
+    Steps:
+    1. Lowercase and strip whitespace.
+    2. Return unchanged if already a canonical Harmonix label.
+    3. Apply the alias table.
+    4. Fall back to positional heuristics: index 0 → "intro",
+       last index → "outro", otherwise → "verse".
+
+    Pure function — no I/O.
+    """
+    lo = label.strip().lower()
+    if lo in HARMONIX_LABELS:
+        return lo
+    if lo in _LABEL_ALIASES:
+        return _LABEL_ALIASES[lo]
+    # positional fallback for unrecognised labels
+    if index == 0:
+        return "intro"
+    if index == total - 1:
+        return "outro"
+    return "verse"
+
 
 def _merge_consecutive_sections(sections: list[Section]) -> list[Section]:
     """
@@ -36,18 +102,23 @@ def _parse_sections(result: object) -> list[Section]:
     """
     Convert an allin1 AnalysisResult's segments into typed Section objects.
 
-    Consecutive segments sharing the same label are merged into a single
-    Section.  Pure function: takes the allin1 result object, returns a list
+    Each raw label is normalised to the canonical Harmonix vocabulary via
+    `_normalize_section_label` before consecutive same-label sections are
+    merged.  Pure function: takes the allin1 result object, returns a list
     of Section.
     """
     if not hasattr(result, "segments"):
         return []
+    segs = list(result.segments)
+    total = len(segs)
     raw: list[Section] = [
         Section(
-            label=str(getattr(seg, "label", "unknown")),
+            label=_normalize_section_label(
+                str(getattr(seg, "label", "unknown")), i, total
+            ),
             start=float(getattr(seg, "start", 0.0)),
             end=float(getattr(seg, "end", 0.0)),
         )
-        for seg in result.segments
+        for i, seg in enumerate(segs)
     ]
     return _merge_consecutive_sections(raw)

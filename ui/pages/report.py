@@ -85,6 +85,65 @@ def _boundary_val(v: float, fmt: str = ".5f", unavail: str = "N/A") -> str:
 
 
 # ---------------------------------------------------------------------------
+# Downbeat-aware section seek (#135)
+# ---------------------------------------------------------------------------
+
+def _nearest_beat_in_section(
+    target: float,
+    beats: list[float],
+    section_start: float,
+    section_end: float,
+) -> float:
+    """
+    Snap a target timestamp to the nearest beat before the section ends.
+
+    Searches all beats with `b < section_end` — intentionally no lower bound so
+    that a downbeat landing fractionally before `section_start` (the true first
+    beat of the section) is still reachable.  Returns `target` unchanged when no
+    candidate beats exist (beat tracking unavailable or all beats are beyond the
+    section end).
+
+    Pure function — no I/O.
+    """
+    candidates = [b for b in beats if b < section_end]
+    if not candidates:
+        return target
+    return min(candidates, key=lambda b: abs(b - target))
+
+
+# ---------------------------------------------------------------------------
+# Chorus-adjacency highlight (#136)
+# ---------------------------------------------------------------------------
+
+def _chorus_adjacent(label: str, i: int, sections: list[Section]) -> bool:
+    """
+    Return True when a section should receive a chorus-adjacent highlight.
+
+    A section is chorus-adjacent when:
+    - Its normalised label contains "pre-chorus" or "build", AND
+    - The nearest following chorus starts within CONSTANTS.PRE_CHORUS_ADJACENT_MAX_S
+      seconds of this section's end.
+
+    Pure function — no I/O.
+    """
+    lo = label.lower()
+    if not any(k in lo for k in ("pre-chorus", "prechorus", "pre chorus", "build")):
+        return False
+    if i >= len(sections) - 1:
+        return False
+    this_end = sections[i].end
+    for j in range(i + 1, len(sections)):
+        next_label = sections[j].label.lower()
+        if any(k in next_label for k in ("chorus", "hook", "refrain", "drop")):
+            gap = sections[j].start - this_end
+            return gap <= CONSTANTS.PRE_CHORUS_ADJACENT_MAX_S
+        # stop searching once we pass the adjacent-window
+        if sections[j].start - this_end > CONSTANTS.PRE_CHORUS_ADJACENT_MAX_S:
+            break
+    return False
+
+
+# ---------------------------------------------------------------------------
 # OpenGraph + JSON-LD meta tags
 # ---------------------------------------------------------------------------
 
@@ -519,6 +578,7 @@ def _render_structure_card(sr: Optional[StructureResult]) -> None:
     bpm_fmt  = f"{sr.bpm:.1f}" if sr and isinstance(sr.bpm, float) else (sr.bpm if sr else "—")
     key      = sr.key if sr else "—"
     sections = sr.sections if sr else []
+    beats    = sr.beats if sr else []
 
     def _fmt_ts(secs: float) -> str:
         m, s = divmod(int(secs), 60)
@@ -553,15 +613,15 @@ def _render_structure_card(sr: Optional[StructureResult]) -> None:
     </div>
     """, unsafe_allow_html=True)
 
-    # Section timeline bar (#133)
+    # Section timeline bar (#133, #136)
     if sections:
         total_dur = sum(s.end - s.start for s in sections)
         if total_dur > 0:
             blocks = "".join(
                 f"<div style='flex:{max(0.01, (s.end - s.start) / total_dur):.4f};"
-                f"background:{_section_label_color(s.label)};height:100%;border-radius:2px;'"
+                f"background:{_section_label_color(s.label, idx, sections)};height:100%;border-radius:2px;'"
                 f" title=\"{html_mod.escape(s.label)} ({int(s.end - s.start)}s)\"></div>"
-                for s in sections
+                for idx, s in enumerate(sections)
             )
             st.markdown(
                 f"<div style='display:flex;gap:2px;height:8px;border-radius:4px;"
@@ -583,7 +643,8 @@ def _render_structure_card(sr: Optional[StructureResult]) -> None:
                     use_container_width=True,
                     type="secondary",
                 ):
-                    st.session_state.start_time = ts_s
+                    snapped = _nearest_beat_in_section(s.start, beats, s.start, s.end)
+                    st.session_state.start_time = int(snapped)
                     st.session_state.player_key = st.session_state.get("player_key", 0) + 1
                     st.rerun()
             with col_label:
@@ -706,8 +767,18 @@ def _section_button_help(label: str, start_fmt: str) -> str:
     return f"{seek}\n\n{tip}" if tip else seek
 
 
-def _section_label_color(label: str) -> str:
-    """Map a section label keyword to a CSS variable for the timeline bar."""
+def _section_label_color(
+    label: str,
+    i: int = 0,
+    sections: Optional[list[Section]] = None,
+) -> str:
+    """
+    Map a section label to a CSS variable for the timeline bar.
+
+    When `sections` is provided and the section at index `i` is chorus-adjacent
+    (#136), it receives a distinct pre-chorus highlight (var(--grade-c) at
+    higher contrast) instead of the generic build/bridge colour.
+    """
     lo = label.lower()
     if any(k in lo for k in ("chorus", "hook", "refrain", "drop")):
         return "var(--accent)"
@@ -716,7 +787,12 @@ def _section_label_color(label: str) -> str:
     if any(k in lo for k in ("outro", "fade", "coda", "end")):
         return "var(--muted)"
     if any(k in lo for k in ("bridge", "pre-chorus", "prechorus", "build")):
-        return "var(--grade-c)"
+        adjacent = (
+            _chorus_adjacent(label, i, sections)
+            if sections is not None
+            else False
+        )
+        return "var(--accent)" if adjacent else "var(--grade-c)"
     if any(k in lo for k in ("instrumental", "break", "solo", "interlude")):
         return "var(--grade-b)"
     return "var(--dim)"  # verse and unrecognised labels
@@ -1401,8 +1477,20 @@ def _render_audio_quality_card(aq: Optional["AudioQualityResult"]) -> None:
         _render_gain_table(aq)
 
     # ── Dialogue-ready row ────────────────────────────────────────────────
-    dial_color = _DIALOGUE_LABEL_COLORS.get(aq.dialogue_label, "var(--muted)")
-    dial_pct   = int(aq.dialogue_score * 100)
+    dial_color  = _DIALOGUE_LABEL_COLORS.get(aq.dialogue_label, "var(--muted)")
+    dial_pct    = int(aq.dialogue_score * 100)
+    vo_headroom = aq.vo_headroom_db
+    vo_str      = (
+        f"~{vo_headroom:g} dB of VO headroom"
+        if vo_headroom is not None
+        else ""
+    )
+    vo_html = (
+        "<div style=\"font-family:'JetBrains Mono',monospace;font-size:.66rem;"
+        f"color:var(--dim);margin-top:3px;\">{html_mod.escape(vo_str)}</div>"
+        if vo_str
+        else ""
+    )
 
     st.markdown(f"""
     <div class="sig" style="padding:14px 16px;display:flex;align-items:center;gap:16px;">
@@ -1416,6 +1504,7 @@ def _render_audio_quality_card(aq: Optional["AudioQualityResult"]) -> None:
         </div>
         <div style="font-family:'Chakra Petch',monospace;font-size:1.1rem;font-weight:700;
                     color:{dial_color};">{html_mod.escape(aq.dialogue_label)}</div>
+        {vo_html}
       </div>
       <div style="margin-left:auto;text-align:right;">
         <div style="font-family:'JetBrains Mono',monospace;font-size:1.2rem;

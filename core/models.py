@@ -393,6 +393,11 @@ class AudioQualityResult(BaseModel):
     dialogue_score: float       # 0.0–1.0; fraction of energy outside 300–3 kHz band
     dialogue_label: str         # "Dialogue-Ready" | "Mixed" | "Dialogue-Heavy"
 
+    # VO headroom estimate (#92)
+    # Estimated dB of headroom available for voiceover; scaled from dialogue_score.
+    # None when not yet computed (backward-compatible with older results).
+    vo_headroom_db: Optional[float] = None
+
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
 

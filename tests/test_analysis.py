@@ -5,6 +5,7 @@ Unit tests for services/analysis.py pure functions.
 
 Covers:
   - _merge_consecutive_sections — section collapse logic
+  - _normalize_section_label — Harmonix vocabulary normalisation (#136)
 
 No GPU, no allin1, no audio — all tests complete in < 1 second.
 """
@@ -13,7 +14,7 @@ from __future__ import annotations
 import pytest
 
 from core.models import Section
-from services.analysis import _merge_consecutive_sections
+from services.analysis import HARMONIX_LABELS, _merge_consecutive_sections, _normalize_section_label
 
 
 def _sec(label: str, start: float, end: float) -> Section:
@@ -116,3 +117,44 @@ class TestMergeConsecutiveSections:
         chorus2 = result[4]
         assert chorus2.start == pytest.approx(102.0)
         assert chorus2.end   == pytest.approx(134.0)
+
+
+# ---------------------------------------------------------------------------
+# _normalize_section_label (#136)
+# ---------------------------------------------------------------------------
+
+class TestNormalizeSectionLabel:
+    def test_canonical_label_unchanged(self) -> None:
+        assert _normalize_section_label("chorus", 1, 5) == "chorus"
+
+    def test_canonical_label_is_lowercased(self) -> None:
+        assert _normalize_section_label("Chorus", 1, 5) == "chorus"
+
+    def test_alias_c_maps_to_chorus(self) -> None:
+        assert _normalize_section_label("c", 1, 5) == "chorus"
+
+    def test_alias_v_maps_to_verse(self) -> None:
+        assert _normalize_section_label("v", 1, 5) == "verse"
+
+    def test_alias_prechorus_maps(self) -> None:
+        assert _normalize_section_label("prechorus", 1, 5) == "pre-chorus"
+
+    def test_canonical_refrain_unchanged(self) -> None:
+        # "refrain" is in HARMONIX_LABELS — returned as-is (lowercased)
+        assert _normalize_section_label("Refrain", 1, 5) == "refrain"
+
+    def test_alias_fade_maps_to_outro(self) -> None:
+        assert _normalize_section_label("fade", 3, 4) == "outro"
+
+    def test_positional_fallback_first_section_is_intro(self) -> None:
+        assert _normalize_section_label("zzz_unknown", 0, 5) == "intro"
+
+    def test_positional_fallback_last_section_is_outro(self) -> None:
+        assert _normalize_section_label("zzz_unknown", 4, 5) == "outro"
+
+    def test_positional_fallback_middle_is_verse(self) -> None:
+        assert _normalize_section_label("zzz_unknown", 2, 5) == "verse"
+
+    def test_all_harmonix_labels_in_frozenset(self) -> None:
+        for label in ("chorus", "verse", "bridge", "intro", "outro"):
+            assert label in HARMONIX_LABELS
