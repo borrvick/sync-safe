@@ -13,7 +13,13 @@ from core.config import CONSTANTS
 from core.exceptions import ModelInferenceError
 from core.models import AudioBuffer, AudioQualityResult
 
-from ._pure import _classify_dialogue, _classify_loudness, _dialogue_score, _measure_loudness
+from ._pure import (
+    _classify_dialogue,
+    _classify_loudness,
+    _compute_vo_headroom,
+    _dialogue_score,
+    _measure_loudness,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -82,4 +88,5 @@ class AudioQualityAnalyzer:
             loudness_verdict=_classify_loudness(integrated_lufs, tp_warning, delta_broadcast),
             dialogue_score=diag_score,
             dialogue_label=diag_label,
+            vo_headroom_db=_compute_vo_headroom(diag_score, CONSTANTS.VO_HEADROOM_MAX_DB),
         )

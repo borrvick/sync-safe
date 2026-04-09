@@ -207,6 +207,13 @@ class SystemConstants:
     PRO_CONFIDENCE_MB_SCORE_THRESHOLD: int = 80    # MusicBrainz score must exceed this for "score_ok"
     PRO_CONFIDENCE_ARTIST_OVERLAP: float   = 0.90  # token overlap ratio must meet/exceed this
 
+    # VO headroom estimate — max dB headroom at perfect dialogue-ready score (#92)
+    VO_HEADROOM_MAX_DB: float = 12.0
+
+    # Section label normalization — max seconds before a chorus for a section
+    # to be considered "pre-chorus adjacent" for timeline highlight (#136)
+    PRE_CHORUS_ADJACENT_MAX_S: float = 16.0
+
     # Dialogue-ready score thresholds (0.0–1.0)
     # Score = fraction of energy OUTSIDE the 300–3000 Hz dialogue competition band.
     # Higher = sits more cleanly under voiceover.
