@@ -16,6 +16,7 @@ Design rules:
 """
 from __future__ import annotations
 
+import dataclasses
 import io
 from typing import TYPE_CHECKING, Any, Literal, Optional
 
@@ -155,6 +156,20 @@ class StructureResult(BaseModel):
 # Forensics
 # ---------------------------------------------------------------------------
 
+@dataclasses.dataclass(frozen=True)
+class SectionRepetition:
+    """
+    Per-label repetition score from section-aware loop analysis (#143, #145).
+
+    max_similarity:  highest pairwise cosine score within this label group.
+    mean_similarity: mean across all pairs — low pair_count = low confidence.
+    pair_count:      number of same-label pairs compared.
+    """
+    max_similarity:  float
+    mean_similarity: float
+    pair_count:      int
+
+
 class AiSegment(BaseModel):
     """One time-windowed AI-probability estimate within a track."""
 
@@ -205,6 +220,14 @@ class ForensicsResult(BaseModel):
     # Blended Repetition Index: 0.6 * loop_score + 0.4 * loop_autocorr_score (see #144)
     repetition_index: Optional[float] = None   # None → forensics skipped or pre-#144 result
 
+    # Per-4-bar-window scores for heatmap rendering (#142)
+    loop_window_scores: list[tuple[float, float]] = Field(default_factory=list)
+    # (start_s, max_similarity) per window
+
+    # Section-aware repetition: inter-section + intra-section (#143, #145)
+    section_similarities: dict[str, SectionRepetition]          = Field(default_factory=dict)
+    section_internal_repetition: dict[str, SectionRepetition]   = Field(default_factory=dict)
+
     ai_segments: list[AiSegment] = Field(default_factory=list)  # per-window heatmap data
 
     flags: list[str]        = Field(default_factory=list)  # human-readable flag labels
@@ -250,6 +273,9 @@ class StingResult(BaseModel):
     fade_tail_seconds: float        = 0.0   # duration (s) where RMS > tail threshold
     # Cut-specific enrichment (#104)
     cut_type: Optional[Literal["clean_cut", "mid_phrase_cut"]] = None
+    # Raw diagnostic fields for JSON export (#108)
+    norm_slope: float               = 0.0   # normalised RMS slope at track end
+    onset_spike_factor: float       = 0.0   # final-onset energy vs track mean
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
@@ -267,6 +293,9 @@ class EnergyEvolutionResult(BaseModel):
     # Per-section breakdown (#106)
     section_details: list[dict[str, str | int | bool]] = Field(default_factory=list)
     ending_section: Optional[str]                      = None  # section label containing track end
+    # Raw diagnostic fields for JSON export (#108)
+    stagnant_timestamps: list[float]    = Field(default_factory=list)  # start_s of each stagnant window
+    per_window_contrasts: list[float]   = Field(default_factory=list)  # energy delta per window
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
@@ -279,7 +308,8 @@ class IntroResult(BaseModel):
 
     intro_seconds: float    = 0.0
     flag: bool              = False
-    source: str             = ""    # "allin1" | "whisper_fallback" | "none"
+    source: str             = ""    # "allin1" | "whisper" | "onset" | "whisper_fallback" | "none"
+    confidence: str         = ""    # "High" | "Medium" | "Low" | "" (pre-#105 results)
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
@@ -352,6 +382,12 @@ class ThemeMoodResult(BaseModel):
     confidence: float               = 0.0
     groq_enriched: bool             = False
     raw_keywords: list[str]         = Field(default_factory=list)
+    # Per-theme confidence scores for UI bars (#167)
+    theme_scores: dict[str, float]  = Field(default_factory=dict)
+    # Category of the top-ranked theme — "energy" | "emotional" | "seasonal" | "" (#167)
+    top_category: str               = ""
+    # Optional one-to-two sentence mood summary from Groq enrichment (#169)
+    mood_summary: Optional[str]     = None
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
@@ -474,6 +510,9 @@ class SyncCut(BaseModel):
     actual_duration_s: float    # actual edit length (end_s − start_s)
     confidence: float           # 0.0–1.0; higher = better section-boundary alignment
     note: str                   # e.g. "Chorus at 0:32 → natural ending at 1:00"
+    # Top-N ranking and per-criterion breakdown (#148, #155)
+    rank: int                                   = 1    # 1 = best, 2 = second-best, 3 = third-best
+    score_breakdown: dict[str, bool]            = Field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()

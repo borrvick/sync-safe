@@ -8,7 +8,7 @@ import logging
 
 from core.config import CONSTANTS
 from core.exceptions import ModelInferenceError
-from core.models import AiSegment, AudioBuffer, ForensicsResult
+from core.models import AiSegment, AudioBuffer, ForensicsResult, Section
 
 from ._aggregators import (
     _build_flags,
@@ -62,12 +62,18 @@ class Forensics:
         ]
 
     @spaces.GPU
-    def analyze(self, audio: AudioBuffer) -> ForensicsResult:
+    def analyze(
+        self,
+        audio: AudioBuffer,
+        sections: list[Section] | None = None,
+    ) -> ForensicsResult:
         """
         Run all forensic checks and aggregate into a ForensicsResult.
 
         Args:
-            audio: In-memory audio buffer from Ingestion.
+            audio:    In-memory audio buffer from Ingestion.
+            sections: Optional allin1 structural sections.  When provided,
+                      section-aware repetition analysis is computed (#143, #145).
 
         Returns:
             ForensicsResult with per-signal scores, human-readable flags,
@@ -82,7 +88,12 @@ class Forensics:
 
         for analyzer in self._analyzers:
             try:
-                analyzer.process(data, bundle)
+                # Thread sections into RhythmAnalyzer only — other analyzers
+                # don't need structural context.
+                if isinstance(analyzer, RhythmAnalyzer):
+                    analyzer.process(data, bundle, sections=sections or [])
+                else:
+                    analyzer.process(data, bundle)
             except ModelInferenceError as exc:
                 _log.warning(
                     "forensics: %s skipped — %s",
@@ -112,6 +123,9 @@ class Forensics:
             loop_score=bundle.loop_score,
             loop_autocorr_score=bundle.loop_autocorr_score,
             repetition_index=repetition_index,
+            loop_window_scores=bundle.loop_window_scores,
+            section_similarities=bundle.section_similarities,
+            section_internal_repetition=bundle.section_internal_repetition,
             spectral_slop=bundle.spectral_slop,
             synthid_score=float(bundle.synthid_bins),
             centroid_instability_score=bundle.centroid_instability_score,

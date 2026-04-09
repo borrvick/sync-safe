@@ -1,4 +1,5 @@
 from ._authorship import Authorship
+from ._labels import THEME_TAXONOMY
 from ._theme import ThemeMoodAnalyzer
 from ._pure import (
     _burstiness,
@@ -11,6 +12,7 @@ from ._scoring import _compute_verdict
 
 __all__ = [
     "Authorship",
+    "THEME_TAXONOMY",
     "ThemeMoodAnalyzer",
     "_burstiness",
     "_unique_word_ratio",

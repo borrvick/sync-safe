@@ -8,6 +8,7 @@ from ._pure import (
     _compute_fade_severity,
     _compute_grade,
     _deduplicate_flags,
+    _detect_onset_intro_end,
     _score_detoxify,
     _section_energy_note,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "_compute_fade_severity",
     "_compute_grade",
     "_deduplicate_flags",
+    "_detect_onset_intro_end",
     "_score_detoxify",
     "_section_energy_note",
 ]

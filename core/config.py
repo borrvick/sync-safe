@@ -127,6 +127,14 @@ class SystemConstants:
     # Intro segments longer than this (seconds) are flagged
     INTRO_MAX_SECONDS: int = 15
 
+    # Onset-energy intro detection (#105)
+    # Minimum beat count before an RMS jump is eligible to signal intro end.
+    INTRO_ONSET_MIN_BEATS: int = 8
+    # RMS must exceed pre-onset mean by this ratio to count as a significant jump.
+    INTRO_ONSET_RMS_JUMP_RATIO: float = 2.0
+    # Two signals are considered "in agreement" when within this many seconds.
+    INTRO_CONFIDENCE_AGREEMENT_S: float = 2.0
+
     # ---- Discovery ------------------------------------------------------------
     MAX_SIMILAR_TRACKS: int = 5
 
@@ -145,6 +153,32 @@ class SystemConstants:
     # Duration tolerance: candidate window must be within ±this many seconds
     # of the target duration to be considered.
     SYNC_CUT_DURATION_TOLERANCE_S: float = 3.0
+
+    # Top-N candidates to return per target duration (#148)
+    SYNC_CUT_TOP_N: int = 3
+
+    # Bonus added to confidence when track loop structure is in the moderate range (#151).
+    # Moderate repetition (REPETITION_INDEX_MODERATE ≤ loop_score < REPETITION_INDEX_HIGH)
+    # means the track loops cleanly but isn't mechanical — most versatile for short spots.
+    SYNC_CUT_LOOP_BONUS: float = 0.05
+
+    # ---- Section-aware repetition (#143, #145) --------------------------------
+    # Minimum section duration (seconds) to attempt fingerprinting.
+    # Sections shorter than this are skipped — avoids noise in tiny blips.
+    SECTION_MIN_DURATION_S: float = 0.5
+
+    # Boundary trim applied to each section slice before fingerprinting.
+    # Removes 50 ms of click/bleed at edit points (sec.start / sec.end boundaries).
+    SECTION_BOUNDARY_TRIM_S: float = 0.05
+
+    # Sub-window size for intra-section internal repetition (#145).
+    # 8 beats = 2 bars — gives more windows per section than the global 16-beat window.
+    INTERNAL_LOOP_BEATS_PER_WINDOW: int = 8
+
+    # Custom duration slider bounds and step (#150)
+    SYNC_CUT_SLIDER_MIN: int = 15
+    SYNC_CUT_SLIDER_MAX: int = 120
+    SYNC_CUT_SLIDER_STEP: int = 5
 
     # ---- Stem validation: mono compatibility / phase alignment ----------------
     # Pearson L/R correlation below this → warn about phase issues
@@ -184,6 +218,16 @@ class SystemConstants:
     STEP_TIMEOUT_COMPLIANCE_S: int    = 60
     STEP_TIMEOUT_AUTHORSHIP_S: int    = 30
     STEP_TIMEOUT_THEME_MOOD_S: int    = 15
+
+    # ---- Theme & Mood Detection (#167) ----------------------------------------
+    # Minimum per-theme score to include in the ranked output list.
+    THEME_MIN_CONFIDENCE: float       = 0.25
+    # Tokens to scan before a keyword match to detect negation ("not", "never", …).
+    THEME_NEGATION_WINDOW: int        = 4
+    # Groq model used for on-demand mood summary enrichment (#169).
+    THEME_GROQ_MODEL: str             = "llama-3.3-70b-versatile"
+    # Max lyric characters sent to Groq — caps token cost.
+    THEME_GROQ_LYRICS_CAP: int        = 2000
     STEP_TIMEOUT_DISCOVERY_S: int     = 30
     STEP_TIMEOUT_LEGAL_S: int         = 30
 

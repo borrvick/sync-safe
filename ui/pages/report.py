@@ -12,12 +12,13 @@ import io
 import json as _json
 import re
 from collections import Counter, OrderedDict
+from itertools import groupby
 from datetime import datetime, timezone
 from typing import Optional
 
 import streamlit as st
 
-from core.config import CONSTANTS
+from core.config import CONSTANTS, get_settings
 from core.models import (
     AiSegment,
     AnalysisResult,
@@ -29,8 +30,10 @@ from core.models import (
     ForensicsResult,
     IntroResult,
     Section,
+    SectionRepetition,
     StingResult,
     StructureResult,
+    SyncCut,
     TranscriptSegment,
 )
 from services.export import (
@@ -39,7 +42,9 @@ from services.export import (
     to_platform_csv,
     to_section_markers_csv,
 )
+from services.content import THEME_TAXONOMY, ThemeMoodAnalyzer
 from services.legal import hfa_url, songfile_url
+from services.sync_cut import SyncCutAnalyzer
 from services.tagging import TagInjector
 from ui.components import ISSUE_META, authorship_color, eq_bars, fmt_ts, issue_pill
 
@@ -81,6 +86,13 @@ _MOOD_COLORS: dict[str, str] = {
     "Chill":       "var(--accent)",
     "Dark":        "var(--danger)",
     "Intense":     "var(--danger)",
+}
+
+# Category → CSS variable for theme pill/bar coloring (#168)
+_THEME_CATEGORY_COLORS: dict[str, str] = {
+    "energy":    "var(--accent)",
+    "emotional": "var(--info)",
+    "seasonal":  "var(--sync-pass)",
 }
 
 
@@ -1138,6 +1150,123 @@ def _render_forensics_card(fr: Optional[ForensicsResult], source: str = "file") 
 # Production Analysis — sample & loop detection (separate from AI detection)
 # ---------------------------------------------------------------------------
 
+def _loop_heatmap_color(score: float) -> str:
+    """Map a loop similarity score to a CSS color string."""
+    if score > CONSTANTS.LOOP_SCORE_CEILING:
+        return "var(--danger)"   # red — highly repetitive
+    if score > CONSTANTS.LOOP_SCORE_POSSIBLE:
+        return "var(--grade-c)"  # amber — moderately repetitive
+    return "var(--accent)"       # green — low repetition
+
+
+def _render_loop_heatmap(window_scores: list[tuple[float, float]]) -> None:
+    """
+    Render a horizontal color-cell heatmap of per-4-bar-window loop scores (#142).
+
+    Each cell's color encodes the max pairwise similarity for that window.
+    A seek button row beneath lets editors jump to any window.
+    """
+    if not window_scores:
+        return
+
+    # Build the color bar as a flex row of divs
+    cells_html = "".join(
+        f"<div style='flex:1;height:18px;background:{_loop_heatmap_color(score)};"
+        f"border-radius:3px;margin:0 1px;' aria-hidden='true' title='{score:.3f}'></div>"
+        for _, score in window_scores
+    )
+    st.markdown(
+        f"<div style='font-family:\"Chakra Petch\",monospace;font-size:.54rem;font-weight:600;"
+        f"letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:4px;'>"
+        f"Loop Window Map</div>"
+        f"<div style='display:flex;gap:0;margin-bottom:4px;'>{cells_html}</div>"
+        f"<div style='display:flex;gap:0;margin-bottom:12px;'>"
+        f"<span style='font-size:.58rem;color:var(--dim);'>0s</span>"
+        f"<span style='flex:1;'></span>"
+        f"<span style='font-size:.58rem;color:var(--dim);'>{window_scores[-1][0]:.0f}s</span>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+    # Seek button row — one button per window
+    cols = st.columns(len(window_scores))
+    for col, (start_s, score) in zip(cols, window_scores):
+        with col:
+            label = f"{int(start_s // 60)}:{int(start_s % 60):02d}"
+            if st.button(
+                label,
+                key=f"heatmap_seek_{start_s:.3f}",
+                help=f"Jump to {label} (score {score:.3f})",
+                use_container_width=True,
+                type="secondary",
+            ):
+                st.session_state.start_time  = int(start_s)
+                st.session_state.player_key  = st.session_state.get("player_key", 0) + 1
+                st.rerun()
+
+
+def _render_section_repetition(
+    inter: dict[str, SectionRepetition],
+    intra: dict[str, SectionRepetition],
+) -> None:
+    """
+    Render per-label inter-section and intra-section repetition rows (#143, #145).
+
+    Inter = same-label sections compared against each other.
+    Intra = sub-windows within each section compared against each other.
+    """
+    all_labels = sorted(set(inter) | set(intra))
+    if not all_labels:
+        return
+
+    _mono = "font-family:'JetBrains Mono',monospace;font-size:.72rem;color:var(--muted);"
+    _dim  = "font-family:'JetBrains Mono',monospace;font-size:.68rem;color:var(--dim);"
+    _hdr  = (
+        "font-family:'Chakra Petch',monospace;font-size:.54rem;font-weight:600;"
+        "letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:6px;"
+    )
+
+    st.markdown(
+        f"<div style='{_hdr}'>Section Repetition Breakdown</div>",
+        unsafe_allow_html=True,
+    )
+
+    for label in all_labels:
+        label_safe = html_mod.escape(label.title())
+        inter_rep  = inter.get(label)
+        intra_rep  = intra.get(label)
+
+        parts: list[str] = []
+
+        if inter_rep:
+            inter_score = inter_rep.max_similarity
+            inter_color = _loop_heatmap_color(inter_score)
+            conf_note   = " <i>(1 pair — low confidence)</i>" if inter_rep.pair_count == 1 else ""
+            flag        = " → Tight hook" if inter_score > CONSTANTS.LOOP_SCORE_CEILING else ""
+            parts.append(
+                f"<span style='color:var(--text);font-weight:600;'>{label_safe}</span> "
+                f"<span style='color:{inter_color};'>{inter_score:.2f}</span> "
+                f"<span style='color:var(--dim);'>({inter_rep.pair_count} pair{'s' if inter_rep.pair_count != 1 else ''})"
+                f"{flag}{conf_note}</span>"
+            )
+
+        if intra_rep:
+            intra_score = intra_rep.max_similarity
+            intra_color = _loop_heatmap_color(intra_score)
+            conf_note   = " <i>(2 sub-windows — low confidence)</i>" if intra_rep.pair_count <= 1 else ""
+            flag        = " → Locked loop" if intra_score > CONSTANTS.LOOP_SCORE_CEILING else ""
+            parts.append(
+                f"<span style='color:var(--dim);'>{label_safe} (internal)</span> "
+                f"<span style='color:{intra_color};'>{intra_score:.2f}</span>"
+                f"<span style='color:var(--dim);'>{flag}{conf_note}</span>"
+            )
+
+        row_html = " · ".join(parts)
+        st.markdown(
+            f"<div style='{_mono}padding:2px 0;'>{row_html}</div>",
+            unsafe_allow_html=True,
+        )
+
+
 def _render_production_analysis_card(fr: Optional[ForensicsResult], source: str = "file") -> None:
     if fr is None:
         st.markdown(
@@ -1248,6 +1377,14 @@ def _render_production_analysis_card(fr: Optional[ForensicsResult], source: str 
                 f"change with the picture. These tracks are harder to loop cleanly but reward "
                 f"editors who use the full duration."
             )
+
+    # ── 4-bar window loop heatmap (#142) ──────────────────────────────────────
+    if fr.loop_window_scores:
+        _render_loop_heatmap(fr.loop_window_scores)
+
+    # ── Section-aware repetition (#143 inter, #145 intra) ─────────────────────
+    if fr.section_similarities or fr.section_internal_repetition:
+        _render_section_repetition(fr.section_similarities, fr.section_internal_repetition)
 
     # ── Spectral boundary signals (monitoring mode — not yet in verdict) ─────
     infra  = fr.infrasonic_energy_ratio
@@ -2179,36 +2316,114 @@ def _render_theme_mood(result: AnalysisResult) -> None:
         return
 
     mood_color = _MOOD_COLORS.get(tm.mood, "var(--accent)")
+
+    # Section header
+    st.markdown(
+        '<div style="font-size:0.72rem;color:var(--dim);text-transform:uppercase;'
+        'letter-spacing:.06em;margin-bottom:8px;">Theme &amp; Mood</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Mood label row
     enriched_badge = (
         ' <span title="Enriched by Groq LLM" style="'
         'font-size:0.65rem;background:var(--accent);color:#000;'
         'border-radius:3px;padding:1px 5px;margin-left:6px;">✦ enriched</span>'
         if tm.groq_enriched else ""
     )
-
-    # Theme chips
-    theme_chips = "".join(
-        f'<span style="display:inline-block;margin:2px 4px 2px 0;padding:3px 10px;'
-        f'border-radius:12px;font-size:0.78rem;background:var(--surface-2);'
-        f'color:var(--text);border:1px solid var(--border-hr);">'
-        f'{html_mod.escape(t)}</span>'
-        for t in tm.themes
-    ) or '<span style="color:var(--muted);font-size:0.82rem;">—</span>'
-
     st.markdown(
-        f'<div style="margin-bottom:18px;">'
-        f'<div style="font-size:0.72rem;color:var(--dim);text-transform:uppercase;'
-        f'letter-spacing:.06em;margin-bottom:6px;">Theme &amp; Mood</div>'
-        f'<div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;">'
+        f'<div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px;">'
         f'<span style="font-size:0.95rem;font-weight:600;color:{mood_color};">'
         f'{html_mod.escape(tm.mood)}</span>'
         f'<span style="color:var(--dim);font-size:0.8rem;">{tm.confidence:.0%} confidence</span>'
         f'{enriched_badge}'
-        f'</div>'
-        f'<div style="margin-top:6px;">{theme_chips}</div>'
         f'</div>',
         unsafe_allow_html=True,
     )
+
+    # Category-coloured theme pills + per-theme confidence bars
+    if tm.theme_scores:
+        for theme, score in sorted(tm.theme_scores.items(), key=lambda x: -x[1]):
+            if score < CONSTANTS.THEME_MIN_CONFIDENCE:
+                continue
+            tax_entry  = THEME_TAXONOMY.get(theme, {})
+            category   = tax_entry.get("category", "")
+            pill_color = _THEME_CATEGORY_COLORS.get(category, "var(--surface-2)")
+            bar_pct    = int(score * 100)
+            st.markdown(
+                f'<div style="margin-bottom:6px;">'
+                f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">'
+                f'<span style="display:inline-block;padding:2px 9px;border-radius:10px;'
+                f'font-size:0.76rem;background:{pill_color};color:var(--text);">'
+                f'{html_mod.escape(theme)}</span>'
+                f'<span style="font-size:0.72rem;color:var(--dim);">{bar_pct}%</span>'
+                f'</div>'
+                f'<div style="height:4px;border-radius:2px;background:var(--surface-2);width:100%;">'
+                f'<div style="height:4px;border-radius:2px;background:{pill_color};'
+                f'width:{bar_pct}%;transition:width .3s;"></div>'
+                f'</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+    elif tm.themes:
+        chips = "".join(
+            f'<span style="display:inline-block;margin:2px 4px 2px 0;padding:3px 10px;'
+            f'border-radius:12px;font-size:0.78rem;background:var(--surface-2);'
+            f'color:var(--text);border:1px solid var(--border-hr);">'
+            f'{html_mod.escape(t)}</span>'
+            for t in tm.themes
+        )
+        st.markdown(f'<div style="margin-bottom:10px;">{chips}</div>', unsafe_allow_html=True)
+    else:
+        st.markdown(
+            '<div style="color:var(--muted);font-size:0.82rem;margin-bottom:10px;">—</div>',
+            unsafe_allow_html=True,
+        )
+
+    # Sync brief copy block
+    themes_str = ", ".join(tm.themes) if tm.themes else "—"
+    summary    = tm.mood_summary or f"{tm.mood} — {themes_str}"
+    st.code(summary, language=None)
+
+    # On-demand Groq enrichment toggle (hidden when key not configured)
+    _render_groq_enrich_toggle(result)
+
+
+def _render_groq_enrich_toggle(result: AnalysisResult) -> None:
+    """Show Groq enrichment toggle only when groq_api_key is configured (#169)."""
+    try:
+        settings = get_settings()
+        groq_key = getattr(settings, "groq_api_key", None)
+    except Exception:  # noqa: BLE001
+        groq_key = None
+    if not groq_key:
+        return
+
+    tm = result.theme_mood
+    if tm is None:
+        return
+
+    transcript_text = " ".join(
+        seg.text for seg in (result.transcript or []) if seg.text.strip()
+    )
+    cache_key = f"groq_tm_{hash(transcript_text[:200])}"
+    if cache_key not in st.session_state:
+        st.session_state[cache_key] = False
+
+    want_groq = st.toggle(
+        "✦ Enrich with Groq",
+        key=f"{cache_key}_toggle",
+        value=st.session_state[cache_key],
+        help="Send a lyric excerpt to Groq LLM for a richer mood summary.",
+    )
+    if want_groq and not tm.groq_enriched:
+        try:
+            enriched = ThemeMoodAnalyzer().enrich(tm, transcript_text)
+            result.theme_mood = enriched
+            st.session_state[cache_key] = True
+            st.rerun()
+        except Exception as exc:  # noqa: BLE001
+            st.warning(f"Groq enrichment failed: {exc}")
 
 
 _AUTHORSHIP_SYNC_NOTES: dict[str, str] = {
@@ -2801,16 +3016,13 @@ def _sync_cut_conf_bar(conf: float) -> str:
     )
 
 
+@st.fragment
 def _render_sync_cuts(result: AnalysisResult) -> None:
-    """Render the Sync Edit Points table — one row per target duration.
+    """Render the Sync Edit Points table — top-3 candidates per target duration.
 
-    Start timestamps are rendered as st.button so clicking seeks the audio
-    player to that position (same pattern as lyric audit timestamps).
+    Wrapped in @st.fragment so the custom-duration slider reruns only this
+    section, not the full report page (#150).  Start timestamps seek the player.
     """
-    # Column header row — added Copy column (#149)
-    h_target, h_start, h_end, h_actual, h_conf, h_note, h_copy = st.columns(
-        [0.7, 0.8, 0.8, 0.7, 1.4, 2, 0.6], gap="small"
-    )
     _mono_hdr = (
         "font-family:JetBrains Mono,monospace;font-size:.6rem;font-weight:600;"
         "letter-spacing:.12em;text-transform:uppercase;color:var(--dim);"
@@ -2826,34 +3038,32 @@ def _render_sync_cuts(result: AnalysisResult) -> None:
         f'100% = perfect on all five. 60%+ is recommended for placement.</span>'
         f'</span></div>'
     )
-    for col, label in (
-        (h_target, "Target"),
-        (h_start,  "Start ▶"),
-        (h_end,    "End"),
-        (h_actual, "Actual"),
-        (h_note,   "Note"),
-        (h_copy,   "Copy"),
-    ):
-        col.markdown(f"<div style='{_mono_hdr}'>{label}</div>", unsafe_allow_html=True)
-    h_conf.markdown(_conf_header, unsafe_allow_html=True)
-
     _mono_cell = (
         "font-family:JetBrains Mono,monospace;font-size:.78rem;"
         "color:var(--muted);padding-top:6px;"
     )
-    for cut in result.sync_cuts:
+    _mono_cell_dim = (
+        "font-family:JetBrains Mono,monospace;font-size:.72rem;"
+        "color:var(--dim);padding-top:4px;"
+    )
+
+    def _render_cut_row(cut: SyncCut, key_suffix: str, is_alt: bool = False) -> None:
+        """Render one SyncCut as a table row. is_alt = True for rank 2/3 sub-rows."""
+        cell_style = _mono_cell_dim if is_alt else _mono_cell
         ts_s = int(cut.start_s)
         c_target, c_start, c_end, c_actual, c_conf, c_note, c_copy = st.columns(
             [0.7, 0.8, 0.8, 0.7, 1.4, 2, 0.6], gap="small"
         )
+        rank_label = f"#{cut.rank}" if is_alt else f"{cut.duration_s}s"
+        rank_color = "var(--dim)" if is_alt else "var(--text)"
         c_target.markdown(
-            f"<div style='{_mono_cell}font-weight:600;color:var(--text);'>{cut.duration_s}s</div>",
+            f"<div style='{cell_style}font-weight:600;color:{rank_color};'>{rank_label}</div>",
             unsafe_allow_html=True,
         )
         with c_start:
             if st.button(
                 _sync_cut_ts(cut.start_s),
-                key=f"cut_{ts_s}_{cut.duration_s}",
+                key=f"cut_{ts_s}_{cut.duration_s}_{key_suffix}",
                 help=f"Jump to {_sync_cut_ts(cut.start_s)} in the audio player",
                 use_container_width=True,
                 type="secondary",
@@ -2862,23 +3072,25 @@ def _render_sync_cuts(result: AnalysisResult) -> None:
                 st.session_state.player_key = st.session_state.get("player_key", 0) + 1
                 st.rerun()
         c_end.markdown(
-            f"<div style='{_mono_cell}'>{_sync_cut_ts(cut.end_s)}</div>",
+            f"<div style='{cell_style}'>{_sync_cut_ts(cut.end_s)}</div>",
             unsafe_allow_html=True,
         )
         c_actual.markdown(
-            f"<div style='{_mono_cell}'>{cut.actual_duration_s:.1f}s</div>",
+            f"<div style='{cell_style}'>{cut.actual_duration_s:.1f}s</div>",
             unsafe_allow_html=True,
         )
         c_conf.markdown(
-            f"<div style='padding-top:6px;'>{_sync_cut_conf_bar(cut.confidence)}</div>",
+            f"<div style='padding-top:{'4' if is_alt else '6'}px;'>"
+            f"{_sync_cut_conf_bar(cut.confidence)}</div>",
             unsafe_allow_html=True,
         )
         c_note.markdown(
-            f"<div style='font-family:Figtree,sans-serif;font-size:.78rem;"
-            f"color:var(--muted);padding-top:6px;'>{html_mod.escape(cut.note)}</div>",
+            f"<div style='font-family:Figtree,sans-serif;font-size:"
+            f"{'0.74' if is_alt else '0.78'}rem;"
+            f"color:var({'--dim' if is_alt else '--muted'});padding-top:6px;'>"
+            f"{html_mod.escape(cut.note)}</div>",
             unsafe_allow_html=True,
         )
-        # Copy popover — st.code provides built-in copy icon (#149)
         with c_copy:
             with st.popover("⧉", help="Copy timestamps or DAW marker text"):
                 ts_str     = f"{fmt_ts(int(cut.start_s))}–{fmt_ts(int(cut.end_s))}"
@@ -2892,9 +3104,57 @@ def _render_sync_cuts(result: AnalysisResult) -> None:
                 st.caption("DAW marker")
                 st.code(marker_str, language=None)
 
+    # -- Build the display list: pre-computed cuts + optional custom-duration cut --
+    display_cuts = list(result.sync_cuts)
+
+    custom_s = st.slider(
+        "Custom target duration (seconds)",
+        min_value=CONSTANTS.SYNC_CUT_SLIDER_MIN,
+        max_value=CONSTANTS.SYNC_CUT_SLIDER_MAX,
+        value=30,
+        step=CONSTANTS.SYNC_CUT_SLIDER_STEP,
+        key="sync_cut_custom_duration",
+        help="Compute edit points for a custom duration. Results are appended to the table.",
+    )
+    # Only recompute if the custom duration differs from all pre-computed targets
+    preset_targets = {c.duration_s for c in result.sync_cuts}
+    if custom_s not in preset_targets and result.structure:
+        custom_cuts = SyncCutAnalyzer().suggest(
+            sections         = result.structure.sections,
+            beats            = result.structure.beats,
+            target_durations = [custom_s],
+            loop_score       = result.forensics.loop_score if result.forensics else 0.0,
+        )
+        display_cuts = display_cuts + custom_cuts
+
+    # -- Header row --
+    h_target, h_start, h_end, h_actual, h_conf, h_note, h_copy = st.columns(
+        [0.7, 0.8, 0.8, 0.7, 1.4, 2, 0.6], gap="small"
+    )
+    for col, label in (
+        (h_target, "Target"),
+        (h_start,  "Start ▶"),
+        (h_end,    "End"),
+        (h_actual, "Actual"),
+        (h_note,   "Note"),
+        (h_copy,   "Copy"),
+    ):
+        col.markdown(f"<div style='{_mono_hdr}'>{label}</div>", unsafe_allow_html=True)
+    h_conf.markdown(_conf_header, unsafe_allow_html=True)
+
+    # -- Data rows: group by duration, show rank-1 full, rank 2-3 as sub-rows --
+    for duration_s, group_iter in groupby(display_cuts, key=lambda c: c.duration_s):
+        group = list(group_iter)
+        rank1 = next((c for c in group if c.rank == 1), group[0])
+        alts  = [c for c in group if c.rank != 1]
+        _render_cut_row(rank1, key_suffix="r1")
+        for alt in alts:
+            _render_cut_row(alt, key_suffix=f"r{alt.rank}", is_alt=True)
+
     st.caption(
         "Edit windows are beat-aligned and scored on: post-intro start, section-boundary "
         "entry/exit, chorus presence, and bar-grid snap. Confidence = composite score (0–100%). "
+        "Rank #2/#3 are alternative windows for each duration. "
         "Click a Start timestamp to seek the audio player."
     )
 

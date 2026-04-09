@@ -137,9 +137,10 @@ def _score_window(
     snap_bars: int,
     boundary_tolerance: float,
     intro_end_s: float,
-) -> float:
+    loop_score: float = 0.0,
+) -> tuple[float, dict[str, bool]]:
     """
-    Score a candidate [start_s, end_s] edit window.  Returns 0.0–1.0.
+    Score a candidate [start_s, end_s] edit window.
 
     Scoring criteria (equal weight, additive):
       +0.20  starts after the intro
@@ -147,30 +148,46 @@ def _score_window(
       +0.20  end is near a section boundary
       +0.20  contains a chorus (or hook/refrain)
       +0.20  end lands on a bar boundary (snap_bars alignment)
+
+    Repetition bonus (#151):
+      +SYNC_CUT_LOOP_BONUS  when REPETITION_INDEX_MODERATE ≤ loop_score < REPETITION_INDEX_HIGH
+      (moderate repetition is a good sign for a sync-friendly loop; high may indicate
+      stock/AI audio, so no bonus is applied at or above the upper threshold)
+
+    Returns:
+        (score, breakdown) — score is 0.0–1.0; breakdown is a dict of
+        criterion name → bool for use in JSON export (#155).
+        breakdown includes "loop_friendly" reflecting the repetition bonus.
     """
-    score = 0.0
+    post_intro           = start_s >= intro_end_s
+    start_near_boundary  = _near_boundary(start_s, sections, boundary_tolerance)
+    end_near_boundary    = _near_boundary(end_s,   sections, boundary_tolerance)
+    contains_chorus      = _contains_chorus(start_s, end_s, sections)
 
-    if start_s >= intro_end_s:
-        score += 0.20
-
-    if _near_boundary(start_s, sections, boundary_tolerance):
-        score += 0.20
-
-    if _near_boundary(end_s, sections, boundary_tolerance):
-        score += 0.20
-
-    if _contains_chorus(start_s, end_s, sections):
-        score += 0.20
-
+    bar_aligned_end = False
     if beats:
         nearest_end_idx = min(
             range(len(beats)),
             key=lambda i: abs(beats[i] - end_s),
         )
-        if nearest_end_idx % snap_bars == 0:
-            score += 0.20
+        bar_aligned_end = nearest_end_idx % snap_bars == 0
 
-    return round(score, 4)
+    loop_friendly = (
+        CONSTANTS.REPETITION_INDEX_MODERATE <= loop_score < CONSTANTS.REPETITION_INDEX_HIGH
+    )
+
+    breakdown: dict[str, bool] = {
+        "post_intro":           post_intro,
+        "start_near_boundary":  start_near_boundary,
+        "end_near_boundary":    end_near_boundary,
+        "contains_chorus":      contains_chorus,
+        "bar_aligned_end":      bar_aligned_end,
+        "loop_friendly":        loop_friendly,
+    }
+    base_score = sum(0.20 for k, v in breakdown.items() if v and k != "loop_friendly")
+    bonus      = CONSTANTS.SYNC_CUT_LOOP_BONUS if loop_friendly else 0.0
+    score      = round(min(1.0, base_score + bonus), 4)
+    return score, breakdown
 
 
 def suggest_sync_cuts(
@@ -180,9 +197,11 @@ def suggest_sync_cuts(
     snap_bars: int,
     boundary_tolerance: float,
     duration_tolerance: float,
+    top_n: int = 3,
+    loop_score: float = 0.0,
 ) -> list[SyncCut]:
     """
-    Pure function.  Return the best SyncCut for each target duration.
+    Pure function.  Return the top-N SyncCuts for each target duration (#148).
 
     Args:
         sections:           allin1 structural sections.
@@ -191,9 +210,15 @@ def suggest_sync_cuts(
         snap_bars:          Bar size in beats (4 for 4/4 time).
         boundary_tolerance: Max distance (s) from a section boundary to count as aligned.
         duration_tolerance: Allowed deviation (s) from each target duration.
+        top_n:              Maximum candidates to return per target duration.
+        loop_score:         Track-level loop repetition score (0.0–1.0) from forensics.
+                            When in the moderate range, a small bonus is applied to each
+                            candidate (#151).
 
     Returns:
-        One SyncCut per target duration where the track is long enough.
+        Up to *top_n* SyncCuts per target duration, sorted by rank (1 = best).
+        Fewer are returned when the track is too short or when fewer distinct
+        windows are found.
     """
     if not beats:
         return []
@@ -207,8 +232,8 @@ def suggest_sync_cuts(
             _log.debug("sync_cut: track too short for %ds cut (%.1fs)", target, track_end)
             continue
 
-        best_score: float              = -1.0
-        best_cut: Optional[SyncCut]    = None
+        # Collect all valid candidates for this target duration
+        candidates: list[tuple[float, dict[str, bool], float, float, float]] = []
 
         for i, beat_start in enumerate(beats):
             if beat_start < intro_end_s and intro_end_s > 0.0:
@@ -229,30 +254,41 @@ def suggest_sync_cuts(
             if abs(actual - target) > duration_tolerance:
                 continue
 
-            score = _score_window(
+            score, breakdown = _score_window(
                 beat_start, end_s,
                 sections, beats,
                 snap_bars, boundary_tolerance,
                 intro_end_s,
+                loop_score=loop_score,
             )
+            candidates.append((score, breakdown, beat_start, end_s, actual))
 
-            if score > best_score:
-                best_score = score
-                best_cut = SyncCut(
-                    duration_s        = target,
-                    start_s           = round(beat_start, 3),
-                    end_s             = round(end_s, 3),
-                    actual_duration_s = round(actual, 3),
-                    confidence        = score,
-                    note              = _build_note(beat_start, end_s, sections),
-                )
+        # Sort descending by score; take top_n with unique start positions
+        candidates.sort(key=lambda c: c[0], reverse=True)
+        seen_starts: set[float] = set()
+        ranked: list[tuple[float, dict[str, bool], float, float, float]] = []
+        for cand in candidates:
+            if cand[2] not in seen_starts:
+                seen_starts.add(cand[2])
+                ranked.append(cand)
+            if len(ranked) >= top_n:
+                break
 
-        if best_cut is not None:
-            cuts.append(best_cut)
+        for rank_idx, (score, breakdown, beat_start, end_s, actual) in enumerate(ranked, 1):
+            cut = SyncCut(
+                duration_s        = target,
+                start_s           = round(beat_start, 3),
+                end_s             = round(end_s, 3),
+                actual_duration_s = round(actual, 3),
+                confidence        = score,
+                note              = _build_note(beat_start, end_s, sections),
+                rank              = rank_idx,
+                score_breakdown   = breakdown,
+            )
+            cuts.append(cut)
             _log.debug(
-                "sync_cut: %ds → start=%.2f end=%.2f conf=%.2f note=%s",
-                target, best_cut.start_s, best_cut.end_s,
-                best_cut.confidence, best_cut.note,
+                "sync_cut: %ds rank=%d → start=%.2f end=%.2f conf=%.2f note=%s",
+                target, rank_idx, cut.start_s, cut.end_s, cut.confidence, cut.note,
             )
 
     return cuts
