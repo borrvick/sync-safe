@@ -231,6 +231,11 @@ class SystemConstants:
     STEP_TIMEOUT_DISCOVERY_S: int     = 30
     STEP_TIMEOUT_LEGAL_S: int         = 30
 
+    # ---- DAW Export (#152) ----------------------------------------------------
+    # Default timecode framerate for Premiere Pro / DaVinci Resolve marker export.
+    # Editors can override via UI selectbox; this is the safe film-standard default.
+    EXPORT_FRAMERATE: float           = 24.0
+
     # ---- Loudness & Dialogue (LUFS / ITU-R BS.1770-4) ------------------------
     # Target integrated loudness per platform (LUFS)
     LUFS_SPOTIFY: float       = -14.0
