@@ -218,6 +218,16 @@ class SystemConstants:
     STEP_TIMEOUT_COMPLIANCE_S: int    = 60
     STEP_TIMEOUT_AUTHORSHIP_S: int    = 30
     STEP_TIMEOUT_THEME_MOOD_S: int    = 15
+
+    # ---- Theme & Mood Detection (#167) ----------------------------------------
+    # Minimum per-theme score to include in the ranked output list.
+    THEME_MIN_CONFIDENCE: float       = 0.25
+    # Tokens to scan before a keyword match to detect negation ("not", "never", …).
+    THEME_NEGATION_WINDOW: int        = 4
+    # Groq model used for on-demand mood summary enrichment (#169).
+    THEME_GROQ_MODEL: str             = "llama-3.3-70b-versatile"
+    # Max lyric characters sent to Groq — caps token cost.
+    THEME_GROQ_LYRICS_CAP: int        = 2000
     STEP_TIMEOUT_DISCOVERY_S: int     = 30
     STEP_TIMEOUT_LEGAL_S: int         = 30
 
