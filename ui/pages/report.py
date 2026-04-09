@@ -12,6 +12,7 @@ import io
 import json as _json
 import re
 from collections import Counter, OrderedDict
+from itertools import groupby
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -31,6 +32,7 @@ from core.models import (
     Section,
     StingResult,
     StructureResult,
+    SyncCut,
     TranscriptSegment,
 )
 from services.export import (
@@ -40,6 +42,7 @@ from services.export import (
     to_section_markers_csv,
 )
 from services.legal import hfa_url, songfile_url
+from services.sync_cut import SyncCutAnalyzer
 from services.tagging import TagInjector
 from ui.components import ISSUE_META, authorship_color, eq_bars, fmt_ts, issue_pill
 
@@ -2801,16 +2804,13 @@ def _sync_cut_conf_bar(conf: float) -> str:
     )
 
 
+@st.fragment
 def _render_sync_cuts(result: AnalysisResult) -> None:
-    """Render the Sync Edit Points table — one row per target duration.
+    """Render the Sync Edit Points table — top-3 candidates per target duration.
 
-    Start timestamps are rendered as st.button so clicking seeks the audio
-    player to that position (same pattern as lyric audit timestamps).
+    Wrapped in @st.fragment so the custom-duration slider reruns only this
+    section, not the full report page (#150).  Start timestamps seek the player.
     """
-    # Column header row — added Copy column (#149)
-    h_target, h_start, h_end, h_actual, h_conf, h_note, h_copy = st.columns(
-        [0.7, 0.8, 0.8, 0.7, 1.4, 2, 0.6], gap="small"
-    )
     _mono_hdr = (
         "font-family:JetBrains Mono,monospace;font-size:.6rem;font-weight:600;"
         "letter-spacing:.12em;text-transform:uppercase;color:var(--dim);"
@@ -2826,34 +2826,32 @@ def _render_sync_cuts(result: AnalysisResult) -> None:
         f'100% = perfect on all five. 60%+ is recommended for placement.</span>'
         f'</span></div>'
     )
-    for col, label in (
-        (h_target, "Target"),
-        (h_start,  "Start ▶"),
-        (h_end,    "End"),
-        (h_actual, "Actual"),
-        (h_note,   "Note"),
-        (h_copy,   "Copy"),
-    ):
-        col.markdown(f"<div style='{_mono_hdr}'>{label}</div>", unsafe_allow_html=True)
-    h_conf.markdown(_conf_header, unsafe_allow_html=True)
-
     _mono_cell = (
         "font-family:JetBrains Mono,monospace;font-size:.78rem;"
         "color:var(--muted);padding-top:6px;"
     )
-    for cut in result.sync_cuts:
+    _mono_cell_dim = (
+        "font-family:JetBrains Mono,monospace;font-size:.72rem;"
+        "color:var(--dim);padding-top:4px;"
+    )
+
+    def _render_cut_row(cut: SyncCut, key_suffix: str, is_alt: bool = False) -> None:
+        """Render one SyncCut as a table row. is_alt = True for rank 2/3 sub-rows."""
+        cell_style = _mono_cell_dim if is_alt else _mono_cell
         ts_s = int(cut.start_s)
         c_target, c_start, c_end, c_actual, c_conf, c_note, c_copy = st.columns(
             [0.7, 0.8, 0.8, 0.7, 1.4, 2, 0.6], gap="small"
         )
+        rank_label = f"#{cut.rank}" if is_alt else f"{cut.duration_s}s"
+        rank_color = "var(--dim)" if is_alt else "var(--text)"
         c_target.markdown(
-            f"<div style='{_mono_cell}font-weight:600;color:var(--text);'>{cut.duration_s}s</div>",
+            f"<div style='{cell_style}font-weight:600;color:{rank_color};'>{rank_label}</div>",
             unsafe_allow_html=True,
         )
         with c_start:
             if st.button(
                 _sync_cut_ts(cut.start_s),
-                key=f"cut_{ts_s}_{cut.duration_s}",
+                key=f"cut_{ts_s}_{cut.duration_s}_{key_suffix}",
                 help=f"Jump to {_sync_cut_ts(cut.start_s)} in the audio player",
                 use_container_width=True,
                 type="secondary",
@@ -2862,23 +2860,25 @@ def _render_sync_cuts(result: AnalysisResult) -> None:
                 st.session_state.player_key = st.session_state.get("player_key", 0) + 1
                 st.rerun()
         c_end.markdown(
-            f"<div style='{_mono_cell}'>{_sync_cut_ts(cut.end_s)}</div>",
+            f"<div style='{cell_style}'>{_sync_cut_ts(cut.end_s)}</div>",
             unsafe_allow_html=True,
         )
         c_actual.markdown(
-            f"<div style='{_mono_cell}'>{cut.actual_duration_s:.1f}s</div>",
+            f"<div style='{cell_style}'>{cut.actual_duration_s:.1f}s</div>",
             unsafe_allow_html=True,
         )
         c_conf.markdown(
-            f"<div style='padding-top:6px;'>{_sync_cut_conf_bar(cut.confidence)}</div>",
+            f"<div style='padding-top:{'4' if is_alt else '6'}px;'>"
+            f"{_sync_cut_conf_bar(cut.confidence)}</div>",
             unsafe_allow_html=True,
         )
         c_note.markdown(
-            f"<div style='font-family:Figtree,sans-serif;font-size:.78rem;"
-            f"color:var(--muted);padding-top:6px;'>{html_mod.escape(cut.note)}</div>",
+            f"<div style='font-family:Figtree,sans-serif;font-size:"
+            f"{'0.74' if is_alt else '0.78'}rem;"
+            f"color:var({'--dim' if is_alt else '--muted'});padding-top:6px;'>"
+            f"{html_mod.escape(cut.note)}</div>",
             unsafe_allow_html=True,
         )
-        # Copy popover — st.code provides built-in copy icon (#149)
         with c_copy:
             with st.popover("⧉", help="Copy timestamps or DAW marker text"):
                 ts_str     = f"{fmt_ts(int(cut.start_s))}–{fmt_ts(int(cut.end_s))}"
@@ -2892,9 +2892,56 @@ def _render_sync_cuts(result: AnalysisResult) -> None:
                 st.caption("DAW marker")
                 st.code(marker_str, language=None)
 
+    # -- Build the display list: pre-computed cuts + optional custom-duration cut --
+    display_cuts = list(result.sync_cuts)
+
+    custom_s = st.slider(
+        "Custom target duration (seconds)",
+        min_value=CONSTANTS.SYNC_CUT_SLIDER_MIN,
+        max_value=CONSTANTS.SYNC_CUT_SLIDER_MAX,
+        value=30,
+        step=CONSTANTS.SYNC_CUT_SLIDER_STEP,
+        key="sync_cut_custom_duration",
+        help="Compute edit points for a custom duration. Results are appended to the table.",
+    )
+    # Only recompute if the custom duration differs from all pre-computed targets
+    preset_targets = {c.duration_s for c in result.sync_cuts}
+    if custom_s not in preset_targets and result.structure:
+        custom_cuts = SyncCutAnalyzer().suggest(
+            sections         = result.structure.sections,
+            beats            = result.structure.beats,
+            target_durations = [custom_s],
+        )
+        display_cuts = display_cuts + custom_cuts
+
+    # -- Header row --
+    h_target, h_start, h_end, h_actual, h_conf, h_note, h_copy = st.columns(
+        [0.7, 0.8, 0.8, 0.7, 1.4, 2, 0.6], gap="small"
+    )
+    for col, label in (
+        (h_target, "Target"),
+        (h_start,  "Start ▶"),
+        (h_end,    "End"),
+        (h_actual, "Actual"),
+        (h_note,   "Note"),
+        (h_copy,   "Copy"),
+    ):
+        col.markdown(f"<div style='{_mono_hdr}'>{label}</div>", unsafe_allow_html=True)
+    h_conf.markdown(_conf_header, unsafe_allow_html=True)
+
+    # -- Data rows: group by duration, show rank-1 full, rank 2-3 as sub-rows --
+    for duration_s, group_iter in groupby(display_cuts, key=lambda c: c.duration_s):
+        group = list(group_iter)
+        rank1 = next((c for c in group if c.rank == 1), group[0])
+        alts  = [c for c in group if c.rank != 1]
+        _render_cut_row(rank1, key_suffix="r1")
+        for alt in alts:
+            _render_cut_row(alt, key_suffix=f"r{alt.rank}", is_alt=True)
+
     st.caption(
         "Edit windows are beat-aligned and scored on: post-intro start, section-boundary "
         "entry/exit, chorus presence, and bar-grid snap. Confidence = composite score (0–100%). "
+        "Rank #2/#3 are alternative windows for each duration. "
         "Click a Start timestamp to seek the audio player."
     )
 

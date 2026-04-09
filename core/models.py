@@ -474,6 +474,9 @@ class SyncCut(BaseModel):
     actual_duration_s: float    # actual edit length (end_s − start_s)
     confidence: float           # 0.0–1.0; higher = better section-boundary alignment
     note: str                   # e.g. "Chorus at 0:32 → natural ending at 1:00"
+    # Top-N ranking and per-criterion breakdown (#148, #155)
+    rank: int                                   = 1    # 1 = best, 2 = second-best, 3 = third-best
+    score_breakdown: dict[str, bool]            = Field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()

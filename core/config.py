@@ -146,6 +146,14 @@ class SystemConstants:
     # of the target duration to be considered.
     SYNC_CUT_DURATION_TOLERANCE_S: float = 3.0
 
+    # Top-N candidates to return per target duration (#148)
+    SYNC_CUT_TOP_N: int = 3
+
+    # Custom duration slider bounds and step (#150)
+    SYNC_CUT_SLIDER_MIN: int = 15
+    SYNC_CUT_SLIDER_MAX: int = 120
+    SYNC_CUT_SLIDER_STEP: int = 5
+
     # ---- Stem validation: mono compatibility / phase alignment ----------------
     # Pearson L/R correlation below this → warn about phase issues
     PHASE_CORRELATION_WARN: float = 0.0

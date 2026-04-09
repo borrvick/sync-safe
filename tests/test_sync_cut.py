@@ -160,7 +160,7 @@ class TestScoreWindow:
         # Start at chorus (post-intro + at boundary), end at chorus end (boundary)
         # chorus: 24.0 – 40.0; 30s window → 24.0 – 54.0 (crosses boundary at 40.0)
         beats = _beats(200)
-        score = _score_window(
+        score, breakdown = _score_window(
             start_s=24.0, end_s=54.0,
             sections=_sections(), beats=beats,
             snap_bars=4, boundary_tolerance=0.5, intro_end_s=8.0,
@@ -169,7 +169,7 @@ class TestScoreWindow:
 
     def test_intro_start_penalised(self) -> None:
         beats = _beats(200)
-        score = _score_window(
+        score, breakdown = _score_window(
             start_s=2.0, end_s=32.0,
             sections=_sections(), beats=beats,
             snap_bars=4, boundary_tolerance=0.5, intro_end_s=8.0,
@@ -179,12 +179,33 @@ class TestScoreWindow:
 
     def test_score_zero_to_one_range(self) -> None:
         beats = _beats(200)
-        score = _score_window(
+        score, breakdown = _score_window(
             start_s=0.0, end_s=15.0,
             sections=_sections(), beats=beats,
             snap_bars=4, boundary_tolerance=0.5, intro_end_s=8.0,
         )
         assert 0.0 <= score <= 1.0
+
+    def test_breakdown_has_all_criteria(self) -> None:
+        beats = _beats(200)
+        _, breakdown = _score_window(
+            start_s=24.0, end_s=54.0,
+            sections=_sections(), beats=beats,
+            snap_bars=4, boundary_tolerance=0.5, intro_end_s=8.0,
+        )
+        expected_keys = {"post_intro", "start_near_boundary", "end_near_boundary",
+                         "contains_chorus", "bar_aligned_end"}
+        assert set(breakdown.keys()) == expected_keys
+
+    def test_score_equals_sum_of_breakdown(self) -> None:
+        beats = _beats(200)
+        score, breakdown = _score_window(
+            start_s=24.0, end_s=54.0,
+            sections=_sections(), beats=beats,
+            snap_bars=4, boundary_tolerance=0.5, intro_end_s=8.0,
+        )
+        expected = round(sum(0.20 for v in breakdown.values() if v), 4)
+        assert score == expected
 
 
 # ---------------------------------------------------------------------------
@@ -228,13 +249,49 @@ class TestSuggestSyncCuts:
             target_durations=[30],
             snap_bars=4, boundary_tolerance=0.5, duration_tolerance=3.0,
         )
-        assert len(cuts) == 1
-        cut = cuts[0]
+        assert len(cuts) >= 1
+        cut = cuts[0]  # rank-1 result
         assert cut.duration_s == 30
         assert cut.start_s >= 0.0
         assert cut.end_s > cut.start_s
         assert 0.0 <= cut.confidence <= 1.0
         assert cut.note != ""
+        assert cut.rank == 1
+        assert isinstance(cut.score_breakdown, dict)
+
+    def test_top_n_respected(self) -> None:
+        beats = _beats(300)
+        cuts = suggest_sync_cuts(
+            sections=_sections(), beats=beats,
+            target_durations=[30],
+            snap_bars=4, boundary_tolerance=0.5, duration_tolerance=3.0,
+            top_n=2,
+        )
+        assert all(c.duration_s == 30 for c in cuts)
+        assert len(cuts) <= 2
+        assert cuts[0].rank == 1
+
+    def test_ranks_are_assigned_in_order(self) -> None:
+        beats = _beats(300)
+        cuts = suggest_sync_cuts(
+            sections=_sections(), beats=beats,
+            target_durations=[30],
+            snap_bars=4, boundary_tolerance=0.5, duration_tolerance=3.0,
+            top_n=3,
+        )
+        ranks = [c.rank for c in cuts]
+        assert ranks == list(range(1, len(ranks) + 1))
+
+    def test_confidence_descending_by_rank(self) -> None:
+        beats = _beats(300)
+        cuts = suggest_sync_cuts(
+            sections=_sections(), beats=beats,
+            target_durations=[30],
+            snap_bars=4, boundary_tolerance=0.5, duration_tolerance=3.0,
+            top_n=3,
+        )
+        confs = [c.confidence for c in cuts]
+        assert confs == sorted(confs, reverse=True)
 
     def test_actual_duration_within_tolerance(self) -> None:
         beats = _beats(200)
