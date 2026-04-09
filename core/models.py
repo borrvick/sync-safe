@@ -243,8 +243,13 @@ class StingResult(BaseModel):
 
     ending_type: EndingType
     sync_ready: bool
-    final_energy_ratio: float   = Field(ge=0.0)
-    flag: bool                  = False
+    final_energy_ratio: float       = Field(ge=0.0)
+    flag: bool                      = False
+    # Fade-specific enrichment (#103)
+    fade_severity: float            = 0.0   # 0.0 (instant cut) → 1.0 (long gentle fade)
+    fade_tail_seconds: float        = 0.0   # duration (s) where RMS > tail threshold
+    # Cut-specific enrichment (#104)
+    cut_type: Optional[Literal["clean_cut", "mid_phrase_cut"]] = None
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
@@ -259,6 +264,9 @@ class EnergyEvolutionResult(BaseModel):
     total_windows: int      = 0
     flag: bool              = False
     detail: str             = ""    # e.g. "3 of 12 windows below 10% delta"
+    # Per-section breakdown (#106)
+    section_details: list[dict[str, str | int | bool]] = Field(default_factory=list)
+    ending_section: Optional[str]                      = None  # section label containing track end
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()

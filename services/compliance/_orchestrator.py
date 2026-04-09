@@ -40,9 +40,12 @@ from ._pure import (
     _WINDOW_SIZE,
     _build_windows,
     _check_brand_keywords,
+    _classify_cut_type,
+    _compute_fade_severity,
     _compute_grade,
     _deduplicate_flags,
     _score_detoxify,
+    _section_energy_note,
 )
 
 try:
@@ -114,8 +117,8 @@ class Compliance:
         """
         y, sr = audio.to_array(CONSTANTS.SAMPLE_RATE)
 
-        sting     = self._check_sting(y, sr)
-        evolution = self._check_energy_evolution(y, sr, beats)
+        sting     = self._check_sting(y, sr, beats)
+        evolution = self._check_energy_evolution(y, sr, beats, sections)
         intro     = self._check_intro(sections, transcript)
         flags     = self._audit_lyrics(transcript)
 
@@ -134,13 +137,16 @@ class Compliance:
     # ------------------------------------------------------------------
 
     @spaces.GPU
-    def _check_sting(self, audio: np.ndarray, sr: int) -> StingResult:
+    def _check_sting(
+        self, audio: np.ndarray, sr: int, beats: list[float]
+    ) -> StingResult:
         """
         Classify the track ending as sting, fade, or cut.
 
         Args:
             audio: Pre-decoded mono array at CONSTANTS.SAMPLE_RATE.
             sr:    Sample rate of the decoded array.
+            beats: Beat timestamps (seconds) for cut-type classification (#104).
         """
         import librosa
 
@@ -151,6 +157,7 @@ class Compliance:
                 sync_ready=True,
                 final_energy_ratio=1.0,
                 flag=False,
+                cut_type=_classify_cut_type(len(audio) / sr, beats, CONSTANTS.CUT_BEAT_TOLERANCE_S),
             )
 
         hop = CONSTANTS.STING_HOP_LENGTH
@@ -197,17 +204,28 @@ class Compliance:
                 flag=False,
             )
         if is_fade:
+            fade_sev, fade_tail = _compute_fade_severity(
+                rms=rms,
+                overall_mean=overall_mean,
+                sr=sr,
+                hop=hop,
+                threshold_ratio=CONSTANTS.FADE_TAIL_THRESHOLD_RATIO,
+                max_seconds=CONSTANTS.FADE_SEVERITY_MAX_SECONDS,
+            )
             return StingResult(
                 ending_type="fade",
                 sync_ready=False,
                 final_energy_ratio=round(final_ratio, 3),
                 flag=True,
+                fade_severity=fade_sev,
+                fade_tail_seconds=fade_tail,
             )
         return StingResult(
             ending_type="cut",
             sync_ready=True,
             final_energy_ratio=round(final_ratio, 3),
             flag=False,
+            cut_type=_classify_cut_type(len(audio) / sr, beats, CONSTANTS.CUT_BEAT_TOLERANCE_S),
         )
 
     # ------------------------------------------------------------------
@@ -216,15 +234,20 @@ class Compliance:
 
     @spaces.GPU
     def _check_energy_evolution(
-        self, audio: np.ndarray, sr: int, beats: list[float]
+        self,
+        audio: np.ndarray,
+        sr: int,
+        beats: list[float],
+        sections: list[Section],
     ) -> EnergyEvolutionResult:
         """
         Verify spectral contrast evolves across every 4-bar window.
 
         Args:
-            audio: Pre-decoded mono array at CONSTANTS.SAMPLE_RATE.
-            sr:    Sample rate of the decoded array.
-            beats: allin1 beat timestamps; falls back to librosa if sparse.
+            audio:    Pre-decoded mono array at CONSTANTS.SAMPLE_RATE.
+            sr:       Sample rate of the decoded array.
+            beats:    allin1 beat timestamps; falls back to librosa if sparse.
+            sections: allin1 sections for per-section breakdown (#106).
         """
         import librosa
 
@@ -241,16 +264,44 @@ class Compliance:
                 detail="Not enough beats detected for 4-bar analysis",
             )
 
-        windows: list[tuple[float, float, np.ndarray]] = []
+        beats_arr = np.asarray(beats, dtype=float)
+
+        def _scan_windows(
+            seg_audio: np.ndarray, seg_beats: np.ndarray
+        ) -> tuple[int, int]:
+            """Return (stagnant, total) window counts for a beat-sliced segment."""
+            step = CONSTANTS.BEATS_PER_WINDOW
+            wins: list[np.ndarray] = []
+            for j in range(0, len(seg_beats) - step, step):
+                t0 = seg_beats[j]
+                t1 = seg_beats[min(j + step, len(seg_beats) - 1)]
+                s0, s1 = int(t0 * sr), int(t1 * sr)
+                chunk = seg_audio[max(0, s0):min(s1, len(seg_audio))]
+                if len(chunk) > 0:
+                    wins.append(chunk)
+            if len(wins) < 2:
+                return 0, 0
+            cs = [float(np.mean(librosa.feature.spectral_contrast(y=w, sr=sr))) for w in wins]
+            cmin, cmax = min(cs), max(cs)
+            crange = cmax - cmin + 1e-9
+            norm = [(c - cmin) / crange for c in cs]
+            stag = sum(
+                1 for k in range(1, len(wins))
+                if abs(norm[k] - norm[k - 1]) < CONSTANTS.ENERGY_DELTA_MIN
+            )
+            return stag, len(wins) - 1
+
+        # Global scan (existing behaviour — uses full audio with absolute beat times)
+        global_windows: list[np.ndarray] = []
         step = CONSTANTS.BEATS_PER_WINDOW
-        for i in range(0, len(beats) - step, step):
-            t_start = beats[i]
-            t_end   = beats[min(i + step, len(beats) - 1)]
+        for i in range(0, len(beats_arr) - step, step):
+            t_start = float(beats_arr[i])
+            t_end   = float(beats_arr[min(i + step, len(beats_arr) - 1)])
             s_start, s_end = int(t_start * sr), int(t_end * sr)
             if s_end > s_start:
-                windows.append((t_start, t_end, audio[s_start:s_end]))
+                global_windows.append(audio[s_start:s_end])
 
-        if len(windows) < 2:
+        if len(global_windows) < 2:
             return EnergyEvolutionResult(
                 stagnant_windows=0,
                 total_windows=0,
@@ -260,17 +311,17 @@ class Compliance:
 
         contrasts = [
             float(np.mean(librosa.feature.spectral_contrast(y=seg, sr=sr)))
-            for _, _, seg in windows
+            for seg in global_windows
         ]
         c_min, c_max = min(contrasts), max(contrasts)
         c_range = c_max - c_min + 1e-9
         norm    = [(c - c_min) / c_range for c in contrasts]
 
         stagnant = sum(
-            1 for i in range(1, len(windows))
+            1 for i in range(1, len(global_windows))
             if abs(norm[i] - norm[i - 1]) < CONSTANTS.ENERGY_DELTA_MIN
         )
-        total = len(windows) - 1
+        total = len(global_windows) - 1
         flag  = stagnant > 0
         detail = (
             f"{stagnant} of {total} window{'s' if total != 1 else ''} below "
@@ -278,11 +329,38 @@ class Compliance:
             if flag else ""
         )
 
+        # Per-section breakdown (#106): slice beats by section boundaries
+        section_details: list[dict[str, str | int | bool]] = []
+        for sec in sections:
+            sec_beats = beats_arr[(beats_arr >= sec.start) & (beats_arr <= sec.end)]
+            if len(sec_beats) < 4:
+                continue
+            # Beats are absolute; slice the audio the same way
+            sec_audio = audio[int(sec.start * sr):min(int(sec.end * sr), len(audio))]
+            # Normalise beat times to section-local zero origin
+            sec_stag, sec_total = _scan_windows(sec_audio, sec_beats - sec.start)
+            section_details.append({
+                "label":            sec.label,
+                "stagnant_windows": sec_stag,
+                "total_windows":    sec_total,
+                "flag":             sec_stag > 0,
+                "note":             _section_energy_note(sec_stag, sec_total),
+            })
+
+        # Which section contains the track end? (#106)
+        track_end_s = len(audio) / sr
+        ending_section: str | None = next(
+            (sec.label for sec in sections if sec.start <= track_end_s <= sec.end),
+            None,
+        )
+
         return EnergyEvolutionResult(
             stagnant_windows=stagnant,
             total_windows=total,
             flag=flag,
             detail=detail,
+            section_details=section_details,
+            ending_section=ending_section,
         )
 
     # ------------------------------------------------------------------

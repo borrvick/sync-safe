@@ -1549,16 +1549,33 @@ def _render_sync_readiness(compliance: Optional[ComplianceReport]) -> None:
     if sting:
         s_ratio   = sting.final_energy_ratio
         ratio_str = f" — tail energy {s_ratio:.1%}" if s_ratio is not None else ""
+
+        # Enrich the display value with fade severity (#103) or cut sub-type (#104)
+        if sting.ending_type == "fade" and sting.fade_severity > 0:
+            sev_label = (
+                "severe"   if sting.fade_severity >= 0.7
+                else "moderate" if sting.fade_severity >= 0.35
+                else "mild"
+            )
+            tail_str  = f"{sting.fade_tail_seconds:.0f}s tail"
+            detail_suffix = f" ({sev_label}, {tail_str})"
+        elif sting.ending_type == "cut" and sting.cut_type:
+            sub = "on-beat" if sting.cut_type == "clean_cut" else "mid-phrase"
+            detail_suffix = f" — {sub}"
+        else:
+            detail_suffix = ""
+
         flag_text = "Track ends with a fade — may bleed into dialogue or scene audio." if sting.flag else None
         _sync_readiness_row(
             icon="🔔", label="Sting / Ending Type",
-            value=sting.ending_type.title() + ratio_str,
+            value=sting.ending_type.title() + detail_suffix + ratio_str,
             ok=not sting.flag,
             flag_text=flag_text,
             tip="Detects how the track ends — critical for sync placement.<br><br>"
                 "<strong>Sting</strong>: sharp final hit with rapid silence after. ✓<br>"
-                "<strong>Cut</strong>: abrupt stop — neutral, workable. ✓<br>"
-                "<strong>Fade</strong>: gradual energy decline — can bleed into dialogue. ⚠ Flagged.",
+                "<strong>Cut (on-beat)</strong>: lands on a beat boundary — clean edit point. ✓<br>"
+                "<strong>Cut (mid-phrase)</strong>: abrupt off-beat stop — workable but imprecise. ✓<br>"
+                "<strong>Fade (mild/moderate/severe)</strong>: gradual energy decline — can bleed into dialogue. ⚠ Flagged.",
         )
 
     if evolution:
@@ -1573,6 +1590,23 @@ def _render_sync_readiness(compliance: Optional[ComplianceReport]) -> None:
             tip="Splits the track into 4-bar windows and measures spectral contrast evolution. "
                 "A delta below <strong>10%</strong> between windows flags stagnant energy.",
         )
+        # Per-section breakdown (#106) — only render when data is available
+        if evolution.section_details:
+            sec_rows_html = "".join(
+                f"<tr>"
+                f"<td style='padding:2px 8px 2px 0;color:var(--text);'>{html_mod.escape(str(sd['label']).title())}</td>"
+                f"<td style='padding:2px 8px;color:{'var(--issue-explicit)' if sd['flag'] else 'var(--pass)'};'>"
+                f"{'⚠' if sd['flag'] else '✓'}"
+                f"</td>"
+                f"<td style='padding:2px 0;color:var(--dim);font-size:.8rem;'>{sd['note']}</td>"
+                f"</tr>"
+                for sd in evolution.section_details
+            )
+            st.markdown(
+                f"<table style='width:100%;border-collapse:collapse;margin-top:4px;'>"
+                f"{sec_rows_html}</table>",
+                unsafe_allow_html=True,
+            )
 
     if intro:
         i_ok    = not intro.flag
