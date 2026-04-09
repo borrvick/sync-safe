@@ -661,8 +661,10 @@ def render_loading(source: Any) -> None:
             from services.loudness import AudioQualityAnalyzer
             from services.legal import ProLookup
             base_links    = Legal().get_links(title, artist)
-            isrc, pro     = ProLookup().lookup(title, artist)
-            legal         = base_links.model_copy(update={"isrc": isrc, "pro_match": pro})
+            isrc, pro, pro_confidence = ProLookup().lookup(title, artist)
+            legal         = base_links.model_copy(update={
+                "isrc": isrc, "pro_match": pro, "pro_confidence": pro_confidence,
+            })
             popularity    = Discovery().get_track_popularity(
                 title, artist,
                 platform_metrics=dict(audio.engagement),

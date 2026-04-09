@@ -221,6 +221,96 @@ def _deduplicate_flags(flags: list[ComplianceFlag]) -> list[ComplianceFlag]:
     return unique
 
 
+def _compute_fade_severity(
+    rms: "np.ndarray",
+    overall_mean: float,
+    sr: int,
+    hop: int,
+    threshold_ratio: float,
+    max_seconds: float,
+) -> tuple[float, float]:
+    """
+    Compute fade severity score and tail duration.
+
+    Args:
+        rms:              Full-track RMS envelope (frames).
+        overall_mean:     Mean RMS value across the track (pre-computed, avoids re-scan).
+        sr:               Sample rate.
+        hop:              Hop length used to compute *rms*.
+        threshold_ratio:  Fraction of overall_mean defining the "tail" region.
+        max_seconds:      Tail duration that maps to severity = 1.0.
+
+    Returns:
+        (severity, tail_seconds)
+        severity: 0.0 (instant cut) → 1.0 (very long, gentle fade)
+        tail_seconds: duration where RMS > threshold_ratio × overall_mean
+
+    Pure aside from numpy — no I/O.
+    """
+    import numpy as np
+
+    if overall_mean < 1e-9 or len(rms) == 0:
+        return 0.0, 0.0
+
+    tail_threshold = overall_mean * threshold_ratio
+    above = np.where(rms > tail_threshold)[0]
+    if len(above) == 0:
+        return 0.0, 0.0
+
+    last_frame  = int(above[-1])
+    total_frames = len(rms)
+    tail_seconds = float((total_frames - last_frame) * hop / sr)
+
+    # Slope steepness over the final quarter of the track
+    quarter = max(total_frames // 4, 2)
+    final_seg = rms[max(0, total_frames - quarter):]
+    if len(final_seg) >= 2:
+        x = np.arange(len(final_seg), dtype=float)
+        slope = float(np.polyfit(x, final_seg, 1)[0])
+        max_slope = overall_mean / max(len(final_seg), 1)
+        slope_factor = float(np.clip(-slope / (max_slope + 1e-9), 0.0, 1.0))
+    else:
+        slope_factor = 0.0
+
+    duration_factor = float(np.clip(tail_seconds / max(max_seconds, 1e-9), 0.0, 1.0))
+    severity = float(np.clip(0.6 * duration_factor + 0.4 * slope_factor, 0.0, 1.0))
+    return round(severity, 3), round(tail_seconds, 1)
+
+
+def _classify_cut_type(
+    audio_duration_s: float,
+    beats: list[float],
+    tolerance_s: float,
+) -> str:
+    """
+    Classify a cut ending as 'clean_cut' (on beat) or 'mid_phrase_cut' (off-beat).
+
+    Args:
+        audio_duration_s: Total track length in seconds.
+        beats:            Beat timestamps in seconds from allin1/librosa.
+        tolerance_s:      Maximum distance from track end to nearest beat → clean_cut.
+
+    Returns:
+        "clean_cut" if the track end lands within *tolerance_s* of a beat,
+        "mid_phrase_cut" otherwise.
+
+    Pure — no I/O.
+    """
+    if not beats:
+        return "mid_phrase_cut"
+    min_distance = min(abs(b - audio_duration_s) for b in beats)
+    return "clean_cut" if min_distance <= tolerance_s else "mid_phrase_cut"
+
+
+def _section_energy_note(stagnant: int, total: int) -> str:
+    """Human-readable summary of per-section energy evolution. Pure — no I/O."""
+    if stagnant == 0:
+        return "Good evolution"
+    if total > 0 and stagnant == total:
+        return f"All {total} window{'s' if total != 1 else ''} flat"
+    return f"{stagnant} of {total} window{'s' if total != 1 else ''} stagnant"
+
+
 def _compute_grade(flags: list[ComplianceFlag]) -> str:
     """
     Compute an A–F lyric-content grade.

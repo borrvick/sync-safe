@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 import pytest
 
-from services.legal import Legal, _build_url
+from services.legal import Legal, _build_url, hfa_url, songfile_url
 
 
 class TestLegal:
@@ -77,3 +77,47 @@ class TestBuildUrl:
     def test_empty_params(self):
         url = _build_url("https://example.com", {})
         assert url == "https://example.com?"
+
+
+class TestHfaUrl:
+    def test_returns_https_url(self):
+        assert hfa_url("Yesterday", "Beatles").startswith("https://")
+
+    def test_domain_is_harryfox(self):
+        assert "harryfox.com" in urlparse(hfa_url("Yesterday", "Beatles")).netloc
+
+    def test_spaces_encoded_as_plus(self):
+        url = hfa_url("Hello World", "Test Artist")
+        assert "Hello+World" in url or "hello+world" in url.lower()
+
+    def test_special_chars_encoded(self):
+        url = hfa_url("AC/DC", "AC/DC")
+        assert "/" not in urlparse(url).query
+
+    def test_empty_inputs_no_crash(self):
+        url = hfa_url("", "")
+        assert url.startswith("https://")
+
+    def test_title_and_artist_present(self):
+        url = hfa_url("Yesterday", "Beatles")
+        assert "Yesterday" in url or "yesterday" in url.lower()
+
+
+class TestSongfileUrl:
+    def test_returns_https_url(self):
+        assert songfile_url("Yesterday", "Beatles").startswith("https://")
+
+    def test_domain_is_songfile(self):
+        assert "songfile.com" in urlparse(songfile_url("Yesterday", "Beatles")).netloc
+
+    def test_spaces_encoded_as_plus(self):
+        url = songfile_url("Hello World", "Test Artist")
+        assert "Hello+World" in url or "hello+world" in url.lower()
+
+    def test_special_chars_encoded(self):
+        url = songfile_url("AC/DC", "AC/DC")
+        assert "/" not in urlparse(url).query
+
+    def test_empty_inputs_no_crash(self):
+        url = songfile_url("", "")
+        assert url.startswith("https://")

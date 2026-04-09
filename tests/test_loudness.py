@@ -8,7 +8,7 @@ from __future__ import annotations
 import numpy as np
 
 from core.config import CONSTANTS
-from services.loudness import _classify_dialogue, _dialogue_score
+from services.loudness import _classify_dialogue, _compute_vo_headroom, _dialogue_score
 
 
 # ---------------------------------------------------------------------------
@@ -70,3 +70,31 @@ class TestDialogueScore:
         score = _dialogue_score(y, self._sr)
         # 8 kHz is well outside the 300–3000 Hz competition band
         assert score > 0.5
+
+
+# ---------------------------------------------------------------------------
+# _compute_vo_headroom (#92)
+# ---------------------------------------------------------------------------
+
+class TestComputeVoHeadroom:
+    def test_zero_score_returns_zero_headroom(self) -> None:
+        assert _compute_vo_headroom(0.0, 12.0) == 0.0
+
+    def test_full_score_returns_max_db(self) -> None:
+        assert _compute_vo_headroom(1.0, 12.0) == 12.0
+
+    def test_midpoint_score_returns_half_max(self) -> None:
+        assert _compute_vo_headroom(0.5, 12.0) == 6.0
+
+    def test_respects_max_db_parameter(self) -> None:
+        assert _compute_vo_headroom(1.0, 8.0) == 8.0
+
+    def test_clamped_below_zero(self) -> None:
+        assert _compute_vo_headroom(-0.5, 12.0) == 0.0
+
+    def test_clamped_above_one(self) -> None:
+        assert _compute_vo_headroom(1.5, 12.0) == 12.0
+
+    def test_uses_constants_max_db(self) -> None:
+        result = _compute_vo_headroom(0.7, CONSTANTS.VO_HEADROOM_MAX_DB)
+        assert result == round(0.7 * CONSTANTS.VO_HEADROOM_MAX_DB, 1)

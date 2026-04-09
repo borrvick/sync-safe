@@ -38,7 +38,7 @@ from core.models import PopularityResult, TrackCandidate
 from core.protocols import YtDlpProvider
 from services.ingestion._ytdlp import YtDlpClient
 
-from ._pure import _normalise_lastfm, _normalise_views, _parse_track_list
+from ._pure import _listeners_to_tier, _normalise_lastfm, _normalise_views, _parse_track_list
 
 
 # ---------------------------------------------------------------------------
@@ -99,19 +99,23 @@ class Discovery:
         if not title and not artist:
             return []
 
-        pairs = _fetch_similar(title, artist, api_key)
+        triples = _fetch_similar(title, artist, api_key)
 
         candidates: list[TrackCandidate] = []
-        for i, (sim_artist, sim_title) in enumerate(pairs):
+        for i, (sim_artist, sim_title, listeners) in enumerate(triples):
             yt_url = self._ytdlp.search_url(sim_artist, sim_title)
             # similarity is rank-based (1.0 → 1/n range) since Last.fm doesn't
             # expose a numeric score in the getSimilar response we consume
-            similarity = round(1.0 - (i / max(len(pairs), 1)) * 0.5, 3)
+            similarity = round(1.0 - (i / max(len(triples), 1)) * 0.5, 3)
+            # Tier from Last.fm listeners already in the similar-tracks response (#124).
+            # None when listeners=0 (fallback path returns 0 → unreliable signal).
+            tier = _listeners_to_tier(listeners) if listeners > 0 else None
             candidates.append(TrackCandidate(
                 title=sim_title,
                 artist=sim_artist,
                 youtube_url=yt_url,
                 similarity=similarity,
+                popularity_tier=tier,
             ))
 
         return candidates
@@ -210,12 +214,13 @@ class Discovery:
 # Last.fm API helpers — pure functions, independently testable
 # ---------------------------------------------------------------------------
 
-def _fetch_similar(title: str, artist: str, api_key: str) -> list[tuple[str, str]]:
+def _fetch_similar(title: str, artist: str, api_key: str) -> list[tuple[str, str, int]]:
     """
     Query Last.fm for similar tracks; fall back to artist.getSimilar.
 
     Returns:
-        List of (artist, title) tuples, up to CONSTANTS.MAX_SIMILAR_TRACKS.
+        List of (artist, title, listeners) triples, up to CONSTANTS.MAX_SIMILAR_TRACKS.
+        `listeners` is 0 when unavailable (fallback path).
 
     Raises:
         AudioSourceError: on network failure or non-2xx HTTP status.
@@ -251,12 +256,13 @@ def _fetch_similar(title: str, artist: str, api_key: str) -> list[tuple[str, str
     return []
 
 
-def _fetch_artist_similar(artist: str, api_key: str) -> list[tuple[str, str]]:
+def _fetch_artist_similar(artist: str, api_key: str) -> list[tuple[str, str, int]]:
     """
     Fallback strategy: fetch similar artists then each artist's top track.
 
     Returns:
-        List of (artist, title) tuples; empty list on any failure.
+        List of (artist, title, listeners) triples; listeners=0 (unavailable on this path).
+        Empty list on any failure.
     """
     params = {
         "method":      "artist.getSimilar",
@@ -272,12 +278,12 @@ def _fetch_artist_similar(artist: str, api_key: str) -> list[tuple[str, str]]:
         resp.raise_for_status()
         similar_artists = resp.json().get("similarartists", {}).get("artist", [])
 
-        results: list[tuple[str, str]] = []
+        results: list[tuple[str, str, int]] = []
         for entry in similar_artists[:CONSTANTS.MAX_SIMILAR_TRACKS]:
             sim_artist = entry.get("name", "")
             top_track  = _fetch_top_track(sim_artist, api_key)
             if top_track:
-                results.append((sim_artist, top_track))
+                results.append((sim_artist, top_track, 0))  # no listener data on fallback path
 
         return results
 
@@ -323,23 +329,29 @@ def _resolve_youtube_url(artist: str, title: str) -> Optional[str]:
     if ytdlp is None:
         return None
 
-    query = f"ytsearch1:{artist} - {title}"
-    cmd   = [
-        ytdlp,
-        "--quiet",
-        "--no-warnings",
-        "--no-download",
-        "--print", "webpage_url",
-        query,
+    # Try "official audio" before "official video" — reduces live/cover hits (#128).
+    # Both queries are passed as list args (not shell=True), so no quoting needed.
+    queries = [
+        f"ytsearch1:{artist} {title} official audio",
+        f"ytsearch1:{artist} {title} official video",
     ]
 
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-        url    = result.stdout.strip()
-        if url.startswith("https://"):
-            return url
-    except Exception:  # noqa: BLE001
-        pass
+    for query in queries:
+        cmd = [
+            ytdlp,
+            "--quiet",
+            "--no-warnings",
+            "--no-download",
+            "--print", "webpage_url",
+            query,
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            url    = result.stdout.strip()
+            if url.startswith("https://"):
+                return url
+        except Exception:  # noqa: BLE001
+            pass
 
     return None
 

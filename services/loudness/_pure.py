@@ -54,14 +54,50 @@ def _dialogue_score(y: np.ndarray, sr: int) -> float:
     freqs = librosa.fft_frequencies(sr=sr)
 
     dialogue_mask   = (freqs >= 300) & (freqs <= 3000)
-    total_energy    = float(stft.mean())
-    dialogue_energy = float(stft[dialogue_mask].mean())
+    total_energy    = float(stft.sum())
+    dialogue_energy = float(stft[dialogue_mask].sum())
 
     if total_energy < 1e-10:
         return 0.5  # silent track — neutral score
 
     competition_ratio = dialogue_energy / total_energy
     return round(float(max(0.0, min(1.0, 1.0 - competition_ratio))), 3)
+
+
+def _classify_loudness(
+    integrated_lufs: float,
+    true_peak_warning: bool,
+    delta_broadcast: float,
+) -> str:
+    """
+    Return a top-line loudness verdict string (#95).
+
+    Priority order: clipping risk > broadcast-ready > streaming-hot > needs mastering > streaming-ready.
+    Pure function — no I/O.
+    """
+    if true_peak_warning:
+        return "Clipping risk"
+    if abs(delta_broadcast) <= CONSTANTS.LOUDNESS_BROADCAST_DELTA_MAX:
+        return "Broadcast-ready"
+    if integrated_lufs > CONSTANTS.LOUDNESS_STREAMING_HOT_MIN:
+        return "Streaming-hot"
+    if integrated_lufs < CONSTANTS.LOUDNESS_NEEDS_MASTERING_MAX:
+        return "Needs mastering"
+    return "Streaming-ready"
+
+
+def _compute_vo_headroom(dialogue_score: float, max_db: float) -> float:
+    """
+    Estimate available VO headroom in dB from the dialogue-readiness score (#92).
+
+    Maps a 0.0–1.0 dialogue score linearly onto a 0–max_db range.
+    A fully dialogue-ready track (score=1.0) offers max_db of headroom; a
+    dialogue-heavy track (score=0.0) offers none.
+
+    Pure function — no I/O.
+    """
+    clamped = max(0.0, min(1.0, dialogue_score))
+    return round(clamped * max_db, 1)
 
 
 def _classify_dialogue(score: float) -> str:

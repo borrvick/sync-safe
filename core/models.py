@@ -202,6 +202,9 @@ class ForensicsResult(BaseModel):
     is_vocal: bool = False                       # True → pyin detected vocal content; routes vocal scoring path
     c2pa_origin: str = ""                        # "ai" | "daw" | "unknown" | "" (no manifest)
 
+    # Blended Repetition Index: 0.6 * loop_score + 0.4 * loop_autocorr_score (see #144)
+    repetition_index: Optional[float] = None   # None → forensics skipped or pre-#144 result
+
     ai_segments: list[AiSegment] = Field(default_factory=list)  # per-window heatmap data
 
     flags: list[str]        = Field(default_factory=list)  # human-readable flag labels
@@ -240,8 +243,13 @@ class StingResult(BaseModel):
 
     ending_type: EndingType
     sync_ready: bool
-    final_energy_ratio: float   = Field(ge=0.0)
-    flag: bool                  = False
+    final_energy_ratio: float       = Field(ge=0.0)
+    flag: bool                      = False
+    # Fade-specific enrichment (#103)
+    fade_severity: float            = 0.0   # 0.0 (instant cut) → 1.0 (long gentle fade)
+    fade_tail_seconds: float        = 0.0   # duration (s) where RMS > tail threshold
+    # Cut-specific enrichment (#104)
+    cut_type: Optional[Literal["clean_cut", "mid_phrase_cut"]] = None
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
@@ -256,6 +264,9 @@ class EnergyEvolutionResult(BaseModel):
     total_windows: int      = 0
     flag: bool              = False
     detail: str             = ""    # e.g. "3 of 12 windows below 10% delta"
+    # Per-section breakdown (#106)
+    section_details: list[dict[str, str | int | bool]] = Field(default_factory=list)
+    ending_section: Optional[str]                      = None  # section label containing track end
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
@@ -321,6 +332,7 @@ class AuthorshipResult(BaseModel):
     roberta_score: Optional[float]      = None  # None when model not run or insufficient data
     feature_notes: list[str]            = Field(default_factory=list)
     scores: dict[str, Optional[float]]  = Field(default_factory=dict)
+    skip_reason: Optional[str]          = None  # "instrumental" | "too_short" | "short" | None
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
@@ -375,9 +387,24 @@ class AudioQualityResult(BaseModel):
     # True peak warning
     true_peak_warning: bool     # True if true peak > TRUE_PEAK_WARN_DBFS
 
+    # Gain adjustment to reach each platform target (negative = turn down, positive = turn up)
+    gain_spotify_db:     float  # dB to apply to hit Spotify target (-delta_spotify)  (#94)
+    gain_apple_music_db: float  # dB to apply to hit Apple Music target               (#94)
+    gain_youtube_db:     float  # dB to apply to hit YouTube target                   (#94)
+    gain_broadcast_db:   float  # dB to apply to hit broadcast target                 (#94)
+
+    # Top-line loudness verdict (#95)
+    loudness_verdict: str       # "Broadcast-ready" | "Streaming-hot" | "Streaming-ready" |
+                                # "Needs mastering" | "Clipping risk"
+
     # Dialogue-readiness
     dialogue_score: float       # 0.0–1.0; fraction of energy outside 300–3 kHz band
     dialogue_label: str         # "Dialogue-Ready" | "Mixed" | "Dialogue-Heavy"
+
+    # VO headroom estimate (#92)
+    # Estimated dB of headroom available for voiceover; scaled from dialogue_score.
+    # None when not yet computed (backward-compatible with older results).
+    vo_headroom_db: Optional[float] = None
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
@@ -424,8 +451,9 @@ class TrackCandidate(BaseModel):
 
     title: str
     artist: str
-    youtube_url: Optional[str]  = None  # None when yt-dlp URL lookup fails
-    similarity: float           = 0.0   # 0.0–1.0; rank-derived from Last.fm order
+    youtube_url: Optional[str]   = None   # None when yt-dlp URL lookup fails
+    similarity: float            = 0.0    # 0.0–1.0; rank-derived from Last.fm order
+    popularity_tier: Optional[str] = None  # "Emerging"|"Regional"|"Mainstream"|"Global"; None if unknown (#124)
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
@@ -482,8 +510,9 @@ class LegalLinks(BaseModel):
     sesac: str  = ""
 
     # Populated by services/pro_lookup.py — None when MusicBrainz returns no hit
-    isrc: Optional[str]      = None  # e.g. "US-ABC-23-12345"
-    pro_match: Optional[str] = None  # e.g. "ASCAP/BMI (US)", "PRS (UK)"
+    isrc: Optional[str]           = None   # e.g. "US-ABC-23-12345"
+    pro_match: Optional[str]      = None   # e.g. "ASCAP/BMI (US)", "PRS (UK)"
+    pro_confidence: Optional[str] = None   # "High"|"Medium"|"Low"; None when pro_match is None (#118)
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()

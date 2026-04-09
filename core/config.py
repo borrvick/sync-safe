@@ -61,6 +61,14 @@ class SystemConstants:
     # Cross-correlation score above this → likely stock loop (sync readiness)
     LOOP_SCORE_CEILING: float = 0.98
 
+    # ---- Repetition Index (blended loop signal for UI display) ----------------
+    # repetition_index = WEIGHT_LOOP * loop_score + WEIGHT_AUTOCORR * loop_autocorr_score
+    # Weights reflect signal hierarchy: cross-corr is more discriminative for AI loops.
+    REPETITION_INDEX_WEIGHT_LOOP: float     = 0.6
+    REPETITION_INDEX_WEIGHT_AUTOCORR: float = 0.4
+    REPETITION_INDEX_HIGH: float            = 0.75   # >= → "High"
+    REPETITION_INDEX_MODERATE: float        = 0.45   # >= → "Moderate"; < → "Low"
+
     # Frequency above which spectral energy is checked for AI artefacts ("slop")
     SPECTRAL_SLOP_HZ: int = 16_000
 
@@ -101,6 +109,10 @@ class SystemConstants:
     FADE_SLOPE_THRESHOLD: float = -0.0005
     # Fade detection: tail-to-mean energy ratio below this → low tail energy
     FADE_RATIO_MAX: float = 0.25
+    # Fade severity: tail duration that maps to severity = 1.0 (#103)
+    FADE_SEVERITY_MAX_SECONDS: float = 60.0
+    # Fade severity: fraction of track mean RMS defining the "tail" region (#103)
+    FADE_TAIL_THRESHOLD_RATIO: float = 0.10
 
     # ---- Compliance: 4-8 Bar Energy Rule --------------------------------------
     # Minimum normalised spectral-contrast delta across a 4-bar window
@@ -108,6 +120,8 @@ class SystemConstants:
 
     # Beats grouped per analysis window (4 bars × 4 beats)
     BEATS_PER_WINDOW: int = 16
+    # Cut type detection: max seconds from track end to nearest beat → "clean_cut" (#104)
+    CUT_BEAT_TOLERANCE_S: float = 0.075
 
     # ---- Compliance: Intro ----------------------------------------------------
     # Intro segments longer than this (seconds) are flagged
@@ -186,6 +200,26 @@ class SystemConstants:
     # True peak warning threshold — exceeding causes clipping on loudness-normalised playback
     TRUE_PEAK_WARN_DBFS: float = -1.0
 
+    # Loudness verdict classification thresholds (#95)
+    LOUDNESS_BROADCAST_DELTA_MAX: float = 2.0    # ±LU from broadcast target → "Broadcast-ready"
+    LOUDNESS_STREAMING_HOT_MIN: float   = -14.0  # above Spotify/YT target → will be turned down
+    LOUDNESS_NEEDS_MASTERING_MAX: float = -20.0  # below this → too quiet for any platform
+
+    # Gain adjustment display color thresholds — used in report UI (#94)
+    GAIN_OK_THRESHOLD_DB: float   = 1.0   # |gain| ≤ this → green (negligible adjustment)
+    GAIN_WARN_THRESHOLD_DB: float = 4.0   # |gain| ≤ this → amber (moderate); above → red
+
+    # PRO confidence scoring thresholds (#118)
+    PRO_CONFIDENCE_MB_SCORE_THRESHOLD: int = 80    # MusicBrainz score must exceed this for "score_ok"
+    PRO_CONFIDENCE_ARTIST_OVERLAP: float   = 0.90  # token overlap ratio must meet/exceed this
+
+    # VO headroom estimate — max dB headroom at perfect dialogue-ready score (#92)
+    VO_HEADROOM_MAX_DB: float = 12.0
+
+    # Section label normalization — max seconds before a chorus for a section
+    # to be considered "pre-chorus adjacent" for timeline highlight (#136)
+    PRE_CHORUS_ADJACENT_MAX_S: float = 16.0
+
     # Dialogue-ready score thresholds (0.0–1.0)
     # Score = fraction of energy OUTSIDE the 300–3000 Hz dialogue competition band.
     # Higher = sits more cleanly under voiceover.
@@ -237,6 +271,11 @@ class SystemConstants:
     SYNC_COST_REGIONAL: tuple[int, int]    = (2_000,  25_000)
     SYNC_COST_MAINSTREAM: tuple[int, int]  = (15_000, 100_000)
     SYNC_COST_GLOBAL: tuple[int, int]      = (50_000, 500_000)
+
+    # Sync-readiness fee modifier multipliers (#112).
+    # Applied to the displayed fee range when all/some compliance checks pass.
+    SYNC_READINESS_UPLIFT: float   = 1.15   # all 3 checks pass → +15%
+    SYNC_READINESS_DISCOUNT: float = 0.80   # sting or intro fails → −20%
 
     # ---- Forensics: IBI / Groove ----------------------------------------------
     # IBI variance below this → "Perfect Quantization" AI signal.
@@ -710,6 +749,7 @@ class SystemConstants:
     REPETITION_SCORE_THRESHOLD: float = 0.40   # above → high repetition (AI signal)
     AI_SIGNAL_COUNT_CERTAIN: int = 3           # signals ≥ this → "Likely AI"
     AI_SIGNAL_COUNT_UNCERTAIN: int = 1         # signals ≥ this → "Uncertain"
+    AUTHORSHIP_MAX_SIGNALS: int = 6            # 4 heuristics + up to 2 from RoBERTa
 
 
 # Module-level singleton — import directly, never instantiate.
