@@ -16,6 +16,7 @@ Design rules:
 """
 from __future__ import annotations
 
+import dataclasses
 import io
 from typing import TYPE_CHECKING, Any, Literal, Optional
 
@@ -155,6 +156,20 @@ class StructureResult(BaseModel):
 # Forensics
 # ---------------------------------------------------------------------------
 
+@dataclasses.dataclass(frozen=True)
+class SectionRepetition:
+    """
+    Per-label repetition score from section-aware loop analysis (#143, #145).
+
+    max_similarity:  highest pairwise cosine score within this label group.
+    mean_similarity: mean across all pairs — low pair_count = low confidence.
+    pair_count:      number of same-label pairs compared.
+    """
+    max_similarity:  float
+    mean_similarity: float
+    pair_count:      int
+
+
 class AiSegment(BaseModel):
     """One time-windowed AI-probability estimate within a track."""
 
@@ -204,6 +219,14 @@ class ForensicsResult(BaseModel):
 
     # Blended Repetition Index: 0.6 * loop_score + 0.4 * loop_autocorr_score (see #144)
     repetition_index: Optional[float] = None   # None → forensics skipped or pre-#144 result
+
+    # Per-4-bar-window scores for heatmap rendering (#142)
+    loop_window_scores: list[tuple[float, float]] = Field(default_factory=list)
+    # (start_s, max_similarity) per window
+
+    # Section-aware repetition: inter-section + intra-section (#143, #145)
+    section_similarities: dict[str, SectionRepetition]          = Field(default_factory=dict)
+    section_internal_repetition: dict[str, SectionRepetition]   = Field(default_factory=dict)
 
     ai_segments: list[AiSegment] = Field(default_factory=list)  # per-window heatmap data
 

@@ -30,6 +30,7 @@ from core.models import (
     ForensicsResult,
     IntroResult,
     Section,
+    SectionRepetition,
     StingResult,
     StructureResult,
     SyncCut,
@@ -1141,6 +1142,123 @@ def _render_forensics_card(fr: Optional[ForensicsResult], source: str = "file") 
 # Production Analysis — sample & loop detection (separate from AI detection)
 # ---------------------------------------------------------------------------
 
+def _loop_heatmap_color(score: float) -> str:
+    """Map a loop similarity score to a CSS color string."""
+    if score > CONSTANTS.LOOP_SCORE_CEILING:
+        return "var(--danger)"   # red — highly repetitive
+    if score > CONSTANTS.LOOP_SCORE_POSSIBLE:
+        return "var(--grade-c)"  # amber — moderately repetitive
+    return "var(--accent)"       # green — low repetition
+
+
+def _render_loop_heatmap(window_scores: list[tuple[float, float]]) -> None:
+    """
+    Render a horizontal color-cell heatmap of per-4-bar-window loop scores (#142).
+
+    Each cell's color encodes the max pairwise similarity for that window.
+    A seek button row beneath lets editors jump to any window.
+    """
+    if not window_scores:
+        return
+
+    # Build the color bar as a flex row of divs
+    cells_html = "".join(
+        f"<div style='flex:1;height:18px;background:{_loop_heatmap_color(score)};"
+        f"border-radius:3px;margin:0 1px;' aria-hidden='true' title='{score:.3f}'></div>"
+        for _, score in window_scores
+    )
+    st.markdown(
+        f"<div style='font-family:\"Chakra Petch\",monospace;font-size:.54rem;font-weight:600;"
+        f"letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:4px;'>"
+        f"Loop Window Map</div>"
+        f"<div style='display:flex;gap:0;margin-bottom:4px;'>{cells_html}</div>"
+        f"<div style='display:flex;gap:0;margin-bottom:12px;'>"
+        f"<span style='font-size:.58rem;color:var(--dim);'>0s</span>"
+        f"<span style='flex:1;'></span>"
+        f"<span style='font-size:.58rem;color:var(--dim);'>{window_scores[-1][0]:.0f}s</span>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+    # Seek button row — one button per window
+    cols = st.columns(len(window_scores))
+    for col, (start_s, score) in zip(cols, window_scores):
+        with col:
+            label = f"{int(start_s // 60)}:{int(start_s % 60):02d}"
+            if st.button(
+                label,
+                key=f"heatmap_seek_{start_s:.3f}",
+                help=f"Jump to {label} (score {score:.3f})",
+                use_container_width=True,
+                type="secondary",
+            ):
+                st.session_state.start_time  = int(start_s)
+                st.session_state.player_key  = st.session_state.get("player_key", 0) + 1
+                st.rerun()
+
+
+def _render_section_repetition(
+    inter: dict[str, SectionRepetition],
+    intra: dict[str, SectionRepetition],
+) -> None:
+    """
+    Render per-label inter-section and intra-section repetition rows (#143, #145).
+
+    Inter = same-label sections compared against each other.
+    Intra = sub-windows within each section compared against each other.
+    """
+    all_labels = sorted(set(inter) | set(intra))
+    if not all_labels:
+        return
+
+    _mono = "font-family:'JetBrains Mono',monospace;font-size:.72rem;color:var(--muted);"
+    _dim  = "font-family:'JetBrains Mono',monospace;font-size:.68rem;color:var(--dim);"
+    _hdr  = (
+        "font-family:'Chakra Petch',monospace;font-size:.54rem;font-weight:600;"
+        "letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:6px;"
+    )
+
+    st.markdown(
+        f"<div style='{_hdr}'>Section Repetition Breakdown</div>",
+        unsafe_allow_html=True,
+    )
+
+    for label in all_labels:
+        label_safe = html_mod.escape(label.title())
+        inter_rep  = inter.get(label)
+        intra_rep  = intra.get(label)
+
+        parts: list[str] = []
+
+        if inter_rep:
+            inter_score = inter_rep.max_similarity
+            inter_color = _loop_heatmap_color(inter_score)
+            conf_note   = " <i>(1 pair — low confidence)</i>" if inter_rep.pair_count == 1 else ""
+            flag        = " → Tight hook" if inter_score > CONSTANTS.LOOP_SCORE_CEILING else ""
+            parts.append(
+                f"<span style='color:var(--text);font-weight:600;'>{label_safe}</span> "
+                f"<span style='color:{inter_color};'>{inter_score:.2f}</span> "
+                f"<span style='color:var(--dim);'>({inter_rep.pair_count} pair{'s' if inter_rep.pair_count != 1 else ''})"
+                f"{flag}{conf_note}</span>"
+            )
+
+        if intra_rep:
+            intra_score = intra_rep.max_similarity
+            intra_color = _loop_heatmap_color(intra_score)
+            conf_note   = " <i>(2 sub-windows — low confidence)</i>" if intra_rep.pair_count <= 1 else ""
+            flag        = " → Locked loop" if intra_score > CONSTANTS.LOOP_SCORE_CEILING else ""
+            parts.append(
+                f"<span style='color:var(--dim);'>{label_safe} (internal)</span> "
+                f"<span style='color:{intra_color};'>{intra_score:.2f}</span>"
+                f"<span style='color:var(--dim);'>{flag}{conf_note}</span>"
+            )
+
+        row_html = " · ".join(parts)
+        st.markdown(
+            f"<div style='{_mono}padding:2px 0;'>{row_html}</div>",
+            unsafe_allow_html=True,
+        )
+
+
 def _render_production_analysis_card(fr: Optional[ForensicsResult], source: str = "file") -> None:
     if fr is None:
         st.markdown(
@@ -1251,6 +1369,14 @@ def _render_production_analysis_card(fr: Optional[ForensicsResult], source: str 
                 f"change with the picture. These tracks are harder to loop cleanly but reward "
                 f"editors who use the full duration."
             )
+
+    # ── 4-bar window loop heatmap (#142) ──────────────────────────────────────
+    if fr.loop_window_scores:
+        _render_loop_heatmap(fr.loop_window_scores)
+
+    # ── Section-aware repetition (#143 inter, #145 intra) ─────────────────────
+    if fr.section_similarities or fr.section_internal_repetition:
+        _render_section_repetition(fr.section_similarities, fr.section_internal_repetition)
 
     # ── Spectral boundary signals (monitoring mode — not yet in verdict) ─────
     infra  = fr.infrasonic_energy_ratio

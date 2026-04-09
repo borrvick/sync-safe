@@ -558,7 +558,10 @@ def render_loading(source: Any) -> None:
         try:
             with step_timeout(_STEP_TIMEOUT_S["forensics"], "forensics"):
                 from services.forensics import Forensics
-                forensics = Forensics().analyze(audio)
+                forensics = Forensics().analyze(
+                    audio,
+                    sections=list(structure.sections) if structure else None,
+                )
         except StepTimeoutError as exc:
             st.toast("⏱ Forensic scan timed out — AI-detection unavailable.", icon="⚠️")
             _advance("forensics", t0, error=str(exc))

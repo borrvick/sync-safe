@@ -149,6 +149,19 @@ class SystemConstants:
     # Top-N candidates to return per target duration (#148)
     SYNC_CUT_TOP_N: int = 3
 
+    # ---- Section-aware repetition (#143, #145) --------------------------------
+    # Minimum section duration (seconds) to attempt fingerprinting.
+    # Sections shorter than this are skipped — avoids noise in tiny blips.
+    SECTION_MIN_DURATION_S: float = 0.5
+
+    # Boundary trim applied to each section slice before fingerprinting.
+    # Removes 50 ms of click/bleed at edit points (sec.start / sec.end boundaries).
+    SECTION_BOUNDARY_TRIM_S: float = 0.05
+
+    # Sub-window size for intra-section internal repetition (#145).
+    # 8 beats = 2 bars — gives more windows per section than the global 16-beat window.
+    INTERNAL_LOOP_BEATS_PER_WINDOW: int = 8
+
     # Custom duration slider bounds and step (#150)
     SYNC_CUT_SLIDER_MIN: int = 15
     SYNC_CUT_SLIDER_MAX: int = 120
