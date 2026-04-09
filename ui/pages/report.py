@@ -18,7 +18,7 @@ from typing import Optional
 
 import streamlit as st
 
-from core.config import CONSTANTS
+from core.config import CONSTANTS, get_settings
 from core.models import (
     AiSegment,
     AnalysisResult,
@@ -42,6 +42,7 @@ from services.export import (
     to_platform_csv,
     to_section_markers_csv,
 )
+from services.content import THEME_TAXONOMY, ThemeMoodAnalyzer
 from services.legal import hfa_url, songfile_url
 from services.sync_cut import SyncCutAnalyzer
 from services.tagging import TagInjector
@@ -85,6 +86,13 @@ _MOOD_COLORS: dict[str, str] = {
     "Chill":       "var(--accent)",
     "Dark":        "var(--danger)",
     "Intense":     "var(--danger)",
+}
+
+# Category → CSS variable for theme pill/bar coloring (#168)
+_THEME_CATEGORY_COLORS: dict[str, str] = {
+    "energy":    "var(--accent)",
+    "emotional": "var(--info)",
+    "seasonal":  "var(--sync-pass)",
 }
 
 
@@ -2308,36 +2316,114 @@ def _render_theme_mood(result: AnalysisResult) -> None:
         return
 
     mood_color = _MOOD_COLORS.get(tm.mood, "var(--accent)")
+
+    # Section header
+    st.markdown(
+        '<div style="font-size:0.72rem;color:var(--dim);text-transform:uppercase;'
+        'letter-spacing:.06em;margin-bottom:8px;">Theme &amp; Mood</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Mood label row
     enriched_badge = (
         ' <span title="Enriched by Groq LLM" style="'
         'font-size:0.65rem;background:var(--accent);color:#000;'
         'border-radius:3px;padding:1px 5px;margin-left:6px;">✦ enriched</span>'
         if tm.groq_enriched else ""
     )
-
-    # Theme chips
-    theme_chips = "".join(
-        f'<span style="display:inline-block;margin:2px 4px 2px 0;padding:3px 10px;'
-        f'border-radius:12px;font-size:0.78rem;background:var(--surface-2);'
-        f'color:var(--text);border:1px solid var(--border-hr);">'
-        f'{html_mod.escape(t)}</span>'
-        for t in tm.themes
-    ) or '<span style="color:var(--muted);font-size:0.82rem;">—</span>'
-
     st.markdown(
-        f'<div style="margin-bottom:18px;">'
-        f'<div style="font-size:0.72rem;color:var(--dim);text-transform:uppercase;'
-        f'letter-spacing:.06em;margin-bottom:6px;">Theme &amp; Mood</div>'
-        f'<div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;">'
+        f'<div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px;">'
         f'<span style="font-size:0.95rem;font-weight:600;color:{mood_color};">'
         f'{html_mod.escape(tm.mood)}</span>'
         f'<span style="color:var(--dim);font-size:0.8rem;">{tm.confidence:.0%} confidence</span>'
         f'{enriched_badge}'
-        f'</div>'
-        f'<div style="margin-top:6px;">{theme_chips}</div>'
         f'</div>',
         unsafe_allow_html=True,
     )
+
+    # Category-coloured theme pills + per-theme confidence bars
+    if tm.theme_scores:
+        for theme, score in sorted(tm.theme_scores.items(), key=lambda x: -x[1]):
+            if score < CONSTANTS.THEME_MIN_CONFIDENCE:
+                continue
+            tax_entry  = THEME_TAXONOMY.get(theme, {})
+            category   = tax_entry.get("category", "")
+            pill_color = _THEME_CATEGORY_COLORS.get(category, "var(--surface-2)")
+            bar_pct    = int(score * 100)
+            st.markdown(
+                f'<div style="margin-bottom:6px;">'
+                f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">'
+                f'<span style="display:inline-block;padding:2px 9px;border-radius:10px;'
+                f'font-size:0.76rem;background:{pill_color};color:var(--text);">'
+                f'{html_mod.escape(theme)}</span>'
+                f'<span style="font-size:0.72rem;color:var(--dim);">{bar_pct}%</span>'
+                f'</div>'
+                f'<div style="height:4px;border-radius:2px;background:var(--surface-2);width:100%;">'
+                f'<div style="height:4px;border-radius:2px;background:{pill_color};'
+                f'width:{bar_pct}%;transition:width .3s;"></div>'
+                f'</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+    elif tm.themes:
+        chips = "".join(
+            f'<span style="display:inline-block;margin:2px 4px 2px 0;padding:3px 10px;'
+            f'border-radius:12px;font-size:0.78rem;background:var(--surface-2);'
+            f'color:var(--text);border:1px solid var(--border-hr);">'
+            f'{html_mod.escape(t)}</span>'
+            for t in tm.themes
+        )
+        st.markdown(f'<div style="margin-bottom:10px;">{chips}</div>', unsafe_allow_html=True)
+    else:
+        st.markdown(
+            '<div style="color:var(--muted);font-size:0.82rem;margin-bottom:10px;">—</div>',
+            unsafe_allow_html=True,
+        )
+
+    # Sync brief copy block
+    themes_str = ", ".join(tm.themes) if tm.themes else "—"
+    summary    = tm.mood_summary or f"{tm.mood} — {themes_str}"
+    st.code(summary, language=None)
+
+    # On-demand Groq enrichment toggle (hidden when key not configured)
+    _render_groq_enrich_toggle(result)
+
+
+def _render_groq_enrich_toggle(result: AnalysisResult) -> None:
+    """Show Groq enrichment toggle only when groq_api_key is configured (#169)."""
+    try:
+        settings = get_settings()
+        groq_key = getattr(settings, "groq_api_key", None)
+    except Exception:  # noqa: BLE001
+        groq_key = None
+    if not groq_key:
+        return
+
+    tm = result.theme_mood
+    if tm is None:
+        return
+
+    transcript_text = " ".join(
+        seg.text for seg in (result.transcript or []) if seg.text.strip()
+    )
+    cache_key = f"groq_tm_{hash(transcript_text[:200])}"
+    if cache_key not in st.session_state:
+        st.session_state[cache_key] = False
+
+    want_groq = st.toggle(
+        "✦ Enrich with Groq",
+        key=f"{cache_key}_toggle",
+        value=st.session_state[cache_key],
+        help="Send a lyric excerpt to Groq LLM for a richer mood summary.",
+    )
+    if want_groq and not tm.groq_enriched:
+        try:
+            enriched = ThemeMoodAnalyzer().enrich(tm, transcript_text)
+            result.theme_mood = enriched
+            st.session_state[cache_key] = True
+            st.rerun()
+        except Exception as exc:  # noqa: BLE001
+            st.warning(f"Groq enrichment failed: {exc}")
 
 
 _AUTHORSHIP_SYNC_NOTES: dict[str, str] = {
