@@ -4,7 +4,9 @@ Pure data-extraction and platform-mapping functions.
 """
 from __future__ import annotations
 
-from core.models import AnalysisResult, Section
+import html as _html
+
+from core.models import AnalysisResult, Section, SyncCut
 
 from ._schema import PLATFORM_SCHEMAS, SECTION_MARKERS_COLUMNS, _AI_VERDICTS
 
@@ -162,3 +164,79 @@ def _to_platform_row(data: dict[str, str], platform: str) -> dict[str, str]:
     if platform == "synchtank":
         return _synchtank_row(data)
     raise ValueError(f"Unknown platform '{platform}'. Valid: {list(PLATFORM_SCHEMAS)}")
+
+
+# ---------------------------------------------------------------------------
+# DAW marker export — Premiere Pro XML and DaVinci Resolve DRT (#152)
+# ---------------------------------------------------------------------------
+
+_DAVINCI_COLORS: frozenset[str] = frozenset({
+    "Cyan", "Blue", "Green", "Yellow", "Red", "Pink", "Purple",
+    "Fuchsia", "Rose", "Lavender", "Sky", "Mint", "Lemon",
+    "Sand", "Cocoa", "Cream",
+})
+_DAVINCI_DEFAULT_COLOR: str = "Cyan"
+assert _DAVINCI_DEFAULT_COLOR in _DAVINCI_COLORS  # guard: color must be a valid DaVinci named color
+
+
+def _seconds_to_timecode(seconds: float, framerate: float) -> str:
+    """
+    Convert a float second value to HH:MM:SS:FF timecode.
+
+    Uses non-drop-frame (NDF) counting — appropriate for 24/25/30 fps.
+    For 29.97 fps this produces NDF timecode, which is correct for most
+    online delivery contexts (drop-frame is only required for broadcast NTSC).
+
+    Pure function — no I/O.
+    """
+    fps          = max(1, round(framerate))   # guard against 0 / sub-1 fps
+    total_frames = int(seconds * framerate)
+    ff           = total_frames % fps
+    total_secs   = total_frames // fps
+    ss           = total_secs % 60
+    mm           = (total_secs // 60) % 60
+    hh           = total_secs // 3600
+    return f"{hh:02d}:{mm:02d}:{ss:02d}:{ff:02d}"
+
+
+def _build_premiere_xml(cuts: list[SyncCut], framerate: float) -> str:
+    """
+    Build a Premiere Pro markers XML string from a list of SyncCut objects (#152).
+
+    Produces a valid <markers> document even when *cuts* is empty.
+    All user-derived strings (note) are XML-escaped before insertion.
+
+    Pure function — no I/O.
+    """
+    lines = ["<markers>"]
+    for cut in cuts:
+        name    = _html.escape(f"{cut.duration_s}s Cut \u2014 {cut.note}")
+        comment = _html.escape(f"Confidence: {cut.confidence:.0%}")
+        lines += [
+            "  <marker>",
+            f"    <name>{name}</name>",
+            f"    <in>{_seconds_to_timecode(cut.start_s, framerate)}</in>",
+            f"    <out>{_seconds_to_timecode(cut.end_s, framerate)}</out>",
+            f"    <comment>{comment}</comment>",
+            "  </marker>",
+        ]
+    lines.append("</markers>")
+    return "\n".join(lines)
+
+
+def _build_davinci_drt(cuts: list[SyncCut], framerate: float) -> str:
+    """
+    Build a DaVinci Resolve .drt marker file from a list of SyncCut objects (#152).
+
+    Format: tab-separated rows with header Timecode, Label, Color, Duration, Note.
+    Color is hardcoded to "Cyan" — the only universally safe named marker color.
+
+    Pure function — no I/O.
+    """
+    rows = ["Timecode\tLabel\tColor\tDuration\tNote"]
+    for cut in cuts:
+        tc          = _seconds_to_timecode(cut.start_s, framerate)
+        duration_tc = _seconds_to_timecode(cut.actual_duration_s, framerate)
+        label       = f"{cut.duration_s}s Cut"
+        rows.append(f"{tc}\t{label}\t{_DAVINCI_DEFAULT_COLOR}\t{duration_tc}\t{cut.note}")
+    return "\n".join(rows)

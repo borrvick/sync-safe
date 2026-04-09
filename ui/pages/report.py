@@ -38,6 +38,8 @@ from core.models import (
 )
 from services.export import (
     PLATFORM_SCHEMAS,
+    _build_davinci_drt,
+    _build_premiere_xml,
     to_analysis_json,
     to_platform_csv,
     to_section_markers_csv,
@@ -2309,6 +2311,41 @@ def _render_lyric_section(result: AnalysisResult) -> None:
 # Lyric section sub-renderers (extracted to keep each function under 40 lines)
 # ---------------------------------------------------------------------------
 
+def _render_theme_bars(theme_scores: dict[str, float]) -> None:
+    """
+    Render category-coloured pill + CSS-transform confidence bar for each theme (#167/#168).
+
+    Uses transform:scaleX() instead of width: to avoid layout thrashing.
+    Each bar has role="progressbar" + aria-valuenow for screen reader accessibility.
+    Only themes at or above THEME_MIN_CONFIDENCE are rendered.
+    """
+    for theme, score in sorted(theme_scores.items(), key=lambda x: -x[1]):
+        if score < CONSTANTS.THEME_MIN_CONFIDENCE:
+            continue
+        tax_entry  = THEME_TAXONOMY.get(theme, {})
+        category   = tax_entry.get("category", "")
+        pill_color = _THEME_CATEGORY_COLORS.get(category, "var(--surface-2)")
+        bar_pct    = int(score * 100)
+        scale      = round(score, 3)
+        st.markdown(
+            f'<div style="margin-bottom:6px;">'
+            f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">'
+            f'<span style="display:inline-block;padding:2px 9px;border-radius:10px;'
+            f'font-size:0.76rem;background:{pill_color};color:var(--text);">'
+            f'{html_mod.escape(theme)}</span>'
+            f'<span style="font-size:0.72rem;color:var(--dim);" aria-hidden="true">{bar_pct}%</span>'
+            f'</div>'
+            f'<div style="height:4px;border-radius:2px;background:var(--surface-2);overflow:hidden;"'
+            f' role="progressbar" aria-valuenow="{bar_pct}" aria-valuemin="0" aria-valuemax="100"'
+            f' aria-label="{html_mod.escape(theme)} confidence">'
+            f'<div style="height:4px;border-radius:2px;background:{pill_color};'
+            f'transform:scaleX({scale});transform-origin:left;transition:transform .3s;"></div>'
+            f'</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+
 def _render_theme_mood(result: AnalysisResult) -> None:
     """Render the Theme & Mood card. Silently skips when theme_mood is None."""
     tm = result.theme_mood
@@ -2343,28 +2380,7 @@ def _render_theme_mood(result: AnalysisResult) -> None:
 
     # Category-coloured theme pills + per-theme confidence bars
     if tm.theme_scores:
-        for theme, score in sorted(tm.theme_scores.items(), key=lambda x: -x[1]):
-            if score < CONSTANTS.THEME_MIN_CONFIDENCE:
-                continue
-            tax_entry  = THEME_TAXONOMY.get(theme, {})
-            category   = tax_entry.get("category", "")
-            pill_color = _THEME_CATEGORY_COLORS.get(category, "var(--surface-2)")
-            bar_pct    = int(score * 100)
-            st.markdown(
-                f'<div style="margin-bottom:6px;">'
-                f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">'
-                f'<span style="display:inline-block;padding:2px 9px;border-radius:10px;'
-                f'font-size:0.76rem;background:{pill_color};color:var(--text);">'
-                f'{html_mod.escape(theme)}</span>'
-                f'<span style="font-size:0.72rem;color:var(--dim);">{bar_pct}%</span>'
-                f'</div>'
-                f'<div style="height:4px;border-radius:2px;background:var(--surface-2);width:100%;">'
-                f'<div style="height:4px;border-radius:2px;background:{pill_color};'
-                f'width:{bar_pct}%;transition:width .3s;"></div>'
-                f'</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
+        _render_theme_bars(tm.theme_scores)
     elif tm.themes:
         chips = "".join(
             f'<span style="display:inline-block;margin:2px 4px 2px 0;padding:3px 10px;'
@@ -3219,10 +3235,66 @@ def _render_export_buttons(result: AnalysisResult) -> None:
         ),
     )
 
+    # DAW marker export — Premiere Pro XML + DaVinci Resolve DRT (#152)
+    _render_daw_export(result, track_slug)
+
     # Tagged file download — only available for direct uploads (not YouTube, which
     # produces a lossy MP3 transcode that is not re-exportable as a deliverable).
     if result.audio.source != _SOURCE_YOUTUBE:
         _render_tagged_download(result, track_slug)
+
+
+_DAW_FRAMERATES: list[float] = [24.0, 25.0, 29.97, 30.0]
+
+
+def _render_daw_export(result: AnalysisResult, track_slug: str) -> None:
+    """Render Premiere Pro XML and DaVinci Resolve DRT download buttons (#152)."""
+    cuts = result.sync_cuts
+    if not cuts:
+        return
+
+    if "daw_framerate" not in st.session_state:
+        st.session_state["daw_framerate"] = CONSTANTS.EXPORT_FRAMERATE
+
+    st.markdown(
+        '<div style="font-size:0.72rem;color:var(--dim);text-transform:uppercase;'
+        'letter-spacing:.06em;margin:18px 0 10px;">DAW Marker Export</div>',
+        unsafe_allow_html=True,
+    )
+
+    col_fps, col_premiere, col_davinci = st.columns([1, 2, 2], gap="medium")
+
+    with col_fps:
+        fps = st.selectbox(
+            "Frame rate",
+            options=_DAW_FRAMERATES,
+            index=_DAW_FRAMERATES.index(st.session_state["daw_framerate"]),
+            key="daw_framerate_select",
+            help="Match your editing project's frame rate setting.",
+        )
+        st.session_state["daw_framerate"] = fps
+
+    with col_premiere:
+        xml_str = _build_premiere_xml(cuts, fps)
+        st.download_button(
+            label="⬇ Premiere Pro XML",
+            data=xml_str.encode("utf-8"),
+            file_name=f"{track_slug}-premiere-markers.xml",
+            mime="application/xml",
+            use_container_width=True,
+            help="Import via Markers panel → Import Markers from File",
+        )
+
+    with col_davinci:
+        drt_str = _build_davinci_drt(cuts, fps)
+        st.download_button(
+            label="⬇ DaVinci Resolve DRT",
+            data=drt_str.encode("utf-8"),
+            file_name=f"{track_slug}-davinci-markers.drt",
+            mime="text/plain",
+            use_container_width=True,
+            help="Import via Timeline → Import → Timeline Markers from EDL",
+        )
 
 
 def _render_platform_export(result: AnalysisResult, track_slug: str) -> None:
