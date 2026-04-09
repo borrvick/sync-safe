@@ -3037,6 +3037,7 @@ def _render_sync_cuts(result: AnalysisResult) -> None:
             sections         = result.structure.sections,
             beats            = result.structure.beats,
             target_durations = [custom_s],
+            loop_score       = result.forensics.loop_score if result.forensics else 0.0,
         )
         display_cuts = display_cuts + custom_cuts
 

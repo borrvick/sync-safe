@@ -44,6 +44,7 @@ from ._pure import (
     _compute_fade_severity,
     _compute_grade,
     _deduplicate_flags,
+    _detect_onset_intro_end,
     _score_detoxify,
     _section_energy_note,
 )
@@ -119,7 +120,7 @@ class Compliance:
 
         sting     = self._check_sting(y, sr, beats)
         evolution = self._check_energy_evolution(y, sr, beats, sections)
-        intro     = self._check_intro(sections, transcript)
+        intro     = self._check_intro(y, sr, beats, sections, transcript)
         flags     = self._audit_lyrics(transcript)
 
         grade = _compute_grade(flags=flags)
@@ -202,6 +203,8 @@ class Compliance:
                 sync_ready=True,
                 final_energy_ratio=round(final_ratio, 3),
                 flag=False,
+                norm_slope=round(norm_slope, 4),
+                onset_spike_factor=round(onset_spike, 3),
             )
         if is_fade:
             fade_sev, fade_tail = _compute_fade_severity(
@@ -219,6 +222,8 @@ class Compliance:
                 flag=True,
                 fade_severity=fade_sev,
                 fade_tail_seconds=fade_tail,
+                norm_slope=round(norm_slope, 4),
+                onset_spike_factor=round(onset_spike, 3),
             )
         return StingResult(
             ending_type="cut",
@@ -226,6 +231,8 @@ class Compliance:
             final_energy_ratio=round(final_ratio, 3),
             flag=False,
             cut_type=_classify_cut_type(len(audio) / sr, beats, CONSTANTS.CUT_BEAT_TOLERANCE_S),
+            norm_slope=round(norm_slope, 4),
+            onset_spike_factor=round(onset_spike, 3),
         )
 
     # ------------------------------------------------------------------
@@ -292,13 +299,15 @@ class Compliance:
             return stag, len(wins) - 1
 
         # Global scan (existing behaviour — uses full audio with absolute beat times)
-        global_windows: list[np.ndarray] = []
         step = CONSTANTS.BEATS_PER_WINDOW
+        global_window_starts: list[float] = []
+        global_windows: list[np.ndarray]  = []
         for i in range(0, len(beats_arr) - step, step):
             t_start = float(beats_arr[i])
             t_end   = float(beats_arr[min(i + step, len(beats_arr) - 1)])
             s_start, s_end = int(t_start * sr), int(t_end * sr)
             if s_end > s_start:
+                global_window_starts.append(t_start)
                 global_windows.append(audio[s_start:s_end])
 
         if len(global_windows) < 2:
@@ -317,10 +326,18 @@ class Compliance:
         c_range = c_max - c_min + 1e-9
         norm    = [(c - c_min) / c_range for c in contrasts]
 
-        stagnant = sum(
-            1 for i in range(1, len(global_windows))
-            if abs(norm[i] - norm[i - 1]) < CONSTANTS.ENERGY_DELTA_MIN
-        )
+        # Collect per-window delta and stagnant window start timestamps
+        per_window_deltas: list[float] = [
+            round(abs(norm[i] - norm[i - 1]), 4)
+            for i in range(1, len(global_windows))
+        ]
+        stagnant_ts: list[float] = [
+            round(global_window_starts[i], 3)
+            for i in range(1, len(global_windows))
+            if per_window_deltas[i - 1] < CONSTANTS.ENERGY_DELTA_MIN
+        ]
+
+        stagnant = len(stagnant_ts)
         total = len(global_windows) - 1
         flag  = stagnant > 0
         detail = (
@@ -361,6 +378,8 @@ class Compliance:
             detail=detail,
             section_details=section_details,
             ending_section=ending_section,
+            stagnant_timestamps=stagnant_ts,
+            per_window_contrasts=per_window_deltas,
         )
 
     # ------------------------------------------------------------------
@@ -369,34 +388,93 @@ class Compliance:
 
     def _check_intro(
         self,
+        audio: np.ndarray,
+        sr: int,
+        beats: list[float],
         sections: list[Section],
         transcript: list[TranscriptSegment],
     ) -> IntroResult:
         """
         Flag intros longer than CONSTANTS.INTRO_MAX_SECONDS.
 
-        Primary source: allin1 sections labelled 'intro'.
-        Fallback: first Whisper lyric timestamp as pre-vocal proxy.
+        Three signals (#105):
+          1. allin1 section label "intro" — most reliable structural signal
+          2. Onset RMS energy jump — first significant energy increase after
+             INTRO_ONSET_MIN_BEATS beats (hardware-detectable, label-independent)
+          3. Whisper first lyric timestamp — pre-vocal proxy / last resort fallback
+
+        Confidence:
+          "High"   — ≥2 signals agree within INTRO_CONFIDENCE_AGREEMENT_S seconds
+          "Medium" — only one non-whisper signal present (allin1 or onset)
+          "Low"    — whisper-only estimate
+
         Never raises — missing data degrades to IntroResult with flag=False.
         """
-        intro_secs = sum(
-            s.end - s.start
-            for s in sections
-            if s.label.lower().startswith("intro")
-        )
-        source = "allin1" if sections else "none"
+        # Signal 1: allin1 section label
+        allin1_intro: float | None = None
+        if sections:
+            total = sum(
+                s.end - s.start
+                for s in sections
+                if s.label.lower().startswith("intro")
+            )
+            if total > 0:
+                allin1_intro = total
 
-        if intro_secs == 0 and transcript:
+        # Signal 2: onset RMS energy jump
+        onset_intro: float | None = _detect_onset_intro_end(audio, sr, beats)
+
+        # Signal 3: Whisper first lyric timestamp
+        whisper_intro: float | None = None
+        if transcript:
             vocal_starts = [seg.start for seg in transcript if seg.text]
             if vocal_starts:
-                intro_secs = float(min(vocal_starts))
-                source     = "whisper_fallback"
+                whisper_intro = float(min(vocal_starts))
+
+        # --- Resolve estimate and confidence ---
+        strong_signals: list[float] = [
+            v for v in (allin1_intro, onset_intro) if v is not None
+        ]
+
+        if len(strong_signals) >= 2:
+            # Both allin1 and onset fired — check agreement
+            agreement = abs(strong_signals[0] - strong_signals[1]) <= CONSTANTS.INTRO_CONFIDENCE_AGREEMENT_S
+            intro_secs = strong_signals[0]  # allin1 takes priority
+            confidence = "High" if agreement else "Medium"
+            source = "allin1"
+        elif allin1_intro is not None:
+            # Only allin1 — onset is None here (otherwise strong_signals would have len ≥ 2)
+            intro_secs = allin1_intro
+            confidence = "Medium"
+            source = "allin1"
+        elif onset_intro is not None:
+            # Only onset (no allin1 labels)
+            intro_secs = onset_intro
+            # Upgrade to High if whisper agrees within tolerance
+            if whisper_intro is not None and abs(onset_intro - whisper_intro) <= CONSTANTS.INTRO_CONFIDENCE_AGREEMENT_S:
+                confidence = "High"
+            else:
+                confidence = "Medium"
+            source = "onset"
+        elif whisper_intro is not None:
+            # Only whisper fallback
+            intro_secs = whisper_intro
+            confidence = "Low"
+            source = "whisper_fallback"
+        else:
+            return IntroResult(
+                intro_seconds=0.0,
+                flag=False,
+                source="none",
+                confidence="",
+            )
 
         flagged = intro_secs > CONSTANTS.INTRO_MAX_SECONDS
         return IntroResult(
             intro_seconds=round(intro_secs, 1),
             flag=flagged,
             source=source,
+            confidence=confidence,
         )
 
     # ------------------------------------------------------------------

@@ -4,11 +4,13 @@ tests/test_compliance.py
 Unit tests for services/compliance.py pure functions.
 
 Covers:
-  - _build_windows       — sliding text window builder
-  - _check_brand_keywords — brand regex scanner
-  - _deduplicate_flags   — dedup + confidence priority logic
-  - _compute_grade       — A–F grade from confirmed strikes
-  - Compliance._check_intro — pure method (no I/O, no models)
+  - _build_windows           — sliding text window builder
+  - _check_brand_keywords    — brand regex scanner
+  - _deduplicate_flags       — dedup + confidence priority logic
+  - _compute_grade           — A–F grade from confirmed strikes
+  - Compliance._check_intro  — pure method (no I/O, no models)
+  - _detect_onset_intro_end  — onset RMS energy jump detector (#105)
+  - _check_intro confidence  — three-signal intro confidence scoring (#105)
 
 No GPU, no Detoxify, no spaCy, no audio — all tests complete in < 1 second.
 """
@@ -16,6 +18,7 @@ from __future__ import annotations
 
 import re
 
+import numpy as np
 import pytest
 
 from core.config import CONSTANTS
@@ -37,6 +40,7 @@ from services.compliance import (
     _compute_fade_severity,
     _compute_grade,
     _deduplicate_flags,
+    _detect_onset_intro_end,
     _section_energy_note,
 )
 
@@ -284,12 +288,26 @@ class TestComputeGrade:
 # ---------------------------------------------------------------------------
 
 class TestCheckIntro:
+    # Silent audio + empty beats → onset detector never fires, keeps tests pure/fast
+    _SR    = 22050
+    _AUDIO = np.zeros(22050 * 5, dtype=np.float32)
+    _BEATS: list[float] = []
+
     def setup_method(self):
         self.svc = Compliance()
 
+    def _call(
+        self,
+        sections: list[Section],
+        transcript: list[TranscriptSegment],
+    ) -> IntroResult:
+        return self.svc._check_intro(
+            self._AUDIO, self._SR, self._BEATS, sections, transcript
+        )
+
     def test_intro_section_under_limit_does_not_flag(self):
         sections = [Section(label="intro", start=0.0, end=10.0)]
-        result = self.svc._check_intro(sections, transcript=[])
+        result = self._call(sections, transcript=[])
         assert result.flag is False
         assert result.intro_seconds == pytest.approx(10.0)
         assert result.source == "allin1"
@@ -297,7 +315,7 @@ class TestCheckIntro:
     def test_intro_section_over_limit_flags(self):
         sections = [Section(label="intro", start=0.0,
                             end=float(CONSTANTS.INTRO_MAX_SECONDS + 1))]
-        result = self.svc._check_intro(sections, transcript=[])
+        result = self._call(sections, transcript=[])
         assert result.flag is True
 
     def test_multiple_intro_sections_sum_is_checked(self):
@@ -306,7 +324,7 @@ class TestCheckIntro:
             Section(label="intro", start=0.0, end=8.0),
             Section(label="intro", start=20.0, end=28.0),
         ]
-        result = self.svc._check_intro(sections, transcript=[])
+        result = self._call(sections, transcript=[])
         assert result.intro_seconds == pytest.approx(16.0)
         assert result.flag is True
 
@@ -315,22 +333,22 @@ class TestCheckIntro:
             Section(label="verse", start=0.0, end=30.0),
             Section(label="chorus", start=30.0, end=60.0),
         ]
-        result = self.svc._check_intro(sections, transcript=[])
+        result = self._call(sections, transcript=[])
         assert result.flag is False
 
     def test_whisper_fallback_when_no_sections(self):
         transcript = [_segment("here we go", start=12.0)]
-        result = self.svc._check_intro(sections=[], transcript=transcript)
+        result = self._call(sections=[], transcript=transcript)
         assert result.source == "whisper_fallback"
         assert result.intro_seconds == pytest.approx(12.0)
 
     def test_whisper_fallback_over_limit_flags(self):
         transcript = [_segment("let's go", start=float(CONSTANTS.INTRO_MAX_SECONDS + 2))]
-        result = self.svc._check_intro(sections=[], transcript=transcript)
+        result = self._call(sections=[], transcript=transcript)
         assert result.flag is True
 
     def test_no_sections_no_transcript_returns_unflagged(self):
-        result = self.svc._check_intro(sections=[], transcript=[])
+        result = self._call(sections=[], transcript=[])
         assert result.flag is False
         assert result.source == "none"
 
@@ -537,3 +555,139 @@ class TestSectionEnergyNote:
 
     def test_partial_stagnant_singular(self) -> None:
         assert _section_energy_note(1, 5) == "1 of 5 windows stagnant"
+
+
+# ---------------------------------------------------------------------------
+# _detect_onset_intro_end (#105)
+# ---------------------------------------------------------------------------
+
+class TestDetectOnsetIntroEnd:
+    """Tests for the onset RMS energy jump intro detector."""
+
+    SR = 22050
+    HOP = 512
+
+    def _make_audio(self, pre_rms: float, post_rms: float, sr: int = SR) -> np.ndarray:
+        """Build a short synthetic array: quiet pre-onset block then louder block."""
+        # 1.5 s quiet then 1.5 s loud — total 3 s
+        half = int(1.5 * sr)
+        quiet = np.random.randn(half).astype(np.float32) * pre_rms
+        loud  = np.random.randn(half).astype(np.float32) * post_rms
+        return np.concatenate([quiet, loud])
+
+    def test_returns_none_when_too_few_beats(self) -> None:
+        y = self._make_audio(0.01, 0.5)
+        # fewer beats than INTRO_ONSET_MIN_BEATS
+        beats = list(np.linspace(0.0, 1.0, CONSTANTS.INTRO_ONSET_MIN_BEATS - 1))
+        result = _detect_onset_intro_end(y, self.SR, beats)
+        assert result is None
+
+    def test_returns_none_for_silent_track(self) -> None:
+        y = np.zeros(self.SR * 3, dtype=np.float32)
+        beats = list(np.linspace(0.0, 2.5, CONSTANTS.INTRO_ONSET_MIN_BEATS + 4))
+        result = _detect_onset_intro_end(y, self.SR, beats)
+        assert result is None
+
+    def test_detects_jump_after_onset_window(self) -> None:
+        # Quiet for first 1.5 s, loud after — beat grid opens past onset window
+        y = self._make_audio(pre_rms=0.005, post_rms=0.5)
+        beats = list(np.linspace(0.0, 2.8, CONSTANTS.INTRO_ONSET_MIN_BEATS + 8))
+        result = _detect_onset_intro_end(y, self.SR, beats)
+        # Onset should be detected in the louder half
+        assert result is not None
+        assert result >= 0.0
+        assert result <= 3.0
+
+    def test_flat_audio_returns_none(self) -> None:
+        # Uniform amplitude — no significant jump
+        y = np.ones(self.SR * 3, dtype=np.float32) * 0.05
+        beats = list(np.linspace(0.0, 2.9, CONSTANTS.INTRO_ONSET_MIN_BEATS + 6))
+        result = _detect_onset_intro_end(y, self.SR, beats)
+        # No frame exceeds the jump threshold for flat audio
+        assert result is None
+
+    def test_returns_float_when_jump_found(self) -> None:
+        y = self._make_audio(pre_rms=0.001, post_rms=1.0)
+        beats = list(np.linspace(0.0, 2.9, CONSTANTS.INTRO_ONSET_MIN_BEATS + 10))
+        result = _detect_onset_intro_end(y, self.SR, beats)
+        if result is not None:
+            assert isinstance(result, float)
+
+
+# ---------------------------------------------------------------------------
+# _check_intro confidence (#105)
+# ---------------------------------------------------------------------------
+
+class TestCheckIntroConfidence:
+    """Tests for the three-signal intro confidence computation."""
+
+    SR = 22050
+
+    def _make_quiet_audio(self, duration_s: float = 5.0) -> np.ndarray:
+        """Return near-silent audio — onset detector finds no jump."""
+        return np.zeros(int(duration_s * self.SR), dtype=np.float32)
+
+    def _sec(self, label: str, start: float, end: float) -> Section:
+        return Section(label=label, start=start, end=end)
+
+    def _seg(self, start: float, text: str = "hello world test lyrics") -> TranscriptSegment:
+        return TranscriptSegment(start=start, end=start + 3.0, text=text)
+
+    def _check(
+        self,
+        audio: np.ndarray,
+        beats: list[float],
+        sections: list[Section],
+        transcript: list[TranscriptSegment],
+    ) -> IntroResult:
+        svc = Compliance()
+        return svc._check_intro(audio, self.SR, beats, sections, transcript)
+
+    def test_allin1_only_returns_medium_confidence(self) -> None:
+        y = self._make_quiet_audio()
+        beats = list(np.linspace(0.0, 4.9, CONSTANTS.INTRO_ONSET_MIN_BEATS + 4))
+        sections = [self._sec("intro", 0.0, 8.0), self._sec("verse", 8.0, 30.0)]
+        result = self._check(y, beats, sections, [])
+        assert result.source == "allin1"
+        # With no onset signal on silent audio, confidence is Medium or High
+        assert result.confidence in ("Medium", "High")
+
+    def test_whisper_only_returns_low_confidence(self) -> None:
+        y = self._make_quiet_audio()
+        beats: list[float] = []  # no beats → no onset window
+        transcript = [self._seg(start=12.0)]
+        result = self._check(y, beats, [], transcript)
+        assert result.source == "whisper_fallback"
+        assert result.confidence == "Low"
+
+    def test_no_signals_returns_empty_confidence(self) -> None:
+        y = self._make_quiet_audio()
+        result = self._check(y, [], [], [])
+        assert result.intro_seconds == 0.0
+        assert result.confidence == ""
+        assert result.flag is False
+
+    def test_intro_over_max_seconds_is_flagged(self) -> None:
+        y = self._make_quiet_audio()
+        beats = list(np.linspace(0.0, 4.9, CONSTANTS.INTRO_ONSET_MIN_BEATS + 4))
+        over_limit = CONSTANTS.INTRO_MAX_SECONDS + 5.0
+        sections = [self._sec("intro", 0.0, over_limit)]
+        result = self._check(y, beats, sections, [])
+        assert result.flag is True
+        assert result.intro_seconds > CONSTANTS.INTRO_MAX_SECONDS
+
+    def test_intro_under_max_seconds_not_flagged(self) -> None:
+        y = self._make_quiet_audio()
+        beats = list(np.linspace(0.0, 4.9, CONSTANTS.INTRO_ONSET_MIN_BEATS + 4))
+        under_limit = max(1.0, CONSTANTS.INTRO_MAX_SECONDS - 3.0)
+        sections = [self._sec("intro", 0.0, under_limit)]
+        result = self._check(y, beats, sections, [])
+        assert result.flag is False
+
+    def test_intro_result_has_confidence_field(self) -> None:
+        y = self._make_quiet_audio()
+        beats = []
+        transcript = [self._seg(start=5.0)]
+        result = self._check(y, beats, [], transcript)
+        assert hasattr(result, "confidence")
+        assert isinstance(result.confidence, str)

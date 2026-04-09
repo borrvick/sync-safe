@@ -194,17 +194,20 @@ class TestScoreWindow:
             snap_bars=4, boundary_tolerance=0.5, intro_end_s=8.0,
         )
         expected_keys = {"post_intro", "start_near_boundary", "end_near_boundary",
-                         "contains_chorus", "bar_aligned_end"}
+                         "contains_chorus", "bar_aligned_end", "loop_friendly"}
         assert set(breakdown.keys()) == expected_keys
 
     def test_score_equals_sum_of_breakdown(self) -> None:
+        # With loop_score=0.0, loop_friendly=False, so score = sum of main criteria × 0.20
         beats = _beats(200)
         score, breakdown = _score_window(
             start_s=24.0, end_s=54.0,
             sections=_sections(), beats=beats,
             snap_bars=4, boundary_tolerance=0.5, intro_end_s=8.0,
         )
-        expected = round(sum(0.20 for v in breakdown.values() if v), 4)
+        main_keys = {"post_intro", "start_near_boundary", "end_near_boundary",
+                     "contains_chorus", "bar_aligned_end"}
+        expected = round(sum(0.20 for k, v in breakdown.items() if v and k in main_keys), 4)
         assert score == expected
 
 
@@ -329,3 +332,77 @@ class TestSyncCutAnalyzer:
         for t in CONSTANTS.SYNC_CUT_TARGET_DURATIONS:
             if beats[-1] >= t - CONSTANTS.SYNC_CUT_DURATION_TOLERANCE_S:
                 assert t in returned_durations
+
+
+# ---------------------------------------------------------------------------
+# Loop bonus (#151)
+# ---------------------------------------------------------------------------
+
+class TestLoopBonus:
+    """_score_window loop_friendly signal and SYNC_CUT_LOOP_BONUS."""
+
+    from core.config import CONSTANTS as _C
+
+    def _score(self, loop_score: float) -> tuple[float, dict[str, bool]]:
+        from core.config import CONSTANTS
+        beats = _beats(120)
+        sections = _sections()
+        return _score_window(
+            start_s=0.0,
+            end_s=30.0,
+            sections=sections,
+            beats=beats,
+            snap_bars=4,
+            boundary_tolerance=CONSTANTS.SYNC_CUT_BOUNDARY_TOLERANCE_S,
+            intro_end_s=0.0,
+            loop_score=loop_score,
+        )
+
+    def test_breakdown_has_loop_friendly_key(self) -> None:
+        _, breakdown = self._score(0.0)
+        assert "loop_friendly" in breakdown
+
+    def test_low_loop_score_no_bonus(self) -> None:
+        from core.config import CONSTANTS
+        score_low, bd_low   = self._score(0.0)
+        score_zero, bd_zero = self._score(CONSTANTS.REPETITION_INDEX_MODERATE - 0.01)
+        # Both should have loop_friendly=False
+        assert bd_low["loop_friendly"] is False
+        assert bd_zero["loop_friendly"] is False
+
+    def test_moderate_loop_score_applies_bonus(self) -> None:
+        from core.config import CONSTANTS
+        mid = (CONSTANTS.REPETITION_INDEX_MODERATE + CONSTANTS.REPETITION_INDEX_HIGH) / 2
+        score_with, bd_with     = self._score(mid)
+        score_without, bd_without = self._score(0.0)
+        assert bd_with["loop_friendly"] is True
+        assert score_with >= score_without
+
+    def test_high_loop_score_no_bonus(self) -> None:
+        from core.config import CONSTANTS
+        score_high, bd_high = self._score(CONSTANTS.REPETITION_INDEX_HIGH)
+        assert bd_high["loop_friendly"] is False
+
+    def test_score_capped_at_one(self) -> None:
+        from core.config import CONSTANTS
+        # All five main criteria true + loop bonus should not exceed 1.0
+        mid = (CONSTANTS.REPETITION_INDEX_MODERATE + CONSTANTS.REPETITION_INDEX_HIGH) / 2
+        score, _ = self._score(mid)
+        assert score <= 1.0
+
+    def test_loop_score_default_is_zero(self) -> None:
+        from core.config import CONSTANTS
+        beats = _beats(120)
+        sections = _sections()
+        # Call without loop_score kwarg — should not raise
+        score, breakdown = _score_window(
+            start_s=0.0,
+            end_s=30.0,
+            sections=sections,
+            beats=beats,
+            snap_bars=4,
+            boundary_tolerance=CONSTANTS.SYNC_CUT_BOUNDARY_TOLERANCE_S,
+            intro_end_s=0.0,
+        )
+        assert "loop_friendly" in breakdown
+        assert isinstance(score, float)

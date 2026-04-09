@@ -273,6 +273,9 @@ class StingResult(BaseModel):
     fade_tail_seconds: float        = 0.0   # duration (s) where RMS > tail threshold
     # Cut-specific enrichment (#104)
     cut_type: Optional[Literal["clean_cut", "mid_phrase_cut"]] = None
+    # Raw diagnostic fields for JSON export (#108)
+    norm_slope: float               = 0.0   # normalised RMS slope at track end
+    onset_spike_factor: float       = 0.0   # final-onset energy vs track mean
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
@@ -290,6 +293,9 @@ class EnergyEvolutionResult(BaseModel):
     # Per-section breakdown (#106)
     section_details: list[dict[str, str | int | bool]] = Field(default_factory=list)
     ending_section: Optional[str]                      = None  # section label containing track end
+    # Raw diagnostic fields for JSON export (#108)
+    stagnant_timestamps: list[float]    = Field(default_factory=list)  # start_s of each stagnant window
+    per_window_contrasts: list[float]   = Field(default_factory=list)  # energy delta per window
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
@@ -302,7 +308,8 @@ class IntroResult(BaseModel):
 
     intro_seconds: float    = 0.0
     flag: bool              = False
-    source: str             = ""    # "allin1" | "whisper_fallback" | "none"
+    source: str             = ""    # "allin1" | "whisper" | "onset" | "whisper_fallback" | "none"
+    confidence: str         = ""    # "High" | "Medium" | "Low" | "" (pre-#105 results)
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
