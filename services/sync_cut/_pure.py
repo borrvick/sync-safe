@@ -137,6 +137,7 @@ def _score_window(
     snap_bars: int,
     boundary_tolerance: float,
     intro_end_s: float,
+    loop_score: float = 0.0,
 ) -> tuple[float, dict[str, bool]]:
     """
     Score a candidate [start_s, end_s] edit window.
@@ -148,9 +149,15 @@ def _score_window(
       +0.20  contains a chorus (or hook/refrain)
       +0.20  end lands on a bar boundary (snap_bars alignment)
 
+    Repetition bonus (#151):
+      +SYNC_CUT_LOOP_BONUS  when REPETITION_INDEX_MODERATE ≤ loop_score < REPETITION_INDEX_HIGH
+      (moderate repetition is a good sign for a sync-friendly loop; high may indicate
+      stock/AI audio, so no bonus is applied at or above the upper threshold)
+
     Returns:
         (score, breakdown) — score is 0.0–1.0; breakdown is a dict of
         criterion name → bool for use in JSON export (#155).
+        breakdown includes "loop_friendly" reflecting the repetition bonus.
     """
     post_intro           = start_s >= intro_end_s
     start_near_boundary  = _near_boundary(start_s, sections, boundary_tolerance)
@@ -165,14 +172,21 @@ def _score_window(
         )
         bar_aligned_end = nearest_end_idx % snap_bars == 0
 
+    loop_friendly = (
+        CONSTANTS.REPETITION_INDEX_MODERATE <= loop_score < CONSTANTS.REPETITION_INDEX_HIGH
+    )
+
     breakdown: dict[str, bool] = {
         "post_intro":           post_intro,
         "start_near_boundary":  start_near_boundary,
         "end_near_boundary":    end_near_boundary,
         "contains_chorus":      contains_chorus,
         "bar_aligned_end":      bar_aligned_end,
+        "loop_friendly":        loop_friendly,
     }
-    score = round(sum(0.20 for v in breakdown.values() if v), 4)
+    base_score = sum(0.20 for k, v in breakdown.items() if v and k != "loop_friendly")
+    bonus      = CONSTANTS.SYNC_CUT_LOOP_BONUS if loop_friendly else 0.0
+    score      = round(min(1.0, base_score + bonus), 4)
     return score, breakdown
 
 
@@ -184,6 +198,7 @@ def suggest_sync_cuts(
     boundary_tolerance: float,
     duration_tolerance: float,
     top_n: int = 3,
+    loop_score: float = 0.0,
 ) -> list[SyncCut]:
     """
     Pure function.  Return the top-N SyncCuts for each target duration (#148).
@@ -196,6 +211,9 @@ def suggest_sync_cuts(
         boundary_tolerance: Max distance (s) from a section boundary to count as aligned.
         duration_tolerance: Allowed deviation (s) from each target duration.
         top_n:              Maximum candidates to return per target duration.
+        loop_score:         Track-level loop repetition score (0.0–1.0) from forensics.
+                            When in the moderate range, a small bonus is applied to each
+                            candidate (#151).
 
     Returns:
         Up to *top_n* SyncCuts per target duration, sorted by rank (1 = best).
@@ -241,6 +259,7 @@ def suggest_sync_cuts(
                 sections, beats,
                 snap_bars, boundary_tolerance,
                 intro_end_s,
+                loop_score=loop_score,
             )
             candidates.append((score, breakdown, beat_start, end_s, actual))
 

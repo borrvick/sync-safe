@@ -5,9 +5,13 @@ Pure compliance helpers and module-level constants — no GPU, no I/O.
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
 from core.config import CONSTANTS
 from core.models import ComplianceFlag, IssueType, Severity, TranscriptSegment
+
+if TYPE_CHECKING:
+    import numpy as np
 from data.drug_keywords import DRUG_KEYWORDS
 
 # ---------------------------------------------------------------------------
@@ -352,3 +356,61 @@ def _compute_grade(flags: list[ComplianceFlag]) -> str:
         f.confidence in ("confirmed", "potential") for f in flags
     )
     return "B" if has_advisory else "A"
+
+
+# ---------------------------------------------------------------------------
+# Onset-energy intro detection (#105)
+# ---------------------------------------------------------------------------
+
+def _detect_onset_intro_end(
+    y: np.ndarray,
+    sr: int,
+    beat_times: list[float],
+) -> float | None:
+    """
+    Find the first significant RMS energy jump after INTRO_ONSET_MIN_BEATS beats.
+
+    Returns the onset timestamp in seconds, or None if:
+    - fewer beats than INTRO_ONSET_MIN_BEATS are present
+    - pre-onset RMS mean is near-zero (silent track)
+    - no frame exceeds the jump threshold after the onset window opens
+
+    Args:
+        y:          Audio waveform (mono float32).
+        sr:         Sample rate.
+        beat_times: Beat timestamps in seconds (from allin1 or librosa).
+
+    Returns:
+        Onset timestamp in seconds, or None.
+    """
+    import numpy as np
+    try:
+        import librosa
+    except ImportError:
+        return None
+
+    if len(beat_times) < CONSTANTS.INTRO_ONSET_MIN_BEATS:
+        return None
+
+    onset_start_s = float(beat_times[CONSTANTS.INTRO_ONSET_MIN_BEATS - 1])
+
+    rms        = librosa.feature.rms(y=y, hop_length=512)[0]
+    hop_times  = librosa.frames_to_time(
+        range(len(rms)), sr=sr, hop_length=512
+    )
+
+    pre_mask = hop_times < onset_start_s
+    if not pre_mask.any():
+        return None
+
+    pre_mean = float(np.mean(rms[pre_mask]))
+    if pre_mean < 1e-9:
+        return None
+
+    threshold = pre_mean * CONSTANTS.INTRO_ONSET_RMS_JUMP_RATIO
+    post_mask = hop_times >= onset_start_s
+    for t, r in zip(hop_times[post_mask], rms[post_mask]):
+        if r >= threshold:
+            return float(t)
+
+    return None

@@ -127,6 +127,14 @@ class SystemConstants:
     # Intro segments longer than this (seconds) are flagged
     INTRO_MAX_SECONDS: int = 15
 
+    # Onset-energy intro detection (#105)
+    # Minimum beat count before an RMS jump is eligible to signal intro end.
+    INTRO_ONSET_MIN_BEATS: int = 8
+    # RMS must exceed pre-onset mean by this ratio to count as a significant jump.
+    INTRO_ONSET_RMS_JUMP_RATIO: float = 2.0
+    # Two signals are considered "in agreement" when within this many seconds.
+    INTRO_CONFIDENCE_AGREEMENT_S: float = 2.0
+
     # ---- Discovery ------------------------------------------------------------
     MAX_SIMILAR_TRACKS: int = 5
 
@@ -148,6 +156,11 @@ class SystemConstants:
 
     # Top-N candidates to return per target duration (#148)
     SYNC_CUT_TOP_N: int = 3
+
+    # Bonus added to confidence when track loop structure is in the moderate range (#151).
+    # Moderate repetition (REPETITION_INDEX_MODERATE ≤ loop_score < REPETITION_INDEX_HIGH)
+    # means the track loops cleanly but isn't mechanical — most versatile for short spots.
+    SYNC_CUT_LOOP_BONUS: float = 0.05
 
     # ---- Section-aware repetition (#143, #145) --------------------------------
     # Minimum section duration (seconds) to attempt fingerprinting.
