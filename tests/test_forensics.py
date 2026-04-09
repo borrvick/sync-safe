@@ -851,3 +851,151 @@ class TestSegmentAiProbabilities:
         y = self._sine(60.0)
         result = segment_ai_probabilities(y, self.SR, window_s=20, hop_s=10)
         assert len(result) == 5
+
+# ---------------------------------------------------------------------------
+# RhythmAnalyzer._loops_windowed (#142)
+# ---------------------------------------------------------------------------
+
+class TestLoopsWindowed:
+    """Tests for the per-4-bar-window heatmap scorer."""
+
+    SR = 22_050
+
+    def _sine(self, seconds: float, freq: float = 440.0) -> np.ndarray:
+        t = np.linspace(0, seconds, int(seconds * self.SR), endpoint=False)
+        return (np.sin(2 * np.pi * freq * t)).astype(np.float32)
+
+    def _analyzer(self):
+        from services.forensics.detectors.rhythm import RhythmAnalyzer
+        return RhythmAnalyzer()
+
+    def test_returns_list_of_tuples(self) -> None:
+        y = self._sine(30.0)
+        tempo = np.array([120.0])
+        result = self._analyzer()._loops_windowed(y, self.SR, tempo)
+        assert isinstance(result, list)
+        if result:
+            assert all(isinstance(w, tuple) and len(w) == 2 for w in result)
+
+    def test_scores_in_unit_interval(self) -> None:
+        y = self._sine(30.0)
+        tempo = np.array([120.0])
+        result = self._analyzer()._loops_windowed(y, self.SR, tempo)
+        for _, score in result:
+            assert 0.0 <= score <= 1.0
+
+    def test_start_times_are_monotonic(self) -> None:
+        y = self._sine(60.0)
+        tempo = np.array([120.0])
+        result = self._analyzer()._loops_windowed(y, self.SR, tempo)
+        for i in range(1, len(result)):
+            assert result[i][0] > result[i - 1][0]
+
+    def test_too_short_returns_empty(self) -> None:
+        y = self._sine(0.5)
+        tempo = np.array([120.0])
+        result = self._analyzer()._loops_windowed(y, self.SR, tempo)
+        assert result == []
+
+    def test_out_of_range_bpm_returns_empty(self) -> None:
+        y = self._sine(30.0)
+        tempo = np.array([10.0])  # below LOOP_BPM_MIN
+        result = self._analyzer()._loops_windowed(y, self.SR, tempo)
+        assert result == []
+
+    def test_repeated_segment_scores_high(self) -> None:
+        # Two identical 4-bar windows → similarity should be near 1.0
+        y = self._sine(30.0)
+        tempo = np.array([120.0])
+        result = self._analyzer()._loops_windowed(y, self.SR, tempo)
+        if result:
+            assert any(score > 0.8 for _, score in result)
+
+
+# ---------------------------------------------------------------------------
+# RhythmAnalyzer._loops_by_section (#143, #145)
+# ---------------------------------------------------------------------------
+
+class TestLoopsBySection:
+    """Tests for section-aware inter + intra repetition analysis."""
+
+    SR = 22_050
+
+    def _sine(self, seconds: float, freq: float = 440.0) -> np.ndarray:
+        t = np.linspace(0, seconds, int(seconds * self.SR), endpoint=False)
+        return (np.sin(2 * np.pi * freq * t)).astype(np.float32)
+
+    def _sections(self):
+        from core.models import Section
+        return [
+            Section(label="intro",  start=0.0,  end=8.0),
+            Section(label="verse",  start=8.0,  end=24.0),
+            Section(label="chorus", start=24.0, end=40.0),
+            Section(label="verse",  start=40.0, end=56.0),
+            Section(label="chorus", start=56.0, end=72.0),
+        ]
+
+    def _analyzer(self):
+        from services.forensics.detectors.rhythm import RhythmAnalyzer
+        return RhythmAnalyzer()
+
+    def test_empty_sections_returns_empty_dicts(self) -> None:
+        y = self._sine(80.0)
+        tempo = np.array([120.0])
+        inter, intra = self._analyzer()._loops_by_section(y, self.SR, tempo, [])
+        assert inter == {}
+        assert intra == {}
+
+    def test_single_instance_label_omitted_from_inter(self) -> None:
+        # intro has only 1 instance → should not appear in inter results
+        y = self._sine(80.0)
+        tempo = np.array([120.0])
+        inter, _ = self._analyzer()._loops_by_section(y, self.SR, tempo, self._sections())
+        assert "intro" not in inter
+
+    def test_multi_instance_labels_in_inter(self) -> None:
+        y = self._sine(80.0)
+        tempo = np.array([120.0])
+        inter, _ = self._analyzer()._loops_by_section(y, self.SR, tempo, self._sections())
+        # verse and chorus each have 2 instances
+        assert "verse" in inter
+        assert "chorus" in inter
+
+    def test_inter_scores_in_unit_interval(self) -> None:
+        y = self._sine(80.0)
+        tempo = np.array([120.0])
+        inter, _ = self._analyzer()._loops_by_section(y, self.SR, tempo, self._sections())
+        for rep in inter.values():
+            assert 0.0 <= rep.max_similarity <= 1.0
+            assert 0.0 <= rep.mean_similarity <= 1.0
+            assert rep.pair_count >= 1
+
+    def test_intra_scores_in_unit_interval(self) -> None:
+        y = self._sine(80.0)
+        tempo = np.array([120.0])
+        _, intra = self._analyzer()._loops_by_section(y, self.SR, tempo, self._sections())
+        for rep in intra.values():
+            assert 0.0 <= rep.max_similarity <= 1.0
+            assert 0.0 <= rep.mean_similarity <= 1.0
+
+    def test_short_section_skipped(self) -> None:
+        from core.models import Section
+        sections = [
+            Section(label="verse", start=0.0, end=0.2),   # < SECTION_MIN_DURATION_S
+            Section(label="verse", start=0.3, end=0.5),   # < SECTION_MIN_DURATION_S
+        ]
+        y = self._sine(1.0)
+        tempo = np.array([120.0])
+        inter, intra = self._analyzer()._loops_by_section(y, self.SR, tempo, sections)
+        # Both verses too short — no pairs possible
+        assert "verse" not in inter
+
+    def test_returns_section_repetition_instances(self) -> None:
+        from core.models import SectionRepetition
+        y = self._sine(80.0)
+        tempo = np.array([120.0])
+        inter, intra = self._analyzer()._loops_by_section(y, self.SR, tempo, self._sections())
+        for rep in inter.values():
+            assert isinstance(rep, SectionRepetition)
+        for rep in intra.values():
+            assert isinstance(rep, SectionRepetition)

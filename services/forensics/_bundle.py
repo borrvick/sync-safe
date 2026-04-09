@@ -4,7 +4,9 @@ Shared signal carrier dataclass — all per-signal scores in one place.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from core.models import SectionRepetition
 
 
 @dataclass
@@ -35,3 +37,8 @@ class _SignalBundle:
     plr_std: float = -1.0
     voiced_noise_floor: float = -1.0  # mean spectral flatness in voiced 4–12 kHz frames
     is_vocal: bool = False            # True → pyin-detected vocal content
+
+    # Section-aware repetition (#142, #143, #145)
+    loop_window_scores: list[tuple[float, float]]       = field(default_factory=list)
+    section_similarities: dict[str, SectionRepetition]          = field(default_factory=dict)
+    section_internal_repetition: dict[str, SectionRepetition]   = field(default_factory=dict)
