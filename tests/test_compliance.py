@@ -33,8 +33,11 @@ from services.compliance import (
     _NER_RECOMMENDATIONS,
     _build_windows,
     _check_brand_keywords,
+    _classify_cut_type,
+    _compute_fade_severity,
     _compute_grade,
     _deduplicate_flags,
+    _section_energy_note,
 )
 
 
@@ -418,3 +421,119 @@ class TestLocationIssueType:
             for i in range(5)
         ]
         assert _compute_grade(flags) == "B"
+
+
+# ---------------------------------------------------------------------------
+# _compute_fade_severity (#103)
+# ---------------------------------------------------------------------------
+
+import numpy as np
+
+
+class TestComputeFadeSeverity:
+    def _call(
+        self,
+        rms: "np.ndarray",
+        overall_mean: float = 0.1,
+        sr: int = 44100,
+        hop: int = 512,
+        threshold_ratio: float = 0.10,
+        max_seconds: float = 60.0,
+    ) -> tuple[float, float]:
+        return _compute_fade_severity(rms, overall_mean, sr, hop, threshold_ratio, max_seconds)
+
+    def test_all_zero_rms_returns_zeros(self) -> None:
+        rms = np.zeros(1000)
+        sev, tail = self._call(rms, overall_mean=0.0)
+        assert sev == 0.0 and tail == 0.0
+
+    def test_empty_rms_returns_zeros(self) -> None:
+        rms = np.array([])
+        sev, tail = self._call(rms, overall_mean=0.0)
+        assert sev == 0.0 and tail == 0.0
+
+    def test_constant_rms_no_tail_above_threshold(self) -> None:
+        # uniform signal: last frame == first frame, no fall-off → no tail below threshold
+        rms = np.full(200, 0.5)
+        sev, tail = self._call(rms, overall_mean=0.5, threshold_ratio=0.10)
+        # All frames are above threshold, last_frame = 199, tail_seconds ≈ 0
+        assert tail == pytest.approx(0.0, abs=0.1)
+
+    def test_severity_clipped_to_one(self) -> None:
+        # rms that produces a very long tail — severity must not exceed 1.0
+        rms = np.linspace(1.0, 0.0, 10000)
+        sev, _ = self._call(rms, overall_mean=0.5, max_seconds=1.0)
+        assert sev <= 1.0
+
+    def test_severity_non_negative(self) -> None:
+        rms = np.random.default_rng(42).uniform(0, 1, 500)
+        sev, tail = self._call(rms, overall_mean=float(np.mean(rms)))
+        assert sev >= 0.0 and tail >= 0.0
+
+    def test_custom_max_seconds_scales_severity(self) -> None:
+        # Same rms → larger max_seconds → lower severity
+        rms = np.linspace(1.0, 0.01, 2000)
+        mean = float(np.mean(rms))
+        sev_short, _ = self._call(rms, overall_mean=mean, max_seconds=1.0)
+        sev_long,  _ = self._call(rms, overall_mean=mean, max_seconds=600.0)
+        assert sev_short >= sev_long
+
+    def test_returns_rounded_values(self) -> None:
+        rms = np.linspace(0.8, 0.05, 500)
+        sev, tail = self._call(rms, overall_mean=float(np.mean(rms)))
+        assert round(sev, 3) == sev
+        assert round(tail, 1) == tail
+
+
+# ---------------------------------------------------------------------------
+# _classify_cut_type (#104)
+# ---------------------------------------------------------------------------
+
+class TestClassifyCutType:
+    def test_no_beats_returns_mid_phrase(self) -> None:
+        assert _classify_cut_type(30.0, [], 0.075) == "mid_phrase_cut"
+
+    def test_exact_beat_match_returns_clean_cut(self) -> None:
+        beats = [0.5, 1.0, 1.5, 2.0, 30.0]
+        assert _classify_cut_type(30.0, beats, 0.075) == "clean_cut"
+
+    def test_within_tolerance_returns_clean_cut(self) -> None:
+        beats = [29.95, 30.5]
+        assert _classify_cut_type(30.0, beats, 0.075) == "clean_cut"  # 0.05 < 0.075
+
+    def test_outside_tolerance_returns_mid_phrase(self) -> None:
+        beats = [29.8, 30.9]
+        assert _classify_cut_type(30.0, beats, 0.075) == "mid_phrase_cut"  # 0.20 > 0.075
+
+    def test_tolerance_boundary_exclusive(self) -> None:
+        # exactly on tolerance edge → clean_cut (<=)
+        assert _classify_cut_type(10.0, [9.925], 0.075) == "clean_cut"
+
+    def test_single_beat_far_away(self) -> None:
+        assert _classify_cut_type(60.0, [1.0], 0.075) == "mid_phrase_cut"
+
+    def test_custom_tolerance_zero_requires_exact(self) -> None:
+        # tolerance=0 → only exact match qualifies
+        assert _classify_cut_type(5.0, [5.0], 0.0) == "clean_cut"
+        assert _classify_cut_type(5.0, [5.001], 0.0) == "mid_phrase_cut"
+
+
+# ---------------------------------------------------------------------------
+# _section_energy_note (#106)
+# ---------------------------------------------------------------------------
+
+class TestSectionEnergyNote:
+    def test_zero_stagnant(self) -> None:
+        assert _section_energy_note(0, 8) == "Good evolution"
+
+    def test_all_stagnant(self) -> None:
+        assert _section_energy_note(4, 4) == "All 4 windows flat"
+
+    def test_singular_window_all_stagnant(self) -> None:
+        assert _section_energy_note(1, 1) == "All 1 window flat"
+
+    def test_partial_stagnant(self) -> None:
+        assert _section_energy_note(3, 8) == "3 of 8 windows stagnant"
+
+    def test_partial_stagnant_singular(self) -> None:
+        assert _section_energy_note(1, 5) == "1 of 5 windows stagnant"

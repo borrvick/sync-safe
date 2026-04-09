@@ -109,6 +109,10 @@ class SystemConstants:
     FADE_SLOPE_THRESHOLD: float = -0.0005
     # Fade detection: tail-to-mean energy ratio below this → low tail energy
     FADE_RATIO_MAX: float = 0.25
+    # Fade severity: tail duration that maps to severity = 1.0 (#103)
+    FADE_SEVERITY_MAX_SECONDS: float = 60.0
+    # Fade severity: fraction of track mean RMS defining the "tail" region (#103)
+    FADE_TAIL_THRESHOLD_RATIO: float = 0.10
 
     # ---- Compliance: 4-8 Bar Energy Rule --------------------------------------
     # Minimum normalised spectral-contrast delta across a 4-bar window
@@ -116,6 +120,8 @@ class SystemConstants:
 
     # Beats grouped per analysis window (4 bars × 4 beats)
     BEATS_PER_WINDOW: int = 16
+    # Cut type detection: max seconds from track end to nearest beat → "clean_cut" (#104)
+    CUT_BEAT_TOLERANCE_S: float = 0.075
 
     # ---- Compliance: Intro ----------------------------------------------------
     # Intro segments longer than this (seconds) are flagged
