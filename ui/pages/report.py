@@ -1879,6 +1879,34 @@ def _sync_readiness_row(icon: str, label: str, value: str, ok: bool,
 # Discovery & Licensing
 # ---------------------------------------------------------------------------
 
+_SIMILAR_TRACK_SOURCE_COLORS: dict[str, str] = {
+    "lastfm":  "var(--muted)",
+    "spotify": "#1db954",        # Spotify brand green — fixed value, not a theme variable
+    "audio":   "var(--info)",
+}
+
+_SIMILAR_TRACK_SOURCE_LABELS: dict[str, str] = {
+    "lastfm":  "Last.fm",
+    "spotify": "Spotify",
+    "audio":   "Audio",
+}
+
+
+def _build_source_pill_html(source: str) -> str:
+    """Return a small source badge pill for a similar track row (#129).
+
+    Pure function — no I/O.
+    """
+    color = _SIMILAR_TRACK_SOURCE_COLORS.get(source, "var(--muted)")
+    label = _SIMILAR_TRACK_SOURCE_LABELS.get(source, html_mod.escape(source))
+    return (
+        f"<span style='font-family:Figtree,sans-serif;font-size:.52rem;"
+        f"color:{color};border:1px solid {color}66;border-radius:3px;"
+        f"padding:1px 5px;white-space:nowrap;opacity:.85;'>"
+        f"{label}</span>"
+    )
+
+
 _POPULARITY_TIER_COLORS: dict[str, str] = {
     "Emerging":   "var(--dim)",
     "Regional":   "var(--issue-location)",  # blue — defined in styles.py
@@ -2321,6 +2349,7 @@ def _render_legal_and_discovery(result: AnalysisResult) -> None:
                     f"padding:1px 5px;white-space:nowrap;'>"
                     f"{html_mod.escape(t.popularity_tier)}</span>"
                 )
+            source_pill = _build_source_pill_html(t.source)
             rows += f"""
             <div class="t-row">
               <div style="flex:1;min-width:0;">
@@ -2334,6 +2363,7 @@ def _render_legal_and_discovery(result: AnalysisResult) -> None:
                   <span style="font-family:'JetBrains Mono',monospace;font-size:.62rem;
                                color:var(--dim);">{sim_pct}</span>
                   {tier_pill}
+                  {source_pill}
                 </div>
               </div>
               {btn}
@@ -2651,7 +2681,7 @@ def _render_authorship_banner(authorship: Optional["AuthorshipResult"]) -> None:
     a_rob     = authorship.roberta_score
     rob_str   = f"Classifier: {a_rob:.0%} AI probability · " if a_rob is not None else ""
     n_sig     = authorship.signal_count
-    sig_str   = f"{n_sig} lyric flag{'s' if n_sig != 1 else ''}"
+    sig_str   = f"{n_sig:.1f} lyric flag{'s' if n_sig != 1.0 else ''}"
     sync_note = _AUTHORSHIP_SYNC_NOTES.get(av, "")
     confidence = _authorship_confidence_score(authorship)
 

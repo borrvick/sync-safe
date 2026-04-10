@@ -364,7 +364,7 @@ class SectionAuthorshipResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     verdict: AIVerdict                  = "Likely Human"
-    signal_count: int                   = 0
+    signal_count: float                 = 0.0  # float to support 0.5-weight phrase signal (#160)
     feature_notes: list[str]            = Field(default_factory=list)
     scores: dict[str, Optional[float]]  = Field(default_factory=dict)
 
@@ -378,7 +378,7 @@ class AuthorshipResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     verdict: AIVerdict                  = "Likely Human"
-    signal_count: int                   = 0
+    signal_count: float                 = 0.0  # float to support 0.5-weight phrase signal (#160)
     roberta_score: Optional[float]      = None  # None when model not run or insufficient data
     feature_notes: list[str]            = Field(default_factory=list)
     scores: dict[str, Optional[float]]  = Field(default_factory=dict)
@@ -513,6 +513,7 @@ class TrackCandidate(BaseModel):
     youtube_url: Optional[str]   = None   # None when yt-dlp URL lookup fails
     similarity: float            = 0.0    # 0.0–1.0; rank-derived from Last.fm order
     popularity_tier: Optional[str] = None  # "Emerging"|"Regional"|"Mainstream"|"Global"; None if unknown (#124)
+    source: str                  = "lastfm"  # "lastfm" | "spotify" | "audio" (#129)
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()

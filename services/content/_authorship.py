@@ -12,6 +12,7 @@ from core.models import AuthorshipResult, Section, SectionAuthorshipResult, Tran
 from core.utils import assign_sections
 
 from ._pure import (
+    _ai_phrase_score,
     _burstiness,
     _repetition_score,
     _rhyme_density,
@@ -97,14 +98,15 @@ class Authorship:
             )
 
         active_sections = sections or []
-        burst = _burstiness(lines)
-        uwr   = _unique_word_ratio(full_text)
-        rhyme = _rhyme_density(lines, transcript, active_sections)
-        rep   = _repetition_score(lines, transcript, active_sections)
-        rob   = self._run_roberta(full_text)
+        burst  = _burstiness(lines)
+        uwr    = _unique_word_ratio(full_text)
+        rhyme  = _rhyme_density(lines, transcript, active_sections)
+        rep    = _repetition_score(lines, transcript, active_sections)
+        rob    = self._run_roberta(full_text)
+        phrase = _ai_phrase_score(lines, full_text)
 
         ai_signals, feature_notes, scores = _score_signals(
-            burst=burst, uwr=uwr, rhyme=rhyme, rep=rep, rob=rob,
+            burst=burst, uwr=uwr, rhyme=rhyme, rep=rep, rob=rob, phrase=phrase,
         )
         verdict     = _compute_verdict(ai_signals)
         skip_reason = "short" if len(lines) < 8 else None
