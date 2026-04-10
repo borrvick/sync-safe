@@ -231,6 +231,11 @@ class SystemConstants:
     STEP_TIMEOUT_DISCOVERY_S: int     = 30
     STEP_TIMEOUT_LEGAL_S: int         = 30
 
+    # ---- DAW Export (#152) ----------------------------------------------------
+    # Default timecode framerate for Premiere Pro / DaVinci Resolve marker export.
+    # Editors can override via UI selectbox; this is the safe film-standard default.
+    EXPORT_FRAMERATE: float           = 24.0
+
     # ---- Loudness & Dialogue (LUFS / ITU-R BS.1770-4) ------------------------
     # Target integrated loudness per platform (LUFS)
     LUFS_SPOTIFY: float       = -14.0
@@ -793,7 +798,14 @@ class SystemConstants:
     REPETITION_SCORE_THRESHOLD: float = 0.40   # above → high repetition (AI signal)
     AI_SIGNAL_COUNT_CERTAIN: int = 3           # signals ≥ this → "Likely AI"
     AI_SIGNAL_COUNT_UNCERTAIN: int = 1         # signals ≥ this → "Uncertain"
-    AUTHORSHIP_MAX_SIGNALS: int = 6            # 4 heuristics + up to 2 from RoBERTa
+    AUTHORSHIP_MAX_SIGNALS: float = 6.5        # 4 heuristics + up to 2 from RoBERTa + 0.5 phrase
+    AI_PHRASE_WEIGHT: float = 0.5              # half-weight — softer than structural signals (#160)
+    SYNC_FEE_STRONG_CONFIDENCE_THRESHOLD: int = 60  # popularity_score ≥ this → "strong" tier confidence (#116)
+    # Section labels where repetition/rhyme is structurally expected — excluded
+    # from per-section AI signal scoring so chorus repeats don't inflate flags (#158).
+    CHORUS_OUTRO_LABELS: frozenset[str] = frozenset({
+        "chorus", "refrain", "hook", "outro",
+    })
 
 
 # Module-level singleton — import directly, never instantiate.

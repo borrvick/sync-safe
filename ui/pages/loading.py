@@ -601,7 +601,10 @@ def render_loading(source: Any) -> None:
     try:
         with step_timeout(_STEP_TIMEOUT_S["authorship"], "authorship"):
             from services.content import Authorship
-            authorship = Authorship().analyze(transcript)
+            authorship = Authorship().analyze(
+                transcript,
+                sections=structure.sections if structure else [],
+            )
     except StepTimeoutError as exc:
         st.toast("⏱ Authorship check timed out — AI-lyric detection skipped.", icon="⚠️")
         _advance("authorship", t0, error=str(exc))

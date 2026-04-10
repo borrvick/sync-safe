@@ -6,10 +6,13 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from typing import Optional
 
 import numpy as np
 
 from core.config import CONSTANTS
+from core.models import Section, TranscriptSegment
+from data.ai_lyric_phrases import AI_LYRIC_PHRASES
 
 
 def _burstiness(lines: list[str]) -> float | None:
@@ -39,14 +42,25 @@ def _unique_word_ratio(text: str) -> float | None:
     return len(set(words)) / len(words)
 
 
-def _rhyme_density(lines: list[str]) -> float | None:
+def _rhyme_density(
+    lines: list[str],
+    segments: Optional[list[TranscriptSegment]] = None,
+    sections: Optional[list[Section]] = None,
+) -> float | None:
     """
     Fraction of consecutive non-empty line pairs that share a rhyme ending.
 
+    When *segments* and *sections* are both provided, verse-only rhyme density
+    is computed (chorus/outro lines excluded) because dense rhyming in those
+    sections is structurally normal (#158). Falls back to full-track scoring
+    when the filtered verse set has fewer than 4 lines.
+
     Returns None when there are fewer than 4 non-empty lines with words.
     """
+    active_lines = _filter_verse_lines(lines, segments, sections)
+
     endings = []
-    for ln in lines:
+    for ln in active_lines:
         words = re.findall(r"\b\w+\b", ln.lower())
         if words:
             endings.append(words[-1])
@@ -64,18 +78,160 @@ def _rhyme_density(lines: list[str]) -> float | None:
     return rhymes / pairs if pairs else 0.0
 
 
-def _repetition_score(lines: list[str]) -> float:
+def _repetition_score(
+    lines: list[str],
+    segments: Optional[list[TranscriptSegment]] = None,
+    sections: Optional[list[Section]] = None,
+) -> float:
     """
     Fraction of lines whose normalised text appears more than once.
 
+    When *segments* and *sections* are both provided, only lines from
+    non-chorus/outro sections are scored — chorus repetition is intentional
+    and not an AI signal (#158). Falls back to full-track scoring when the
+    filtered verse set has fewer than 4 lines.
+
     Returns 0.0 when there are no non-empty lines.
     """
-    clean = [re.sub(r"\s+", " ", ln.strip().lower()) for ln in lines if ln.strip()]
+    active_lines = _filter_verse_lines(lines, segments, sections)
+    clean = [re.sub(r"\s+", " ", ln.strip().lower()) for ln in active_lines if ln.strip()]
     if not clean:
         return 0.0
     counts   = Counter(clean)
     repeated = sum(1 for ln in clean if counts[ln] > 1)
     return repeated / len(clean)
+
+
+def _filter_verse_lines(
+    lines: list[str],
+    segments: Optional[list[TranscriptSegment]],
+    sections: Optional[list[Section]],
+) -> list[str]:
+    """
+    Return only the lines that belong to non-chorus/outro sections (#158).
+
+    When sections are unavailable or the filtered set is too small (< 4 lines),
+    returns the original full list so the signal degrades gracefully rather than
+    silently hiding a real verse-level problem.
+
+    Pure helper — no I/O.
+    """
+    if not segments or not sections:
+        return lines
+
+    # Build a set of chorus/outro section time windows
+    chorus_windows: list[tuple[float, float]] = [
+        (sec.start, sec.end)
+        for sec in sections
+        if sec.label.lower() in CONSTANTS.CHORUS_OUTRO_LABELS
+    ]
+    if not chorus_windows:
+        return lines
+
+    # Map each segment to a line index (segments and lines are parallel)
+    if len(segments) != len(lines):
+        return lines  # mismatched lengths — fall back to full set
+
+    verse_lines: list[str] = []
+    for seg, ln in zip(segments, lines):
+        mid = (seg.start + seg.end) / 2
+        in_chorus = any(start <= mid < end for start, end in chorus_windows)
+        if not in_chorus:
+            verse_lines.append(ln)
+
+    return verse_lines if len(verse_lines) >= 4 else lines
+
+
+_CONSECUTIVE_SUBJECT_VERB = re.compile(r"^(i|you)\s+\w+\s+\w+", re.IGNORECASE)
+_MIN_CONSECUTIVE_SV_LINES: int = 3  # structural AI pattern threshold
+
+
+def _ai_phrase_score(lines: list[str], full_text: str) -> bool:
+    """
+    Return True when AI lyric clichés or structural patterns are detected (#160).
+
+    Two detection strategies:
+      1. Substring match against AI_LYRIC_PHRASES on the lowercased full text.
+      2. Structural: 3+ consecutive lines matching 'I/You [verb] [noun]' — a
+         telltale ChatGPT parallelism pattern.
+
+    Returns False when lines < 3 (structural check needs at least 3 lines).
+    Pure function — no I/O.
+    """
+    if full_text.strip():
+        text_lower = full_text.lower()
+        for phrase in AI_LYRIC_PHRASES:
+            if phrase in text_lower:
+                return True
+
+    if len(lines) < _MIN_CONSECUTIVE_SV_LINES:
+        return False
+
+    consecutive = 0
+    for line in lines:
+        if _CONSECUTIVE_SUBJECT_VERB.match(line.strip()):
+            consecutive += 1
+            if consecutive >= _MIN_CONSECUTIVE_SV_LINES:
+                return True
+        else:
+            consecutive = 0
+
+    return False
+
+
+def _score_heuristics(
+    burst: float | None,
+    uwr:   float | None,
+    rhyme: float | None,
+    rep:   float,
+) -> tuple[float, list[str]]:
+    """Score the four structural heuristics and return (signals, notes).
+
+    Pure helper — called only by _score_signals. No I/O.
+    """
+    signals: float     = 0.0
+    notes:   list[str] = []
+
+    if burst is not None:
+        if burst < CONSTANTS.BURSTINESS_CV_THRESHOLD:
+            signals += 1.0
+            notes.append(
+                f"Uniform line lengths — burstiness CV {burst:.2f} "
+                f"(AI threshold <{CONSTANTS.BURSTINESS_CV_THRESHOLD})"
+            )
+        else:
+            notes.append(f"Variable line lengths — burstiness CV {burst:.2f} ✓")
+
+    if uwr is not None:
+        if uwr < CONSTANTS.UNIQUE_WORD_RATIO_THRESHOLD:
+            signals += 1.0
+            notes.append(
+                f"Low vocabulary diversity — {uwr:.0%} unique words "
+                f"(AI threshold <{CONSTANTS.UNIQUE_WORD_RATIO_THRESHOLD:.0%})"
+            )
+        else:
+            notes.append(f"Healthy vocabulary diversity — {uwr:.0%} unique words ✓")
+
+    if rhyme is not None:
+        if rhyme > CONSTANTS.RHYME_DENSITY_THRESHOLD:
+            signals += 1.0
+            notes.append(
+                f"Over-rhymed — {rhyme:.0%} consecutive pairs rhyme "
+                f"(AI threshold >{CONSTANTS.RHYME_DENSITY_THRESHOLD:.0%})"
+            )
+        else:
+            notes.append(f"Natural rhyme density — {rhyme:.0%} ✓")
+
+    if rep > CONSTANTS.REPETITION_SCORE_THRESHOLD:
+        signals += 1.0
+        notes.append(
+            f"High repetition — {rep:.0%} of lines repeated "
+            f"(AI threshold >{CONSTANTS.REPETITION_SCORE_THRESHOLD:.0%})"
+        )
+    else:
+        notes.append(f"Normal repetition — {rep:.0%} of lines repeated ✓")
+
+    return signals, notes
 
 
 def _score_signals(
@@ -84,72 +240,45 @@ def _score_signals(
     rhyme: float | None,
     rep:   float,
     rob:   float | None,
-) -> tuple[int, list[str], dict[str, float | None]]:
+    phrase: bool = False,
+) -> tuple[float, list[str], dict[str, float | None]]:
     """
     Map feature values to AI signal counts and human-readable notes.
 
     Returns:
         (ai_signals, feature_notes, scores_dict)
+        ai_signals is float to support the 0.5-weight phrase signal (#160).
 
     Pure function — all thresholds come from CONSTANTS.
     """
-    ai_signals:    int       = 0
-    feature_notes: list[str] = []
     scores: dict[str, float | None] = {
         "burstiness":        round(burst, 3) if burst is not None else None,
         "unique_word_ratio": round(uwr, 3)   if uwr   is not None else None,
         "rhyme_density":     round(rhyme, 3) if rhyme is not None else None,
         "repetition_score":  round(rep, 3),
         "roberta_ai_prob":   round(rob, 3)   if rob   is not None else None,
+        "ai_phrase_score":   1.0             if phrase else 0.0,
     }
 
-    if burst is not None:
-        if burst < CONSTANTS.BURSTINESS_CV_THRESHOLD:
-            ai_signals += 1
-            feature_notes.append(
-                f"Uniform line lengths — burstiness CV {burst:.2f} "
-                f"(AI threshold <{CONSTANTS.BURSTINESS_CV_THRESHOLD})"
-            )
-        else:
-            feature_notes.append(f"Variable line lengths — burstiness CV {burst:.2f} ✓")
-
-    if uwr is not None:
-        if uwr < CONSTANTS.UNIQUE_WORD_RATIO_THRESHOLD:
-            ai_signals += 1
-            feature_notes.append(
-                f"Low vocabulary diversity — {uwr:.0%} unique words "
-                f"(AI threshold <{CONSTANTS.UNIQUE_WORD_RATIO_THRESHOLD:.0%})"
-            )
-        else:
-            feature_notes.append(f"Healthy vocabulary diversity — {uwr:.0%} unique words ✓")
-
-    if rhyme is not None:
-        if rhyme > CONSTANTS.RHYME_DENSITY_THRESHOLD:
-            ai_signals += 1
-            feature_notes.append(
-                f"Over-rhymed — {rhyme:.0%} consecutive pairs rhyme "
-                f"(AI threshold >{CONSTANTS.RHYME_DENSITY_THRESHOLD:.0%})"
-            )
-        else:
-            feature_notes.append(f"Natural rhyme density — {rhyme:.0%} ✓")
-
-    if rep > CONSTANTS.REPETITION_SCORE_THRESHOLD:
-        ai_signals += 1
-        feature_notes.append(
-            f"High repetition — {rep:.0%} of lines repeated "
-            f"(AI threshold >{CONSTANTS.REPETITION_SCORE_THRESHOLD:.0%})"
-        )
-    else:
-        feature_notes.append(f"Normal repetition — {rep:.0%} of lines repeated ✓")
+    ai_signals, feature_notes = _score_heuristics(burst, uwr, rhyme, rep)
 
     if rob is not None:
         if rob >= 0.70:
-            ai_signals += 2
+            ai_signals += 2.0
             feature_notes.append(f"Classifier: AI-generated ({rob:.0%} confidence)")
         elif rob >= 0.50:
-            ai_signals += 1
+            ai_signals += 1.0
             feature_notes.append(f"Classifier: borderline ({rob:.0%} AI probability)")
         else:
             feature_notes.append(f"Classifier: likely human ({rob:.0%} AI probability) ✓")
+
+    if phrase:
+        ai_signals += CONSTANTS.AI_PHRASE_WEIGHT
+        feature_notes.append(
+            f"AI-cliché phrase detected — soft signal "
+            f"(+{CONSTANTS.AI_PHRASE_WEIGHT} weight)"
+        )
+    else:
+        feature_notes.append("No AI-cliché phrases detected ✓")
 
     return ai_signals, feature_notes, scores

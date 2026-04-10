@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 
+from core.config import CONSTANTS
 from core.models import AnalysisResult, Section
 
 from ._mappers import _extract_track_data, _section_rows, _to_platform_row
@@ -62,13 +64,49 @@ def to_section_markers_csv(sections: list[Section]) -> bytes:
     return buf.getvalue().encode("utf-8-sig")
 
 
+def _build_sync_fee_section(result: AnalysisResult) -> dict:
+    """
+    Build the sync_fee section for the JSON export (#116).
+
+    Reads base ranges from result.popularity (already in the model).
+    multipliers_applied is null until the scenario slider UI (#110) is
+    implemented — callers should treat null as 'no adjustment applied'.
+
+    Pure function — no I/O, no Streamlit calls.
+    """
+    pop = result.popularity
+    if pop is None:
+        return {
+            "fee_tier":           None,
+            "tier_confidence":    None,
+            "base_range_low":     None,
+            "base_range_high":    None,
+            "adjusted_range_low": None,
+            "adjusted_range_high": None,
+            "multipliers_applied": None,
+            "popularity_score":   None,
+        }
+    return {
+        "fee_tier":           pop.tier,
+        "tier_confidence":    "strong" if pop.popularity_score >= CONSTANTS.SYNC_FEE_STRONG_CONFIDENCE_THRESHOLD else "moderate",
+        "base_range_low":     pop.sync_cost_low,
+        "base_range_high":    pop.sync_cost_high,
+        "adjusted_range_low": None,   # populated when #110 scenario sliders are added
+        "adjusted_range_high": None,
+        "multipliers_applied": None,
+        "popularity_score":   pop.popularity_score,
+    }
+
+
 def to_analysis_json(result: AnalysisResult) -> bytes:
     """
-    Serialise the full AnalysisResult to UTF-8 JSON bytes (#140, #123).
+    Serialise the full AnalysisResult to UTF-8 JSON bytes (#140, #123, #116).
 
     Includes all pipeline outputs: structure + merged sections, forensics,
     compliance, legal / rights data (ISRC, PRO, confidence), popularity,
-    audio quality, similar tracks, and sync cuts.
+    audio quality, similar tracks, sync cuts, and sync fee breakdown.
     Raw audio bytes are excluded — they are not a domain value.
     """
-    return result.to_json().encode("utf-8")
+    payload = json.loads(result.to_json())
+    payload["sync_fee"] = _build_sync_fee_section(result)
+    return json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")

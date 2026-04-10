@@ -19,6 +19,7 @@ from typing import Optional
 import streamlit as st
 
 from core.config import CONSTANTS, get_settings
+from core.utils import assign_sections
 from core.models import (
     AiSegment,
     AnalysisResult,
@@ -38,6 +39,8 @@ from core.models import (
 )
 from services.export import (
     PLATFORM_SCHEMAS,
+    _build_davinci_drt,
+    _build_premiere_xml,
     to_analysis_json,
     to_platform_csv,
     to_section_markers_csv,
@@ -211,6 +214,85 @@ def _inject_og_tags(result: AnalysisResult) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Combined authorship banner (#161)
+# ---------------------------------------------------------------------------
+
+def combined_authorship_verdict(
+    forensics: Optional["ForensicsResult"],
+    authorship: Optional["AuthorshipResult"],
+) -> Optional[tuple[str, str]]:
+    """Collapse audio-AI (forensics) and lyric-AI (authorship) into one verdict.
+
+    Returns:
+        (verdict_text, css_color) or None when neither result is available.
+
+    Rules:
+        - Either result flagged as AI → "AI-Generated Content Detected", danger color.
+        - Both results available and both clear → "No AI Signals Detected", ok color.
+        - Mixed or insufficient → "AI Signals Uncertain", caution color.
+
+    Pure function — no I/O, no side effects.
+    """
+    if forensics is None and authorship is None:
+        return None
+
+    fv = forensics.verdict if forensics else None
+    av = authorship.verdict if authorship else None
+
+    audio_ai   = fv in ("Likely AI", "AI")
+    lyric_ai   = av in ("Likely AI",)
+    audio_ok   = fv in ("Likely Not AI", "Not AI")
+    lyric_ok   = av in ("Likely Human",)
+    audio_skip = fv is None or fv == "Insufficient data"
+    lyric_skip = av is None or av in ("Insufficient data", "Uncertain")
+
+    if audio_ai or lyric_ai:
+        return "AI-Generated Content Detected", "var(--danger)"
+
+    if audio_ok and (lyric_ok or lyric_skip):
+        return "No Audio AI Signals Detected", "var(--ok)"
+
+    if lyric_ok and audio_skip:
+        return "No Lyric AI Signals Detected", "var(--ok)"
+
+    return "AI Signals Uncertain", "var(--grade-c)"
+
+
+def _render_combined_authorship_banner(result: "AnalysisResult") -> None:
+    """Render a combined audio + lyric AI verdict card (#161)."""
+    outcome = combined_authorship_verdict(result.forensics, result.authorship)
+    if outcome is None:
+        return
+
+    verdict, color = outcome
+    fv = result.forensics.verdict if result.forensics else "—"
+    av = result.authorship.verdict if result.authorship else "—"
+
+    rows_html = (
+        f"<div style='display:flex;gap:24px;flex-wrap:wrap;margin-top:10px;'>"
+        f"<span style='font-family:\"Figtree\",sans-serif;font-size:.74rem;color:var(--muted);'>"
+        f"Audio AI: <strong style='color:var(--text);'>{html_mod.escape(fv)}</strong></span>"
+        f"<span style='font-family:\"Figtree\",sans-serif;font-size:.74rem;color:var(--muted);'>"
+        f"Lyric AI: <strong style='color:var(--text);'>{html_mod.escape(av)}</strong></span>"
+        f"</div>"
+    )
+
+    st.markdown(f"""
+    <div style="border:1px solid {color}44;border-radius:12px;background:{color}0D;
+                padding:14px 20px;margin-bottom:14px;">
+      <div style="display:flex;align-items:center;gap:14px;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:1rem;font-weight:700;
+                    color:{color};flex-shrink:0;">{html_mod.escape(verdict)}</div>
+        <div style="font-family:'Chakra Petch',monospace;font-size:.52rem;font-weight:600;
+                    letter-spacing:.12em;text-transform:uppercase;color:var(--dim);">
+          Combined AI Assessment</div>
+      </div>
+      {rows_html}
+    </div>
+    """, unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
@@ -228,6 +310,7 @@ def render_report(
     st.markdown('<span id="main-content" tabindex="-1"></span>', unsafe_allow_html=True)
     _render_audio_player(audio)
     _render_sync_snapshot(result)
+    _render_combined_authorship_banner(result)
 
     with st.expander("Track Overview", expanded=True):
         _section_tooltip(
@@ -1796,6 +1879,34 @@ def _sync_readiness_row(icon: str, label: str, value: str, ok: bool,
 # Discovery & Licensing
 # ---------------------------------------------------------------------------
 
+_SIMILAR_TRACK_SOURCE_COLORS: dict[str, str] = {
+    "lastfm":  "var(--muted)",
+    "spotify": "#1db954",        # Spotify brand green — fixed value, not a theme variable
+    "audio":   "var(--info)",
+}
+
+_SIMILAR_TRACK_SOURCE_LABELS: dict[str, str] = {
+    "lastfm":  "Last.fm",
+    "spotify": "Spotify",
+    "audio":   "Audio",
+}
+
+
+def _build_source_pill_html(source: str) -> str:
+    """Return a small source badge pill for a similar track row (#129).
+
+    Pure function — no I/O.
+    """
+    color = _SIMILAR_TRACK_SOURCE_COLORS.get(source, "var(--muted)")
+    label = _SIMILAR_TRACK_SOURCE_LABELS.get(source, html_mod.escape(source))
+    return (
+        f"<span style='font-family:Figtree,sans-serif;font-size:.52rem;"
+        f"color:{color};border:1px solid {color}66;border-radius:3px;"
+        f"padding:1px 5px;white-space:nowrap;opacity:.85;'>"
+        f"{label}</span>"
+    )
+
+
 _POPULARITY_TIER_COLORS: dict[str, str] = {
     "Emerging":   "var(--dim)",
     "Regional":   "var(--issue-location)",  # blue — defined in styles.py
@@ -2238,6 +2349,7 @@ def _render_legal_and_discovery(result: AnalysisResult) -> None:
                     f"padding:1px 5px;white-space:nowrap;'>"
                     f"{html_mod.escape(t.popularity_tier)}</span>"
                 )
+            source_pill = _build_source_pill_html(t.source)
             rows += f"""
             <div class="t-row">
               <div style="flex:1;min-width:0;">
@@ -2251,6 +2363,7 @@ def _render_legal_and_discovery(result: AnalysisResult) -> None:
                   <span style="font-family:'JetBrains Mono',monospace;font-size:.62rem;
                                color:var(--dim);">{sim_pct}</span>
                   {tier_pill}
+                  {source_pill}
                 </div>
               </div>
               {btn}
@@ -2309,6 +2422,41 @@ def _render_lyric_section(result: AnalysisResult) -> None:
 # Lyric section sub-renderers (extracted to keep each function under 40 lines)
 # ---------------------------------------------------------------------------
 
+def _render_theme_bars(theme_scores: dict[str, float]) -> None:
+    """
+    Render category-coloured pill + CSS-transform confidence bar for each theme (#167/#168).
+
+    Uses transform:scaleX() instead of width: to avoid layout thrashing.
+    Each bar has role="progressbar" + aria-valuenow for screen reader accessibility.
+    Only themes at or above THEME_MIN_CONFIDENCE are rendered.
+    """
+    for theme, score in sorted(theme_scores.items(), key=lambda x: -x[1]):
+        if score < CONSTANTS.THEME_MIN_CONFIDENCE:
+            continue
+        tax_entry  = THEME_TAXONOMY.get(theme, {})
+        category   = tax_entry.get("category", "")
+        pill_color = _THEME_CATEGORY_COLORS.get(category, "var(--surface-2)")
+        bar_pct    = int(score * 100)
+        scale      = round(score, 3)
+        st.markdown(
+            f'<div style="margin-bottom:6px;">'
+            f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">'
+            f'<span style="display:inline-block;padding:2px 9px;border-radius:10px;'
+            f'font-size:0.76rem;background:{pill_color};color:var(--text);">'
+            f'{html_mod.escape(theme)}</span>'
+            f'<span style="font-size:0.72rem;color:var(--dim);" aria-hidden="true">{bar_pct}%</span>'
+            f'</div>'
+            f'<div style="height:4px;border-radius:2px;background:var(--surface-2);overflow:hidden;"'
+            f' role="progressbar" aria-valuenow="{bar_pct}" aria-valuemin="0" aria-valuemax="100"'
+            f' aria-label="{html_mod.escape(theme)} confidence">'
+            f'<div style="height:4px;border-radius:2px;background:{pill_color};'
+            f'transform:scaleX({scale});transform-origin:left;transition:transform .3s;"></div>'
+            f'</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+
 def _render_theme_mood(result: AnalysisResult) -> None:
     """Render the Theme & Mood card. Silently skips when theme_mood is None."""
     tm = result.theme_mood
@@ -2343,28 +2491,7 @@ def _render_theme_mood(result: AnalysisResult) -> None:
 
     # Category-coloured theme pills + per-theme confidence bars
     if tm.theme_scores:
-        for theme, score in sorted(tm.theme_scores.items(), key=lambda x: -x[1]):
-            if score < CONSTANTS.THEME_MIN_CONFIDENCE:
-                continue
-            tax_entry  = THEME_TAXONOMY.get(theme, {})
-            category   = tax_entry.get("category", "")
-            pill_color = _THEME_CATEGORY_COLORS.get(category, "var(--surface-2)")
-            bar_pct    = int(score * 100)
-            st.markdown(
-                f'<div style="margin-bottom:6px;">'
-                f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">'
-                f'<span style="display:inline-block;padding:2px 9px;border-radius:10px;'
-                f'font-size:0.76rem;background:{pill_color};color:var(--text);">'
-                f'{html_mod.escape(theme)}</span>'
-                f'<span style="font-size:0.72rem;color:var(--dim);">{bar_pct}%</span>'
-                f'</div>'
-                f'<div style="height:4px;border-radius:2px;background:var(--surface-2);width:100%;">'
-                f'<div style="height:4px;border-radius:2px;background:{pill_color};'
-                f'width:{bar_pct}%;transition:width .3s;"></div>'
-                f'</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
+        _render_theme_bars(tm.theme_scores)
     elif tm.themes:
         chips = "".join(
             f'<span style="display:inline-block;margin:2px 4px 2px 0;padding:3px 10px;'
@@ -2506,6 +2633,45 @@ def _authorship_confidence_score(authorship: "AuthorshipResult") -> Optional[flo
     return (1.0 - raw) if is_human else raw
 
 
+_SECTION_PILL_ICONS: dict[str, str] = {
+    "Likely Human":      "✓",
+    "Uncertain":         "▲",
+    "Likely AI":         "⚠",
+    "Insufficient data": "–",
+}
+
+
+def _build_section_pills_html(authorship: "AuthorshipResult") -> str:
+    """Return an HTML pill row for per-section authorship verdicts (#156).
+
+    Returns empty string when no per-section data is available.
+    Pure function — no I/O.
+    """
+    per_section = authorship.per_section
+    if not per_section:
+        return ""
+
+    pills: list[str] = []
+    for label, sec in per_section.items():
+        color     = authorship_color(sec.verdict)
+        icon      = _SECTION_PILL_ICONS.get(sec.verdict, "–")
+        aria_lbl  = html_mod.escape(f"{label}: {sec.verdict}")
+        pills.append(
+            f"<span aria-label='{aria_lbl}' style='display:inline-flex;align-items:center;gap:4px;"
+            f"padding:2px 8px;border-radius:20px;border:1px solid {color}44;"
+            f"background:{color}0F;font-family:\"Chakra Petch\",monospace;"
+            f"font-size:.55rem;font-weight:600;letter-spacing:.08em;"
+            f"text-transform:uppercase;color:{color};white-space:nowrap;'>"
+            f"<span aria-hidden='true'>{html_mod.escape(label)}&nbsp;{icon}</span></span>"
+        )
+
+    return (
+        f"<div style='display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;'>"
+        + "".join(pills)
+        + "</div>"
+    )
+
+
 def _render_authorship_banner(authorship: Optional["AuthorshipResult"]) -> None:
     if not authorship:
         return
@@ -2515,7 +2681,7 @@ def _render_authorship_banner(authorship: Optional["AuthorshipResult"]) -> None:
     a_rob     = authorship.roberta_score
     rob_str   = f"Classifier: {a_rob:.0%} AI probability · " if a_rob is not None else ""
     n_sig     = authorship.signal_count
-    sig_str   = f"{n_sig} lyric flag{'s' if n_sig != 1 else ''}"
+    sig_str   = f"{n_sig:.1f} lyric flag{'s' if n_sig != 1.0 else ''}"
     sync_note = _AUTHORSHIP_SYNC_NOTES.get(av, "")
     confidence = _authorship_confidence_score(authorship)
 
@@ -2566,6 +2732,9 @@ def _render_authorship_banner(authorship: Optional["AuthorshipResult"]) -> None:
         if sync_note else ""
     )
 
+    # Per-section pill row (#156) — ✓ Likely Human, ▲ Uncertain, ⚠ Likely AI
+    section_pills_html = _build_section_pills_html(authorship)
+
     # Verdict header — always visible (#163)
     st.markdown(f"""
     <div style="border:1px solid {av_color}22;border-radius:10px;background:{av_color}08;
@@ -2582,6 +2751,7 @@ def _render_authorship_banner(authorship: Optional["AuthorshipResult"]) -> None:
         </div>
       </div>
       {conf_bar_html}
+      {section_pills_html}
       {sync_suffix}
     </div>
     """, unsafe_allow_html=True)
@@ -2622,7 +2792,7 @@ def _render_lyric_column(
         )
         return
 
-    for sec_label, segs in _assign_sections(segments, sections):
+    for sec_label, segs in assign_sections(segments, sections):
         st.markdown(
             f"<div style='font-family:\"Chakra Petch\",monospace;font-size:.6rem;"
             f"font-weight:700;color:var(--accent);letter-spacing:.14em;text-transform:uppercase;"
@@ -3219,10 +3389,66 @@ def _render_export_buttons(result: AnalysisResult) -> None:
         ),
     )
 
+    # DAW marker export — Premiere Pro XML + DaVinci Resolve DRT (#152)
+    _render_daw_export(result, track_slug)
+
     # Tagged file download — only available for direct uploads (not YouTube, which
     # produces a lossy MP3 transcode that is not re-exportable as a deliverable).
     if result.audio.source != _SOURCE_YOUTUBE:
         _render_tagged_download(result, track_slug)
+
+
+_DAW_FRAMERATES: list[float] = [24.0, 25.0, 29.97, 30.0]
+
+
+def _render_daw_export(result: AnalysisResult, track_slug: str) -> None:
+    """Render Premiere Pro XML and DaVinci Resolve DRT download buttons (#152)."""
+    cuts = result.sync_cuts
+    if not cuts:
+        return
+
+    if "daw_framerate" not in st.session_state:
+        st.session_state["daw_framerate"] = CONSTANTS.EXPORT_FRAMERATE
+
+    st.markdown(
+        '<div style="font-size:0.72rem;color:var(--dim);text-transform:uppercase;'
+        'letter-spacing:.06em;margin:18px 0 10px;">DAW Marker Export</div>',
+        unsafe_allow_html=True,
+    )
+
+    col_fps, col_premiere, col_davinci = st.columns([1, 2, 2], gap="medium")
+
+    with col_fps:
+        fps = st.selectbox(
+            "Frame rate",
+            options=_DAW_FRAMERATES,
+            index=_DAW_FRAMERATES.index(st.session_state["daw_framerate"]),
+            key="daw_framerate_select",
+            help="Match your editing project's frame rate setting.",
+        )
+        st.session_state["daw_framerate"] = fps
+
+    with col_premiere:
+        xml_str = _build_premiere_xml(cuts, fps)
+        st.download_button(
+            label="⬇ Premiere Pro XML",
+            data=xml_str.encode("utf-8"),
+            file_name=f"{track_slug}-premiere-markers.xml",
+            mime="application/xml",
+            use_container_width=True,
+            help="Import via Markers panel → Import Markers from File",
+        )
+
+    with col_davinci:
+        drt_str = _build_davinci_drt(cuts, fps)
+        st.download_button(
+            label="⬇ DaVinci Resolve DRT",
+            data=drt_str.encode("utf-8"),
+            file_name=f"{track_slug}-davinci-markers.drt",
+            mime="text/plain",
+            use_container_width=True,
+            help="Import via Timeline → Import → Timeline Markers from EDL",
+        )
 
 
 def _render_platform_export(result: AnalysisResult, track_slug: str) -> None:
