@@ -8,7 +8,8 @@ import numpy as np
 
 from core.config import ModelParams
 from core.exceptions import ModelInferenceError
-from core.models import AuthorshipResult, TranscriptSegment
+from core.models import AuthorshipResult, Section, SectionAuthorshipResult, TranscriptSegment
+from core.utils import assign_sections
 
 from ._pure import (
     _burstiness,
@@ -51,15 +52,23 @@ class Authorship:
     # Public interface (AuthorshipAnalyzer protocol)
     # ------------------------------------------------------------------
 
-    def analyze(self, transcript: list[TranscriptSegment]) -> AuthorshipResult:
+    def analyze(
+        self,
+        transcript: list[TranscriptSegment],
+        sections: list[Section] | None = None,
+    ) -> AuthorshipResult:
         """
         Run all authorship signals and return a typed AuthorshipResult.
 
         Args:
             transcript: Whisper segments (text fields are the model input).
+            sections:   allin1 structural sections, used for per-section scoring
+                        (#156) and section-aware signal filtering (#158).
+                        Defaults to None (full-track analysis only).
 
         Returns:
-            AuthorshipResult with verdict, signal count, and per-signal data.
+            AuthorshipResult with verdict, signal count, per-signal data, and
+            optional per_section breakdown when sections are provided.
 
         Raises:
             ModelInferenceError: if the RoBERTa model fails to load.
@@ -68,7 +77,6 @@ class Authorship:
         full_text = "\n".join(lines)
 
         if not lines or len(full_text) < 80:
-            # Whisper returned nothing (or only whitespace) — likely instrumental
             return AuthorshipResult(
                 verdict="Insufficient data",
                 signal_count=0,
@@ -88,24 +96,19 @@ class Authorship:
                 skip_reason="too_short",
             )
 
+        active_sections = sections or []
         burst = _burstiness(lines)
         uwr   = _unique_word_ratio(full_text)
-        rhyme = _rhyme_density(lines)
-        rep   = _repetition_score(lines)
-        rob   = self._run_roberta(full_text)   # may raise ModelInferenceError
+        rhyme = _rhyme_density(lines, transcript, active_sections)
+        rep   = _repetition_score(lines, transcript, active_sections)
+        rob   = self._run_roberta(full_text)
 
         ai_signals, feature_notes, scores = _score_signals(
-            burst=burst,
-            uwr=uwr,
-            rhyme=rhyme,
-            rep=rep,
-            rob=rob,
+            burst=burst, uwr=uwr, rhyme=rhyme, rep=rep, rob=rob,
         )
-
-        verdict = _compute_verdict(ai_signals)
-
-        # 4–7 lines: analysis runs but data is sparse — flag as advisory
+        verdict     = _compute_verdict(ai_signals)
         skip_reason = "short" if len(lines) < 8 else None
+        per_section = _analyze_per_section(transcript, active_sections)
 
         return AuthorshipResult(
             verdict=verdict,
@@ -114,6 +117,7 @@ class Authorship:
             feature_notes=feature_notes,
             scores=scores,
             skip_reason=skip_reason,
+            per_section=per_section,
         )
 
     # ------------------------------------------------------------------
@@ -186,3 +190,61 @@ class Authorship:
                     "original_error": str(exc),
                 },
             ) from exc
+
+
+# ---------------------------------------------------------------------------
+# Per-section authorship — pure helper (#156)
+# ---------------------------------------------------------------------------
+
+_MIN_SECTION_LINES: int = 4
+_MIN_SECTION_CHARS: int = 80
+
+
+def _analyze_per_section(
+    transcript: list[TranscriptSegment],
+    sections: list[Section],
+) -> dict[str, SectionAuthorshipResult]:
+    """
+    Run linguistic signals independently per allin1 section (#156).
+
+    All instances of the same label (e.g. every CHORUS) are merged into a
+    single bucket before scoring — avoids penalising intentional structural
+    repetition across multiple chorus plays.
+
+    Sections below the minimum data threshold (_MIN_SECTION_LINES lines or
+    _MIN_SECTION_CHARS characters) are omitted from the result entirely.
+    RoBERTa is NOT run per-section (GPU cost is prohibitive at this granularity).
+
+    Pure function — no GPU, no I/O.
+    """
+    if not sections:
+        return {}
+
+    # Merge same-label sections into buckets
+    buckets: dict[str, list[TranscriptSegment]] = {}
+    for label, segs in assign_sections(transcript, sections):
+        buckets.setdefault(label, []).extend(segs)
+
+    result: dict[str, SectionAuthorshipResult] = {}
+    for label, segs in buckets.items():
+        lines     = [seg.text.strip() for seg in segs if seg.text.strip()]
+        full_text = "\n".join(lines)
+        if len(lines) < _MIN_SECTION_LINES or len(full_text) < _MIN_SECTION_CHARS:
+            continue  # insufficient data — omit rather than produce noise
+
+        burst = _burstiness(lines)
+        uwr   = _unique_word_ratio(full_text)
+        rhyme = _rhyme_density(lines)   # no section filtering within a single section
+        rep   = _repetition_score(lines)
+
+        ai_signals, feature_notes, scores = _score_signals(
+            burst=burst, uwr=uwr, rhyme=rhyme, rep=rep, rob=None,
+        )
+        result[label] = SectionAuthorshipResult(
+            verdict=_compute_verdict(ai_signals),
+            signal_count=ai_signals,
+            feature_notes=feature_notes,
+            scores=scores,
+        )
+
+    return result

@@ -6,10 +6,12 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from typing import Optional
 
 import numpy as np
 
 from core.config import CONSTANTS
+from core.models import Section, TranscriptSegment
 
 
 def _burstiness(lines: list[str]) -> float | None:
@@ -39,14 +41,25 @@ def _unique_word_ratio(text: str) -> float | None:
     return len(set(words)) / len(words)
 
 
-def _rhyme_density(lines: list[str]) -> float | None:
+def _rhyme_density(
+    lines: list[str],
+    segments: Optional[list[TranscriptSegment]] = None,
+    sections: Optional[list[Section]] = None,
+) -> float | None:
     """
     Fraction of consecutive non-empty line pairs that share a rhyme ending.
 
+    When *segments* and *sections* are both provided, verse-only rhyme density
+    is computed (chorus/outro lines excluded) because dense rhyming in those
+    sections is structurally normal (#158). Falls back to full-track scoring
+    when the filtered verse set has fewer than 4 lines.
+
     Returns None when there are fewer than 4 non-empty lines with words.
     """
+    active_lines = _filter_verse_lines(lines, segments, sections)
+
     endings = []
-    for ln in lines:
+    for ln in active_lines:
         words = re.findall(r"\b\w+\b", ln.lower())
         if words:
             endings.append(words[-1])
@@ -64,18 +77,68 @@ def _rhyme_density(lines: list[str]) -> float | None:
     return rhymes / pairs if pairs else 0.0
 
 
-def _repetition_score(lines: list[str]) -> float:
+def _repetition_score(
+    lines: list[str],
+    segments: Optional[list[TranscriptSegment]] = None,
+    sections: Optional[list[Section]] = None,
+) -> float:
     """
     Fraction of lines whose normalised text appears more than once.
 
+    When *segments* and *sections* are both provided, only lines from
+    non-chorus/outro sections are scored — chorus repetition is intentional
+    and not an AI signal (#158). Falls back to full-track scoring when the
+    filtered verse set has fewer than 4 lines.
+
     Returns 0.0 when there are no non-empty lines.
     """
-    clean = [re.sub(r"\s+", " ", ln.strip().lower()) for ln in lines if ln.strip()]
+    active_lines = _filter_verse_lines(lines, segments, sections)
+    clean = [re.sub(r"\s+", " ", ln.strip().lower()) for ln in active_lines if ln.strip()]
     if not clean:
         return 0.0
     counts   = Counter(clean)
     repeated = sum(1 for ln in clean if counts[ln] > 1)
     return repeated / len(clean)
+
+
+def _filter_verse_lines(
+    lines: list[str],
+    segments: Optional[list[TranscriptSegment]],
+    sections: Optional[list[Section]],
+) -> list[str]:
+    """
+    Return only the lines that belong to non-chorus/outro sections (#158).
+
+    When sections are unavailable or the filtered set is too small (< 4 lines),
+    returns the original full list so the signal degrades gracefully rather than
+    silently hiding a real verse-level problem.
+
+    Pure helper — no I/O.
+    """
+    if not segments or not sections:
+        return lines
+
+    # Build a set of chorus/outro section time windows
+    chorus_windows: list[tuple[float, float]] = [
+        (sec.start, sec.end)
+        for sec in sections
+        if sec.label.lower() in CONSTANTS.CHORUS_OUTRO_LABELS
+    ]
+    if not chorus_windows:
+        return lines
+
+    # Map each segment to a line index (segments and lines are parallel)
+    if len(segments) != len(lines):
+        return lines  # mismatched lengths — fall back to full set
+
+    verse_lines: list[str] = []
+    for seg, ln in zip(segments, lines):
+        mid = (seg.start + seg.end) / 2
+        in_chorus = any(start <= mid < end for start, end in chorus_windows)
+        if not in_chorus:
+            verse_lines.append(ln)
+
+    return verse_lines if len(verse_lines) >= 4 else lines
 
 
 def _score_signals(
