@@ -636,6 +636,17 @@ def render_loading(source: Any) -> None:
         _advance("theme_mood", t0)
 
     # ── Step 8: Track discovery ───────────────────────────────────────────
+    # Best-effort Essentia mood extraction (#74) — always non-fatal.
+    # Runs before the timed discovery step; feeds mood_tags into find_similar().
+    _mood_tags: list[str] = []
+    try:
+        from services.essentia_similarity import EssentiaSimilarity  # noqa: PLC0415
+        with step_timeout(CONSTANTS.ESSENTIA_FEATURE_TIMEOUT_S, "essentia_mood"):
+            _feats = EssentiaSimilarity().extract_features(audio.raw)
+            _mood_tags = _feats.get("mood_tags", [])
+    except Exception:  # noqa: BLE001 — mood extraction is always best-effort
+        pass
+
     _tick("Track Discovery", "discovery")
     t0 = time.time()
     similar = []
@@ -643,7 +654,7 @@ def render_loading(source: Any) -> None:
     try:
         with step_timeout(_STEP_TIMEOUT_S["discovery"], "discovery"):
             from services.discovery import Discovery
-            similar = Discovery().find_similar(title, artist) or []
+            similar = Discovery().find_similar(title, artist, mood_tags=_mood_tags) or []
     except StepTimeoutError as exc:
         st.toast("⏱ Track discovery timed out — similar tracks unavailable.", icon="⚠️")
         _advance("discovery", t0, error=str(exc))

@@ -72,14 +72,22 @@ class Discovery:
     # Public interface (TrackDiscovery protocol)
     # ------------------------------------------------------------------
 
-    def find_similar(self, title: str, artist: str) -> list[TrackCandidate]:
+    def find_similar(
+        self,
+        title: str,
+        artist: str,
+        mood_tags: list[str] | None = None,
+    ) -> list[TrackCandidate]:
         """
         Return up to CONSTANTS.MAX_SIMILAR_TRACKS similar tracks with
         resolved YouTube URLs.
 
         Args:
-            title:  Track title string.
-            artist: Artist name string.
+            title:     Track title string.
+            artist:    Artist name string.
+            mood_tags: Optional mood labels from Essentia feature extraction (#74).
+                       When provided, feeds the first tag into Last.fm
+                       tag.getTopArtists as a third discovery source.
 
         Returns:
             List of TrackCandidate objects ordered by similarity descending.
@@ -123,13 +131,29 @@ class Discovery:
                         track_id, token, limit=CONSTANTS.MAX_SIMILAR_TRACKS
                     )
 
+        # ── Essentia mood-tag discovery (#74) ─────────────────────────────────
+        # Use the top mood tag to query Last.fm tag.getTopArtists → top tracks.
+        # Falls back silently — mood_tags is None when Essentia is not installed
+        # or extraction failed upstream.
+        mood_pairs: list[tuple[str, str]] = []
+        if mood_tags:
+            mood_pairs = _fetch_lastfm_tag_artists(mood_tags[0], api_key)
+
+        # Three-way merge: Last.fm track similarity → Spotify → mood-tag path.
+        # _merge_candidates accepts a flat second list — concatenate spotify and
+        # mood pairs so all three sources are deduped in a single pass.
         triples = _merge_candidates(
-            lastfm_triples, spotify_pairs, max_results=CONSTANTS.MAX_SIMILAR_TRACKS
+            lastfm_triples,
+            spotify_pairs + mood_pairs,
+            max_results=CONSTANTS.MAX_SIMILAR_TRACKS,
         )
 
-        # Build Last.fm key set once — used per-candidate to detect Spotify-sourced entries.
+        # Build source lookup sets once — used per-candidate to assign source label.
         lfm_keys = {
             (a.lower().strip(), ttl.lower().strip()) for a, ttl, _ in lastfm_triples
+        }
+        mood_keys = {
+            (a.lower().strip(), ttl.lower().strip()) for a, ttl in mood_pairs
         }
 
         candidates: list[TrackCandidate] = []
@@ -139,15 +163,15 @@ class Discovery:
             # expose a numeric score in the getSimilar response we consume
             similarity = round(1.0 - (i / max(len(triples), 1)) * 0.5, 3)
             # Tier from Last.fm listeners already in the similar-tracks response (#124).
-            # None when listeners=0 (fallback path or Spotify-sourced entry).
+            # None when listeners=0 (fallback path, Spotify-sourced, or mood-sourced).
             tier = _listeners_to_tier(listeners) if listeners > 0 else None
-            # Source: if this came from the Spotify-only portion of the merge,
-            # listeners will be 0 and the artist+title won't be in lastfm_triples.
-            source = (
-                "lastfm"
-                if (sim_artist.lower().strip(), sim_title.lower().strip()) in lfm_keys
-                else "spotify"
-            )
+            norm_key = (sim_artist.lower().strip(), sim_title.lower().strip())
+            if norm_key in lfm_keys:
+                source = "lastfm"
+            elif norm_key in mood_keys:
+                source = "audio"   # mood-based audio feature path
+            else:
+                source = "spotify"
             candidates.append(TrackCandidate(
                 title=sim_title,
                 artist=sim_artist,
@@ -294,6 +318,53 @@ def _fetch_similar(title: str, artist: str, api_key: str) -> list[tuple[str, str
         return _fetch_artist_similar(artist, api_key)
 
     return []
+
+
+def _fetch_lastfm_tag_artists(
+    tag: str,
+    api_key: str,
+) -> list[tuple[str, str]]:
+    """
+    Fetch top artists for a Last.fm mood/genre tag, then each artist's top track (#74).
+
+    Uses tag.getTopArtists to find artists associated with the tag, then
+    artist.getTopTracks to get a representative track per artist.  This is the
+    Essentia mood-tag discovery path — a third source alongside track.getSimilar
+    (Last.fm) and Spotify recommendations.
+
+    Returns:
+        List of (artist, title) pairs; empty on any failure.
+        Listeners count is omitted — tag-sourced entries carry no reliable count.
+
+    Pure I/O boundary — no business logic.
+    """
+    if not tag or not tag.strip():
+        return []
+
+    params = {
+        "method":  "tag.getTopArtists",
+        "tag":     tag.strip().lower(),
+        "api_key": api_key,
+        "format":  "json",
+        "limit":   CONSTANTS.MAX_SIMILAR_TRACKS,
+    }
+
+    try:
+        resp = requests.get(_LASTFM_BASE, params=params, timeout=10)
+        resp.raise_for_status()
+        artists = resp.json().get("topartists", {}).get("artist", [])
+
+        results: list[tuple[str, str]] = []
+        for entry in artists[:CONSTANTS.MAX_SIMILAR_TRACKS]:
+            artist_name = entry.get("name", "")
+            if not artist_name:
+                continue
+            top_track = _fetch_top_track(artist_name, api_key)
+            if top_track:
+                results.append((artist_name, top_track))
+        return results
+    except Exception:  # noqa: BLE001 — mood path is always best-effort
+        return []
 
 
 def _fetch_artist_similar(artist: str, api_key: str) -> list[tuple[str, str, int]]:
@@ -618,29 +689,32 @@ def _fetch_spotify_recommendations(
 
 def _merge_candidates(
     lastfm: list[tuple[str, str, int]],
-    spotify: list[tuple[str, str]],
+    extra_pairs: list[tuple[str, str]],
     max_results: int,
 ) -> list[tuple[str, str, int]]:
     """
-    Round-robin interleave Last.fm and Spotify candidates; dedup by normalised key.
+    Round-robin interleave Last.fm and extra candidates; dedup by normalised key.
+
+    `extra_pairs` may come from any non-Last.fm source (Spotify recommendations,
+    Essentia mood-tag path, or a concatenation of both).  Entries carry no
+    listener count — they are assigned 0.
 
     Normalisation: lowercase, strip leading/trailing whitespace.  The first
     occurrence of each (artist, title) pair is kept; duplicates are dropped.
-    Last.fm entries carry their listener counts; Spotify entries carry 0.
 
     Pure function — no I/O.
     """
     seen: set[tuple[str, str]] = set()
     merged: list[tuple[str, str, int]] = []
 
-    # Convert Spotify pairs to the same 3-tuple shape (listeners=0)
-    spotify_triples: list[tuple[str, str, int]] = [
-        (art, ttl, 0) for art, ttl in spotify
+    # Convert extra pairs to the same 3-tuple shape (listeners=0)
+    extra_triples: list[tuple[str, str, int]] = [
+        (art, ttl, 0) for art, ttl in extra_pairs
     ]
 
     # Round-robin interleave
-    for lfm, spot in zip(lastfm, spotify_triples):
-        for entry in (lfm, spot):
+    for lfm, extra in zip(lastfm, extra_triples):
+        for entry in (lfm, extra):
             key = (entry[0].lower().strip(), entry[1].lower().strip())
             if key not in seen:
                 seen.add(key)
@@ -649,7 +723,7 @@ def _merge_candidates(
                 return merged
 
     # Drain whichever list is longer
-    for remainder in (lastfm[len(spotify_triples):], spotify_triples[len(lastfm):]):
+    for remainder in (lastfm[len(extra_triples):], extra_triples[len(lastfm):]):
         for entry in remainder:
             key = (entry[0].lower().strip(), entry[1].lower().strip())
             if key not in seen:
