@@ -15,6 +15,7 @@ Design rules:
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import time
@@ -675,10 +676,22 @@ def render_loading(source: Any) -> None:
                 title, artist,
                 platform_metrics=dict(audio.engagement),
             )
-            audio_quality = AudioQualityAnalyzer().analyze(
-                audio,
-                sections=structure.sections if structure is not None else None,
-            )
+            # Session-state cache — avoids recompute when the same audio is
+            # re-submitted within the same browser session (#102).
+            # SHA-256 of first 64 KB is cheap and sufficient for identity.
+            audio_hash = hashlib.sha256(audio.raw[:CONSTANTS.LOUDNESS_CACHE_HASH_BYTES]).hexdigest()
+            if (
+                st.session_state.get("_loudness_audio_hash") == audio_hash
+                and st.session_state.get("_loudness_result") is not None
+            ):
+                audio_quality = st.session_state["_loudness_result"]
+            else:
+                audio_quality = AudioQualityAnalyzer().analyze(
+                    audio,
+                    sections=structure.sections if structure is not None else None,
+                )
+                st.session_state["_loudness_audio_hash"] = audio_hash
+                st.session_state["_loudness_result"]     = audio_quality
     except StepTimeoutError as exc:
         st.toast("⏱ Legal/loudness step timed out — PRO links and loudness data unavailable.", icon="⚠️")
         _advance("legal", t0, error=str(exc))

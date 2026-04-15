@@ -53,6 +53,8 @@ class SystemConstants:
     # ---- Audio ----------------------------------------------------------------
     SAMPLE_RATE: int = 22_050           # Hz; librosa default, balances quality/memory
     MAX_UPLOAD_BYTES: int = 50 * 1024 * 1024  # 50 MB hard ceiling
+    # Bytes to hash for session-state loudness cache key — enough for reliable identity (#102)
+    LOUDNESS_CACHE_HASH_BYTES: int = 65_536  # 64 KB
 
     # ---- Forensics ------------------------------------------------------------
     # Inter-beat interval variance below this → "Perfect Quantization" (AI signal)
