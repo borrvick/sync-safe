@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 import html as html_mod
 import io
+import logging
 import math
 import json as _json
 import re
@@ -19,7 +20,9 @@ from typing import Optional
 
 import streamlit as st
 
-from core.config import CONSTANTS, get_settings
+import requests
+
+from core.config import CONSTANTS, SYNC_FEE_MULTIPLIERS, get_settings
 from core.utils import assign_sections
 from core.models import (
     AiSegment,
@@ -55,6 +58,8 @@ from services.sync_cut import SyncCutAnalyzer
 from services.tagging import TagInjector
 from ui.components import ISSUE_META, authorship_color, eq_bars, fmt_ts, issue_pill
 
+
+_log = logging.getLogger(__name__)
 
 # AudioSource literal value for YouTube — matches core/models.py AudioSource type.
 # Defined here to avoid repeating the string across multiple render functions.
@@ -312,21 +317,16 @@ def render_report(
     )
     _render_nav(audio.label)
     st.markdown('<span id="main-content" tabindex="-1"></span>', unsafe_allow_html=True)
-    _render_audio_player(audio)
+    _render_enriched_track_card(audio, result)
     _render_sync_snapshot(result)
     _render_combined_authorship_banner(result)
 
     with st.expander("Track Overview", expanded=True):
         _section_tooltip(
-            "Basic track metadata and detected arrangement structure. Shows title, artist, BPM, "
-            "musical key, and duration alongside the section map (intro, verse, chorus, bridge, "
-            "outro) detected by the allin1 structural analysis model."
+            "Detected arrangement structure. Shows BPM, musical key, and the section map "
+            "(intro, verse, chorus, bridge, outro) detected by the allin1 structural analysis model."
         )
-        c_left, c_right = st.columns([1, 1], gap="large")
-        with c_left:
-            _render_metadata_card(result.structure, result.audio.metadata)
-        with c_right:
-            _render_structure_card(result.structure)
+        _render_structure_card(result.structure)
 
     with st.expander("Authenticity Audit", expanded=True):
         _section_tooltip(
@@ -606,7 +606,158 @@ def _render_nav(source_label: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Audio player
+# Album art fetch (#71)
+# ---------------------------------------------------------------------------
+
+@st.cache_data(ttl=3600)
+def _fetch_album_art(title: str, artist: str, api_key: str) -> Optional[str]:
+    """
+    Look up album art URL via Last.fm track.getInfo.
+
+    Returns the largest available image URL (size "extralarge") or None on any
+    error.  Result is cached for 1 h to avoid repeated API calls on reruns.
+    Only https:// URLs are returned — javascript: and other schemes are rejected.
+
+    Pure network call — no side effects beyond the HTTP request.
+    """
+    if not api_key:
+        return None
+    try:
+        resp = requests.get(
+            "https://ws.audioscrobbler.com/2.0/",
+            params={
+                "method":  "track.getInfo",
+                "api_key": api_key,
+                "artist":  artist,
+                "track":   title,
+                "format":  "json",
+            },
+            timeout=5,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        images = data.get("track", {}).get("album", {}).get("image", [])
+        # Last.fm returns images in ascending size order; prefer extralarge
+        for img in reversed(images):
+            url = img.get("#text", "")
+            if url and url.startswith("https://"):
+                return url
+    except Exception as exc:  # noqa: BLE001 — album art is best-effort
+        _log.debug("album art fetch failed for '%s' by '%s': %s", title, artist, exc)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Enriched track card — audio player + metadata + album art (#71)
+# ---------------------------------------------------------------------------
+
+def _render_enriched_track_card(audio: AudioBuffer, result: AnalysisResult) -> None:
+    """
+    Render the top-of-report enriched card combining album art, track metadata,
+    and the audio player in one visual unit.
+
+    Layout: st.columns([1, 4]) — art thumbnail on the left, player + metadata
+    stacked on the right.  Falls back to a text placeholder when no art URL is
+    available (Essentia/Last.fm not configured, or API call failed).
+    """
+    sr   = result.structure
+    meta = (sr.metadata if sr else {}) or {}
+    ingestion_meta = result.audio.metadata or {}
+    title_raw  = meta.get("title", "")  or ingestion_meta.get("title", "")
+    artist_raw = meta.get("artist", "") or ingestion_meta.get("artist", "")
+
+    # Try to fetch album art only when we have both title and artist
+    art_url: Optional[str] = None
+    if title_raw and artist_raw:
+        try:
+            settings = get_settings()
+            lfm_key  = getattr(settings, "lastfm_api_key", None) or ""
+        except Exception as exc:  # noqa: BLE001
+            _log.debug("could not load settings for album art lookup: %s", exc)
+            lfm_key = ""
+        if lfm_key:
+            art_url = _fetch_album_art(title_raw, artist_raw, lfm_key)
+
+    title_str  = html_mod.escape(title_raw)
+    artist_str = html_mod.escape(artist_raw)
+
+    duration    = ingestion_meta.get("duration", "")
+    sample_rate = ingestion_meta.get("sample_rate", "")
+    bit_depth   = ingestion_meta.get("bit_depth", "")
+    channels    = ingestion_meta.get("channels", "")
+
+    specs = [
+        ("Duration",    duration),
+        ("Sample Rate", sample_rate),
+        ("Bit Depth",   bit_depth),
+        ("Channels",    channels),
+    ]
+    spec_items = "".join(
+        f"<div style='display:flex;flex-direction:column;gap:3px;'>"
+        f"  <div style='font-family:\"Chakra Petch\",monospace;font-size:.5rem;font-weight:600;"
+        f"letter-spacing:.12em;text-transform:uppercase;color:var(--dim);'>{label}</div>"
+        f"  <div style='font-family:\"JetBrains Mono\",monospace;font-size:.8rem;color:var(--text);'>{html_mod.escape(str(value))}</div>"
+        f"</div>"
+        for label, value in specs if value
+    )
+    specs_html = (
+        f"<div style='display:flex;gap:24px;margin-top:12px;flex-wrap:wrap;'>{spec_items}</div>"
+        if spec_items else ""
+    )
+
+    title_html = (
+        f"<div style='font-family:\"JetBrains Mono\",monospace;font-size:1.4rem;"
+        f"font-weight:700;color:var(--text);line-height:1.2;margin-bottom:5px;'>{title_str}</div>"
+        if title_str else
+        "<div style='font-size:.9rem;color:var(--dim);margin-bottom:5px;'>No tags found</div>"
+    )
+    artist_html = (
+        f"<div style='font-family:\"Chakra Petch\",monospace;font-size:.6rem;"
+        f"font-weight:600;color:var(--accent);letter-spacing:.12em;text-transform:uppercase;'>{artist_str}</div>"
+        if artist_str else ""
+    )
+
+    col_art, col_main = st.columns([1, 4], gap="large")
+
+    with col_art:
+        if art_url:
+            st.markdown(
+                f"<img src='{html_mod.escape(art_url)}' "
+                f"style='width:100%;border-radius:6px;object-fit:cover;aspect-ratio:1/1;' "
+                f"alt='Album art for {title_str}' />",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                "<div style='width:100%;aspect-ratio:1/1;border-radius:6px;"
+                "background:var(--border-hr);display:flex;align-items:center;"
+                "justify-content:center;' aria-hidden='true'>"
+                "<span style='font-size:2rem;color:var(--dim);'>♪</span></div>",
+                unsafe_allow_html=True,
+            )
+
+    with col_main:
+        st.markdown(f"""
+        <div class="sig" style="margin-bottom:12px;">
+          <div class="sig-head">Track Metadata</div>
+          {title_html}
+          {artist_html}
+          {specs_html}
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Audio player — st.empty() slot forces re-init when player_key changes
+        slot = st.empty()
+        slot.audio(
+            audio.raw,
+            start_time=st.session_state.get("start_time", 0),
+        )
+
+    st.markdown("<div style='margin-bottom:20px;'></div>", unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
+# Audio player (legacy — kept for compatibility; render_report uses enriched card)
 # ---------------------------------------------------------------------------
 
 def _render_audio_player(audio: AudioBuffer) -> None:
@@ -659,7 +810,7 @@ def _render_metadata_card(sr: Optional[StructureResult], ingestion_meta: dict | 
         f"<div style='display:flex;flex-direction:column;gap:3px;'>"
         f"  <div style='font-family:\"Chakra Petch\",monospace;font-size:.5rem;font-weight:600;"
         f"letter-spacing:.12em;text-transform:uppercase;color:var(--dim);'>{label}</div>"
-        f"  <div style='font-family:\"JetBrains Mono\",monospace;font-size:.8rem;color:var(--text);'>{value}</div>"
+        f"  <div style='font-family:\"JetBrains Mono\",monospace;font-size:.8rem;color:var(--text);'>{html_mod.escape(str(value))}</div>"
         f"</div>"
         for label, value in specs if value
     )
@@ -2055,6 +2206,38 @@ def _tier_confidence_label(popularity_score: int, tier: str) -> Optional[str]:
     return None
 
 
+def _apply_fee_multipliers(
+    base_low: int,
+    base_high: int,
+    usage: str,
+    territory: str,
+    exclusivity: str,
+) -> tuple[int, int]:
+    """
+    Apply scenario multipliers from SYNC_FEE_MULTIPLIERS to a base fee band.
+
+    Looks up each dimension in its sub-dict (defaulting to 1.0 on unknown keys)
+    and multiplies all three factors together.
+
+    Args:
+        base_low:    Lower bound of the base sync fee estimate (post-compliance adj.)
+        base_high:   Upper bound of the base sync fee estimate (post-compliance adj.)
+        usage:       Usage scenario label (e.g. "TV Scene")
+        territory:   Territory label (e.g. "Worldwide")
+        exclusivity: Exclusivity label (e.g. "Exclusive")
+
+    Returns:
+        Adjusted (low, high) integer tuple. Values floored to zero — never negative.
+
+    Pure function — no I/O.
+    """
+    u_mult = SYNC_FEE_MULTIPLIERS["usage"].get(usage, 1.0)
+    t_mult = SYNC_FEE_MULTIPLIERS["territory"].get(territory, 1.0)
+    e_mult = SYNC_FEE_MULTIPLIERS["exclusivity"].get(exclusivity, 1.0)
+    combined = u_mult * t_mult * e_mult
+    return max(0, int(base_low * combined)), max(0, int(base_high * combined))
+
+
 def _split_fee_band(low: int, high: int) -> tuple[int, int, int, int]:
     """
     Split a fee band into a narrower 'likely' range and a full 'possible' range.
@@ -2234,8 +2417,84 @@ def _render_popularity_card(result: AnalysisResult) -> None:
         if mod_note else ""
     )
 
+    # ── Scenario selectors (#110) ─────────────────────────────────────────────
+    # Initialize session state keys before access
+    usage_options       = list(SYNC_FEE_MULTIPLIERS["usage"].keys())
+    territory_options   = list(SYNC_FEE_MULTIPLIERS["territory"].keys())
+    exclusivity_options = list(SYNC_FEE_MULTIPLIERS["exclusivity"].keys())
+
+    if "fee_usage" not in st.session_state:
+        st.session_state["fee_usage"] = usage_options[0]
+    if "fee_territory" not in st.session_state:
+        st.session_state["fee_territory"] = territory_options[0]
+    if "fee_exclusivity" not in st.session_state:
+        st.session_state["fee_exclusivity"] = exclusivity_options[0]
+
+    # Guard index lookups: a stale session state value (e.g. from a previous deploy
+    # that had different option labels) would raise ValueError — fall back to 0.
+    def _safe_index(options: list[str], key: str) -> int:
+        try:
+            return options.index(st.session_state[key])
+        except ValueError:
+            return 0
+
+    sc_left, sc_mid, sc_right = st.columns(3)
+    with sc_left:
+        sel_usage = st.selectbox(
+            "Usage",
+            usage_options,
+            index=_safe_index(usage_options, "fee_usage"),
+            key="fee_usage",
+            help="How the track will be used (documentary, ad, trailer, etc.).",
+        )
+    with sc_mid:
+        sel_territory = st.selectbox(
+            "Territory",
+            territory_options,
+            index=_safe_index(territory_options, "fee_territory"),
+            key="fee_territory",
+            help="Geographic scope of the license.",
+        )
+    with sc_right:
+        sel_exclusivity = st.selectbox(
+            "Exclusivity",
+            exclusivity_options,
+            index=_safe_index(exclusivity_options, "fee_exclusivity"),
+            key="fee_exclusivity",
+            help="Whether this will be an exclusive or non-exclusive sync license.",
+        )
+
+    # Apply scenario multipliers on top of the compliance-adjusted base
+    scen_low, scen_high = _apply_fee_multipliers(
+        adj_low, adj_high, sel_usage, sel_territory, sel_exclusivity
+    )
+    scen_likely_low, scen_likely_high, scen_poss_low, scen_poss_high = _split_fee_band(
+        scen_low, scen_high
+    )
+
+    # Detect whether any scenario dimension deviates from baseline (multiplier ≠ 1.0)
+    scen_is_baseline = (
+        SYNC_FEE_MULTIPLIERS["usage"][sel_usage] == 1.0
+        and SYNC_FEE_MULTIPLIERS["territory"][sel_territory] == 1.0
+        and SYNC_FEE_MULTIPLIERS["exclusivity"][sel_exclusivity] == 1.0
+    )
+
+    if scen_is_baseline:
+        # No scenario adjustment — show base fee only
+        scen_html = ""
+    else:
+        scen_likely_fmt = f"${scen_likely_low:,} – ${scen_likely_high:,}"
+        scen_poss_fmt   = f"${scen_poss_low:,} – ${scen_poss_high:,}"
+        scen_html = (
+            f"<div style=\"font-family:'Chakra Petch',monospace;font-size:.82rem;"
+            f"font-weight:700;color:var(--accent);margin-top:6px;\">{scen_likely_fmt}</div>"
+            f"<div style=\"font-family:'Figtree',sans-serif;font-size:.62rem;"
+            f"color:var(--muted);margin-top:2px;\">Scenario adjusted · "
+            f"Possible: {scen_poss_fmt}</div>"
+        )
+
     st.markdown(f"""
-    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;margin-top:12px;">
       <div class="sig" style="flex:1;min-width:120px;padding:14px 16px;text-align:center;">
         <div style="font-family:'Chakra Petch',monospace;font-size:.5rem;font-weight:600;
                     letter-spacing:.18em;text-transform:uppercase;color:var(--dim);
@@ -2255,6 +2514,7 @@ def _render_popularity_card(result: AnalysisResult) -> None:
         <div style="font-family:'Figtree',sans-serif;font-size:.7rem;color:var(--muted);
                     margin-top:2px;">Likely · Possible: {possible_fmt}</div>
         {mod_html}
+        {scen_html}
         <div style="font-family:'Figtree',sans-serif;font-size:.62rem;color:var(--dim);
                     margin-top:2px;">Industry estimates 2024–2026.</div>
       </div>

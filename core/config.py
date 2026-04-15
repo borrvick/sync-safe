@@ -837,6 +837,29 @@ GENRE_LRA_RANGES: dict[str, tuple[float, float]] = {
 GENRE_LRA_DEFAULT: tuple[float, float] = (6.0, 14.0)  # fallback for unrecognised genres
 
 
+# Sync fee scenario multipliers (#110).
+# Defined as a module-level constant (not inside SystemConstants) to avoid
+# Pydantic's mutable-default error on nested dicts — same pattern as GENRE_LRA_RANGES.
+SYNC_FEE_MULTIPLIERS: dict[str, dict[str, float]] = {
+    "usage": {
+        "Documentary":   1.0,
+        "TV Scene":      1.5,
+        "Ad (30s)":      2.5,
+        "Trailer":       3.5,
+        "Online/Social": 0.6,
+    },
+    "territory": {
+        "US-only":   1.0,
+        "Europe":    1.3,
+        "Worldwide": 2.0,
+    },
+    "exclusivity": {
+        "Non-exclusive": 1.0,
+        "Exclusive":     1.8,
+    },
+}
+
+
 # ---------------------------------------------------------------------------
 # Layer 2: Runtime Settings (environment / .env / HF Spaces secrets)
 # ---------------------------------------------------------------------------
