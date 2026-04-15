@@ -1736,6 +1736,10 @@ def _render_audio_quality_card(aq: Optional["AudioQualityResult"]) -> None:
     # ── Loudness profile bar (#98) ─────────────────────────────────────────
     _render_loudness_profile_bar(aq)
 
+    # ── Genre-aware LRA context (#99) ────────────────────────────────────
+    if aq.genre_lra_context:
+        st.caption(f"LRA context: {html_mod.escape(aq.genre_lra_context['note'])}")
+
     # ── Per-section LUFS / LRA breakdown (#96) ───────────────────────────
     if aq.section_loudness:
         with st.expander("Per-section loudness", expanded=False):

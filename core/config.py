@@ -815,6 +815,23 @@ class SystemConstants:
 # Module-level singleton — import directly, never instantiate.
 CONSTANTS = SystemConstants()
 
+# Genre-aware LRA context ranges (LU low, LU high) — soft recommendation only (#99).
+# Kept as a module-level dict (not on SystemConstants) to avoid Pydantic mutable-default errors.
+GENRE_LRA_RANGES: dict[str, tuple[float, float]] = {
+    "pop":        (4.0,  8.0),
+    "hip-hop":    (4.0,  8.0),
+    "electronic": (5.0,  9.0),
+    "rock":       (6.0, 10.0),
+    "country":    (6.0, 10.0),
+    "r&b":        (5.0,  9.0),
+    "jazz":       (10.0, 16.0),
+    "classical":  (12.0, 20.0),
+    "cinematic":  (12.0, 18.0),
+    "ambient":    (10.0, 18.0),
+    "folk":       (8.0,  14.0),
+}
+GENRE_LRA_DEFAULT: tuple[float, float] = (6.0, 14.0)  # fallback for unrecognised genres
+
 
 # ---------------------------------------------------------------------------
 # Layer 2: Runtime Settings (environment / .env / HF Spaces secrets)

@@ -18,6 +18,7 @@ from ._pure import (
     _classify_loudness,
     _compute_vo_headroom,
     _dialogue_score,
+    _genre_lra_context,
     _measure_loudness,
     _measure_section_loudness,
 )
@@ -38,6 +39,7 @@ class AudioQualityAnalyzer:
         self,
         buffer: AudioBuffer,
         sections: list[Section] | None = None,
+        genre: str | None = None,
     ) -> AudioQualityResult:
         """
         Run loudness + dialogue analysis on an AudioBuffer.
@@ -46,10 +48,12 @@ class AudioQualityAnalyzer:
             buffer:   AudioBuffer with raw audio bytes.
             sections: Optional list of structural sections from allin1. When
                       provided, per-section LUFS and LRA are computed (#96).
+            genre:    Optional genre string (e.g. "hip-hop", "cinematic"). When
+                      provided, a soft LRA context note is computed (#99).
 
         Returns:
             AudioQualityResult with LUFS, true peak, LRA, dialogue score,
-            and (optionally) per-section loudness breakdown.
+            per-section loudness breakdown, and genre-aware LRA context.
 
         Raises:
             ModelInferenceError: if audio is too short or malformed.
@@ -71,9 +75,10 @@ class AudioQualityAnalyzer:
             )
 
         integrated_lufs, true_peak, lra = _measure_loudness(y, sr)
-        diag_score      = _dialogue_score(y, sr)
-        diag_label      = _classify_dialogue(diag_score)
+        diag_score       = _dialogue_score(y, sr)
+        diag_label       = _classify_dialogue(diag_score)
         section_loudness = _measure_section_loudness(y, sr, sections) if sections else []
+        lra_context      = _genre_lra_context(genre, lra)
 
         delta_spotify     = round(integrated_lufs - CONSTANTS.LUFS_SPOTIFY,     1)
         delta_apple_music = round(integrated_lufs - CONSTANTS.LUFS_APPLE_MUSIC, 1)
@@ -99,4 +104,5 @@ class AudioQualityAnalyzer:
             dialogue_label=diag_label,
             vo_headroom_db=_compute_vo_headroom(diag_score, CONSTANTS.VO_HEADROOM_MAX_DB),
             section_loudness=section_loudness,
+            genre_lra_context=lra_context,
         )

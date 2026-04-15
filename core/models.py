@@ -470,6 +470,10 @@ class AudioQualityResult(BaseModel):
     # Empty list when sections were not provided or all were too short for measurement.
     section_loudness: list[dict[str, Any]] = Field(default_factory=list)
 
+    # Genre-aware LRA soft recommendation (#99)
+    # None when genre is unknown or not provided — no recommendation shown in that case.
+    genre_lra_context: Optional[dict[str, Any]] = None
+
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
 

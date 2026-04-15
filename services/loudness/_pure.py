@@ -12,7 +12,9 @@ import numpy as np
 import pyloudnorm as pyln
 from scipy.signal import resample_poly
 
-from core.config import CONSTANTS
+from typing import Any
+
+from core.config import CONSTANTS, GENRE_LRA_DEFAULT, GENRE_LRA_RANGES
 from core.models import Section
 
 _log = logging.getLogger(__name__)
@@ -191,3 +193,56 @@ def _classify_dialogue(score: float) -> str:
     if score >= CONSTANTS.DIALOGUE_READY_LOW:
         return "Mixed"
     return "Dialogue-Heavy"
+
+
+def _genre_lra_context(
+    genre: str | None,
+    measured_lra: float,
+) -> dict[str, Any] | None:
+    """
+    Return a soft LRA recommendation dict for the detected genre (#99).
+
+    Performs an exact key lookup in GENRE_LRA_RANGES, then a substring
+    fallback (e.g. "trap hip-hop" → "hip-hop"), then GENRE_LRA_DEFAULT.
+    Returns None when genre is None or an empty string — callers treat
+    None as "no recommendation to show."
+
+    Pure function — no I/O.
+    """
+    if not genre or not genre.strip():
+        return None
+
+    key = genre.lower().strip()
+
+    # Exact match first, then substring fallback
+    if key in GENRE_LRA_RANGES:
+        low, high = GENRE_LRA_RANGES[key]
+        matched = key
+    else:
+        matched = next(
+            (k for k in GENRE_LRA_RANGES if k in key),
+            None,
+        )
+        if matched:
+            low, high = GENRE_LRA_RANGES[matched]
+        else:
+            low, high = GENRE_LRA_DEFAULT
+            matched = None
+
+    # Use the canonical key name for display when matched; fall back to the
+    # raw genre string title-cased only when no key matched at all.
+    display = matched.title() if matched else genre.strip().title()
+
+    if measured_lra < low:
+        note = f"Low for {display} ({low:.0f}–{high:.0f} LU typical) — over-compressed"
+    elif measured_lra > high:
+        note = f"High for {display} ({low:.0f}–{high:.0f} LU typical) — wide dynamics"
+    else:
+        note = f"Within typical {display} range ({low:.0f}–{high:.0f} LU)"
+
+    return {
+        "genre":    genre,
+        "lra_low":  low,
+        "lra_high": high,
+        "note":     note,
+    }
