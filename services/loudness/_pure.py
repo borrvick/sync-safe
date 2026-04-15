@@ -4,6 +4,8 @@ Pure loudness measurement and dialogue-readiness functions — no I/O, no Stream
 """
 from __future__ import annotations
 
+import csv
+import io
 import logging
 import math
 
@@ -15,7 +17,7 @@ from scipy.signal import resample_poly
 from typing import Any
 
 from core.config import CONSTANTS, GENRE_LRA_DEFAULT, GENRE_LRA_RANGES
-from core.models import Section
+from core.models import AudioQualityResult, Section
 
 _log = logging.getLogger(__name__)
 
@@ -281,3 +283,44 @@ def _genre_lra_context(
         "lra_high": high,
         "note":     note,
     }
+
+
+def _fmt_float(val: float, fmt: str = ".1f") -> str:
+    """Format a float with the given format spec; return 'N/A' for nan/inf."""
+    return f"{val:{fmt}}" if math.isfinite(val) else "N/A"
+
+
+def build_ebu_r128_csv(track_name: str, aq: AudioQualityResult) -> str:
+    """
+    Build an EBU R128 delivery report as a CSV string (#101).
+
+    Returns a standalone CSV suitable for mastering engineers and sync
+    supervisors.  All numeric fields are guarded against nan — written as
+    "N/A" so the file is always parseable.
+
+    Pure function — no I/O (uses io.StringIO internally).
+    """
+    buf    = io.StringIO()
+    writer = csv.writer(buf)
+
+    writer.writerow(["EBU R128 Delivery Report"])
+    writer.writerow(["Track", track_name])
+    writer.writerow([])
+
+    writer.writerow(["Metric", "Value", "Standard"])
+    writer.writerow(["Integrated LUFS",    _fmt_float(aq.integrated_lufs),   "ITU-R BS.1770-4 / EBU R128"])
+    writer.writerow(["True Peak (dBFS)",   _fmt_float(aq.true_peak_dbfs),    "ITU-R BS.1770-4"])
+    writer.writerow(["Loudness Range (LU)", _fmt_float(aq.loudness_range_lu), "EBU R128"])
+    writer.writerow([])
+
+    writer.writerow(["Platform", "Target LUFS", "Delta (LU)", "Gain Adjustment"])
+    writer.writerow(["Spotify",     f"{CONSTANTS.LUFS_SPOTIFY:.1f}",     _fmt_float(aq.delta_spotify),     f"{_fmt_float(-aq.delta_spotify)} dB"])
+    writer.writerow(["Apple Music", f"{CONSTANTS.LUFS_APPLE_MUSIC:.1f}", _fmt_float(aq.delta_apple_music), f"{_fmt_float(-aq.delta_apple_music)} dB"])
+    writer.writerow(["YouTube",     f"{CONSTANTS.LUFS_YOUTUBE:.1f}",     _fmt_float(aq.delta_youtube),     f"{_fmt_float(-aq.delta_youtube)} dB"])
+    writer.writerow(["Broadcast",   f"{CONSTANTS.LUFS_BROADCAST:.1f}",   _fmt_float(aq.delta_broadcast),   f"{_fmt_float(-aq.delta_broadcast)} dB"])
+    writer.writerow([])
+
+    writer.writerow(["Verdict",           aq.loudness_verdict])
+    writer.writerow(["True Peak Warning", "YES" if aq.true_peak_warning else "NO"])
+
+    return buf.getvalue()

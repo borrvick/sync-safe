@@ -47,6 +47,7 @@ from services.export import (
     to_section_markers_csv,
 )
 from services.content import THEME_TAXONOMY, ThemeMoodAnalyzer
+from services.loudness import build_ebu_r128_csv
 from services.legal import hfa_url, songfile_url
 from services.sync_cut import SyncCutAnalyzer
 from services.tagging import TagInjector
@@ -1770,6 +1771,15 @@ def _render_audio_quality_card(aq: Optional["AudioQualityResult"]) -> None:
     # ── Gain adjustments (#94) ────────────────────────────────────────────
     with st.expander("Gain adjustments by platform", expanded=False):
         _render_gain_table(aq)
+
+    # ── EBU R128 export (#101) ────────────────────────────────────────────
+    track_name = st.session_state.get("track_name", "track")
+    st.download_button(
+        label="Export EBU R128 Report (CSV)",
+        data=build_ebu_r128_csv(track_name, aq),
+        file_name="ebu_r128_report.csv",
+        mime="text/csv",
+    )
 
     # ── Dialogue-ready row ────────────────────────────────────────────────
     dial_color  = _DIALOGUE_LABEL_COLORS.get(aq.dialogue_label, "var(--muted)")
