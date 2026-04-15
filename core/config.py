@@ -139,6 +139,8 @@ class SystemConstants:
 
     # ---- Discovery ------------------------------------------------------------
     MAX_SIMILAR_TRACKS: int = 5
+    ESSENTIA_MAX_MOOD_TAGS: int    = 3   # top-N mood tags passed to Last.fm tag discovery
+    ESSENTIA_FEATURE_TIMEOUT_S: int = 30  # max seconds for MusicExtractor per track
 
     # ---- Sync-Cut Detection ---------------------------------------------------
     # Standard ad/TV edit durations (seconds) to find edit points for.
