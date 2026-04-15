@@ -528,6 +528,7 @@ class TrackCandidate(BaseModel):
     similarity: float            = 0.0    # 0.0–1.0; rank-derived from Last.fm order
     popularity_tier: Optional[str] = None  # "Emerging"|"Regional"|"Mainstream"|"Global"; None if unknown (#124)
     source: str                  = "lastfm"  # "lastfm" | "spotify" | "audio" (#129)
+    sync_ready: Optional[bool]   = None   # True/False after on-demand check; None = unchecked (#127)
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()

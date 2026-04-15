@@ -36,6 +36,7 @@ from core.models import (
     StingResult,
     StructureResult,
     SyncCut,
+    TrackCandidate,
     TranscriptSegment,
 )
 from services.export import (
@@ -47,6 +48,7 @@ from services.export import (
     to_section_markers_csv,
 )
 from services.content import THEME_TAXONOMY, ThemeMoodAnalyzer
+from services.forensics import AI_VERDICTS
 from services.loudness import build_ebu_r128_csv
 from services.legal import hfa_url, songfile_url
 from services.sync_cut import SyncCutAnalyzer
@@ -1980,6 +1982,38 @@ def _build_source_pill_html(source: str) -> str:
     )
 
 
+def _run_sync_check(t: TrackCandidate, idx: int, state_key: str) -> None:
+    """
+    Download audio for a similar track and derive sync readiness (#127).
+
+    Stores True/False in st.session_state[state_key][idx]:
+      True  — loop_score below LOOP_SCORE_CEILING AND ai_verdict not flagged
+      False — either signal exceeds the threshold, or an error occurred
+
+    Swallows all exceptions — sync check is always best-effort; a failure
+    stores False so the UI renders "Not ready" rather than crashing.
+    Imports services lazily to avoid heavy module loads at page import time.
+    """
+    if not t.youtube_url:
+        st.session_state[state_key][idx] = False
+        return
+
+    try:
+        from services.ingestion import Ingestion          # noqa: PLC0415
+        from services.forensics import ForensicsService   # noqa: PLC0415
+
+        audio = Ingestion().load(t.youtube_url)
+        fr    = ForensicsService().analyze(audio)
+        ready = (
+            fr.loop_score < CONSTANTS.LOOP_SCORE_CEILING
+            and fr.ai_verdict not in AI_VERDICTS
+        )
+        st.session_state[state_key][idx] = ready
+    except Exception:  # noqa: BLE001 — sync check is always best-effort
+        st.session_state[state_key][idx] = False
+        st.warning(f'Sync check failed for "{t.title}" — check your connection and retry.')
+
+
 _POPULARITY_TIER_COLORS: dict[str, str] = {
     "Emerging":   "var(--dim)",
     "Regional":   "var(--issue-location)",  # blue — defined in styles.py
@@ -2400,20 +2434,33 @@ def _render_legal_and_discovery(result: AnalysisResult) -> None:
     """, unsafe_allow_html=True)
 
     if result.similar_tracks:
-        rows = ""
-        for t in result.similar_tracks:
+        # Session state: sync check results keyed by track index (#127)
+        _SYNC_KEY = "similar_sync_checks"
+        if _SYNC_KEY not in st.session_state:
+            st.session_state[_SYNC_KEY] = {}
+
+        show_sync_only = st.toggle(
+            "Show sync-ready only",
+            key="similar_sync_filter",
+            help="Filter to tracks that passed an on-demand sync readiness check.",
+        )
+
+        any_visible = False
+        for i, t in enumerate(result.similar_tracks):
+            sync_status: Optional[bool] = st.session_state[_SYNC_KEY].get(i)
+
+            # When the filter is on, skip tracks that haven't passed
+            if show_sync_only and sync_status is not True:
+                continue
+
+            any_visible = True
             safe_title  = html_mod.escape(t.title)
             safe_artist = html_mod.escape(t.artist)
-            btn = (
-                f'<a href="{html_mod.escape(t.youtube_url)}" target="_blank" rel="noopener noreferrer"'
-                f' class="t-btn" aria-label="Preview {safe_title} by {safe_artist} on YouTube">▶ Preview</a>'
-                if t.youtube_url
-                else '<button disabled class="t-btn" style="opacity:.3;cursor:not-allowed;">No link</button>'
-            )
             sim_clamped = min(1.0, max(0.0, t.similarity))
             sim_pct     = f"{sim_clamped:.0%}"
             sim_bar     = f"{sim_clamped:.3f}"
-            tier_pill   = ""
+
+            tier_pill = ""
             if t.popularity_tier:
                 tc = _POPULARITY_TIER_COLORS.get(t.popularity_tier, "var(--dim)")
                 tier_pill = (
@@ -2423,25 +2470,66 @@ def _render_legal_and_discovery(result: AnalysisResult) -> None:
                     f"{html_mod.escape(t.popularity_tier)}</span>"
                 )
             source_pill = _build_source_pill_html(t.source)
-            rows += f"""
-            <div class="t-row">
-              <div style="flex:1;min-width:0;">
-                <div class="t-art">{safe_artist}</div>
-                <div class="t-nm">{safe_title}</div>
-                <div style="display:flex;align-items:center;gap:8px;margin-top:5px;">
-                  <div style="width:72px;height:3px;border-radius:2px;background:var(--border-hr);overflow:hidden;flex-shrink:0;">
-                    <div style="height:3px;border-radius:2px;background:var(--accent);width:72px;
-                                transform:scaleX({sim_bar});transform-origin:left;"></div>
+
+            # Sync status badge — shown inline in the pill row after check (#127)
+            if sync_status is True:
+                sync_badge = (
+                    "<span style='font-family:Figtree,sans-serif;font-size:.55rem;"
+                    "color:var(--ok);border:1px solid var(--ok);border-radius:3px;"
+                    "padding:1px 5px;white-space:nowrap;'>Sync-ready</span>"
+                )
+            elif sync_status is False:
+                sync_badge = (
+                    "<span style='font-family:Figtree,sans-serif;font-size:.55rem;"
+                    "color:var(--danger);border:1px solid var(--danger);border-radius:3px;"
+                    "padding:1px 5px;white-space:nowrap;'>Not ready</span>"
+                )
+            else:
+                sync_badge = ""
+
+            preview_btn = (
+                f'<a href="{html_mod.escape(t.youtube_url)}" target="_blank" rel="noopener noreferrer"'
+                f' class="t-btn" aria-label="Preview {safe_title} by {safe_artist} on YouTube">▶ Preview</a>'
+                if t.youtube_url
+                else '<button disabled class="t-btn" style="opacity:.3;cursor:not-allowed;">No link</button>'
+            )
+
+            col_row, col_check = st.columns([8, 2])
+            with col_row:
+                st.markdown(f"""
+                <div class="t-row">
+                  <div style="flex:1;min-width:0;">
+                    <div class="t-art">{safe_artist}</div>
+                    <div class="t-nm">{safe_title}</div>
+                    <div style="display:flex;align-items:center;gap:8px;margin-top:5px;">
+                      <div style="width:72px;height:3px;border-radius:2px;background:var(--border-hr);overflow:hidden;flex-shrink:0;">
+                        <div style="height:3px;border-radius:2px;background:var(--accent);width:72px;
+                                    transform:scaleX({sim_bar});transform-origin:left;"></div>
+                      </div>
+                      <span style="font-family:'JetBrains Mono',monospace;font-size:.62rem;
+                                   color:var(--dim);">{sim_pct}</span>
+                      {tier_pill}
+                      {source_pill}
+                      {sync_badge}
+                    </div>
                   </div>
-                  <span style="font-family:'JetBrains Mono',monospace;font-size:.62rem;
-                               color:var(--dim);">{sim_pct}</span>
-                  {tier_pill}
-                  {source_pill}
-                </div>
-              </div>
-              {btn}
-            </div>"""
-        st.markdown(f"<div class='sig' style='padding:18px;'>{rows}</div>", unsafe_allow_html=True)
+                  {preview_btn}
+                </div>""", unsafe_allow_html=True)
+            with col_check:
+                # Only show the check button for unchecked tracks with a YouTube URL
+                if t.youtube_url and sync_status is None:
+                    if st.button(
+                        "Check sync",
+                        key=f"sync_check_{i}",
+                        use_container_width=True,
+                        help="Download and run forensic analysis to check sync readiness.",
+                    ):
+                        with st.spinner(f"Checking {t.title}…"):
+                            _run_sync_check(t, i, _SYNC_KEY)
+                        st.rerun()
+
+        if show_sync_only and not any_visible:
+            st.caption("No sync-ready tracks yet — click 'Check sync' on individual tracks first.")
 
         # Copy search list (#125) — one click copies "Title — Artist" per line
         search_list = "\n".join(
