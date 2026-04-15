@@ -11,7 +11,7 @@ import librosa
 
 from core.config import CONSTANTS
 from core.exceptions import ModelInferenceError
-from core.models import AudioBuffer, AudioQualityResult
+from core.models import AudioBuffer, AudioQualityResult, Section
 
 from ._pure import (
     _classify_dialogue,
@@ -19,6 +19,7 @@ from ._pure import (
     _compute_vo_headroom,
     _dialogue_score,
     _measure_loudness,
+    _measure_section_loudness,
 )
 
 _log = logging.getLogger(__name__)
@@ -33,15 +34,22 @@ class AudioQualityAnalyzer:
         print(result.integrated_lufs, result.dialogue_label)
     """
 
-    def analyze(self, buffer: AudioBuffer) -> AudioQualityResult:
+    def analyze(
+        self,
+        buffer: AudioBuffer,
+        sections: list[Section] | None = None,
+    ) -> AudioQualityResult:
         """
         Run loudness + dialogue analysis on an AudioBuffer.
 
         Args:
-            buffer: AudioBuffer with raw audio bytes.
+            buffer:   AudioBuffer with raw audio bytes.
+            sections: Optional list of structural sections from allin1. When
+                      provided, per-section LUFS and LRA are computed (#96).
 
         Returns:
-            AudioQualityResult with LUFS, true peak, LRA, and dialogue score.
+            AudioQualityResult with LUFS, true peak, LRA, dialogue score,
+            and (optionally) per-section loudness breakdown.
 
         Raises:
             ModelInferenceError: if audio is too short or malformed.
@@ -63,8 +71,9 @@ class AudioQualityAnalyzer:
             )
 
         integrated_lufs, true_peak, lra = _measure_loudness(y, sr)
-        diag_score = _dialogue_score(y, sr)
-        diag_label = _classify_dialogue(diag_score)
+        diag_score      = _dialogue_score(y, sr)
+        diag_label      = _classify_dialogue(diag_score)
+        section_loudness = _measure_section_loudness(y, sr, sections) if sections else []
 
         delta_spotify     = round(integrated_lufs - CONSTANTS.LUFS_SPOTIFY,     1)
         delta_apple_music = round(integrated_lufs - CONSTANTS.LUFS_APPLE_MUSIC, 1)
@@ -89,4 +98,5 @@ class AudioQualityAnalyzer:
             dialogue_score=diag_score,
             dialogue_label=diag_label,
             vo_headroom_db=_compute_vo_headroom(diag_score, CONSTANTS.VO_HEADROOM_MAX_DB),
+            section_loudness=section_loudness,
         )

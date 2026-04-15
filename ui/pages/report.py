@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 import html as html_mod
 import io
+import math
 import json as _json
 import re
 from collections import Counter, OrderedDict
@@ -1629,6 +1630,32 @@ def _render_gain_table(aq: "AudioQualityResult") -> None:
     )
 
 
+def _render_section_loudness_table(sections: list[dict]) -> None:
+    """Render per-section LUFS / LRA as a styled table (#96)."""
+    if not sections:
+        st.markdown(
+            "<div style='color:var(--dim);font-size:.84rem;font-family:Figtree,sans-serif;'>"
+            "Sections too short for per-section loudness measurement.</div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    rows = []
+    for s in sections:
+        lufs = s["integrated_lufs"]
+        lra  = s["lra_lu"]
+        peak_marker = " ▲" if s.get("is_peak") else ""
+        rows.append({
+            "Section":   html_mod.escape(str(s["label"])) + peak_marker,
+            "Start":     f"{s['start_s']:.1f}s",
+            "End":       f"{s['end_s']:.1f}s",
+            "LUFS":      f"{lufs:.1f}"  if not math.isnan(lufs) else "—",
+            "LRA (LU)":  f"{lra:.1f}"  if not math.isnan(lra)  else "—",
+        })
+
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+
+
 def _render_audio_quality_card(aq: Optional["AudioQualityResult"]) -> None:
     """Render LUFS broadcast loudness and dialogue-readiness metrics."""
     st.markdown("""
@@ -1708,6 +1735,11 @@ def _render_audio_quality_card(aq: Optional["AudioQualityResult"]) -> None:
 
     # ── Loudness profile bar (#98) ─────────────────────────────────────────
     _render_loudness_profile_bar(aq)
+
+    # ── Per-section LUFS / LRA breakdown (#96) ───────────────────────────
+    if aq.section_loudness:
+        with st.expander("Per-section loudness", expanded=False):
+            _render_section_loudness_table(aq.section_loudness)
 
     # ── Gain adjustments (#94) ────────────────────────────────────────────
     with st.expander("Gain adjustments by platform", expanded=False):

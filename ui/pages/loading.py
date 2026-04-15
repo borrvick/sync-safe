@@ -675,7 +675,10 @@ def render_loading(source: Any) -> None:
                 title, artist,
                 platform_metrics=dict(audio.engagement),
             )
-            audio_quality = AudioQualityAnalyzer().analyze(audio)
+            audio_quality = AudioQualityAnalyzer().analyze(
+                audio,
+                sections=structure.sections if structure is not None else None,
+            )
     except StepTimeoutError as exc:
         st.toast("⏱ Legal/loudness step timed out — PRO links and loudness data unavailable.", icon="⚠️")
         _advance("legal", t0, error=str(exc))

@@ -250,6 +250,8 @@ class SystemConstants:
     TRUE_PEAK_WARN_DBFS: float = -1.0
     # Oversampling factor for inter-sample true peak (ITU-R BS.1770-4 minimum is 4×)
     TRUE_PEAK_OVERSAMPLE: int = 4
+    # Minimum section duration (s) for per-section LUFS/LRA — pyloudnorm needs several 400ms gating blocks
+    DIALOGUE_MIN_SECTION_DUR_S: float = 2.0
 
     # Loudness verdict classification thresholds (#95)
     LOUDNESS_BROADCAST_DELTA_MAX: float = 2.0    # ±LU from broadcast target → "Broadcast-ready"

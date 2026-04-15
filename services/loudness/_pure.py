@@ -5,6 +5,7 @@ Pure loudness measurement and dialogue-readiness functions — no I/O, no Stream
 from __future__ import annotations
 
 import logging
+import math
 
 import librosa
 import numpy as np
@@ -12,6 +13,7 @@ import pyloudnorm as pyln
 from scipy.signal import resample_poly
 
 from core.config import CONSTANTS
+from core.models import Section
 
 _log = logging.getLogger(__name__)
 
@@ -57,6 +59,68 @@ def _measure_loudness(y: np.ndarray, sr: int) -> tuple[float, float, float]:
         lra = 0.0
 
     return round(float(loudness), 1), round(true_peak_dbfs, 1), round(lra, 1)
+
+
+def _measure_section_loudness(
+    y: np.ndarray,
+    sr: int,
+    sections: list[Section],
+) -> list[dict[str, str | float | bool]]:
+    """
+    Compute integrated LUFS and LRA for each structural section (#96).
+
+    Sections shorter than CONSTANTS.DIALOGUE_MIN_SECTION_DUR_S are skipped
+    (pyloudnorm's gating algorithm requires several 400ms blocks to converge).
+    Skipped sections carry nan values so the UI can render "—" instead of crashing.
+    The loudest valid section is annotated with is_peak=True.
+
+    Pure function — no I/O.
+    """
+    meter   = pyln.Meter(sr)
+    results: list[dict[str, str | float | bool]] = []
+
+    for sec in sections:
+        start_sample = int(sec.start * sr)
+        end_sample   = min(int(sec.end * sr), len(y))
+        slice_       = y[start_sample:end_sample]
+        duration     = len(slice_) / sr
+
+        if duration < CONSTANTS.DIALOGUE_MIN_SECTION_DUR_S:
+            results.append({
+                "label":            sec.label,
+                "start_s":          round(sec.start, 1),
+                "end_s":            round(sec.end, 1),
+                "integrated_lufs":  float("nan"),
+                "lra_lu":           float("nan"),
+            })
+            continue
+
+        data = slice_.astype(np.float64).reshape(-1, 1)
+        try:
+            lufs = float(meter.integrated_loudness(data))
+        except ValueError:
+            lufs = float("nan")
+
+        try:
+            lra = float(meter.loudness_range(data))
+        except ValueError:
+            lra = float("nan")
+
+        results.append({
+            "label":            sec.label,
+            "start_s":          round(sec.start, 1),
+            "end_s":            round(sec.end, 1),
+            "integrated_lufs":  round(lufs, 1) if not math.isnan(lufs) else float("nan"),
+            "lra_lu":           round(lra, 1)  if not math.isnan(lra)  else float("nan"),
+        })
+
+    # Mark the loudest valid section
+    valid = [r for r in results if not math.isnan(float(r["integrated_lufs"]))]
+    if valid:
+        peak = max(valid, key=lambda r: float(r["integrated_lufs"]))
+        peak["is_peak"] = True
+
+    return results
 
 
 def _dialogue_score(y: np.ndarray, sr: int) -> float:

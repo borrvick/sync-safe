@@ -465,6 +465,11 @@ class AudioQualityResult(BaseModel):
     # None when not yet computed (backward-compatible with older results).
     vo_headroom_db: Optional[float] = None
 
+    # Per-section LUFS and LRA breakdown (#96)
+    # Each entry: {label, start_s, end_s, integrated_lufs, lra_lu, is_peak?}
+    # Empty list when sections were not provided or all were too short for measurement.
+    section_loudness: list[dict[str, Any]] = Field(default_factory=list)
+
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
 
