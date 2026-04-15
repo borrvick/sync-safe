@@ -146,6 +146,41 @@ def _dialogue_score(y: np.ndarray, sr: int) -> float:
     return round(float(max(0.0, min(1.0, 1.0 - competition_ratio))), 3)
 
 
+def _dialogue_score_sections(
+    y: np.ndarray,
+    sr: int,
+    sections: list[Section],
+) -> list[dict[str, Any]]:
+    """
+    Compute per-section dialogue-readiness scores (#91).
+
+    Reuses _dialogue_score() and _classify_dialogue() on each waveform slice.
+    Sections shorter than CONSTANTS.DIALOGUE_MIN_SECTION_DUR_S are omitted —
+    too little audio for a reliable spectral energy ratio.
+
+    Pure function — no I/O.
+    """
+    results: list[dict[str, Any]] = []
+    for sec in sections:
+        start_sample = int(sec.start * sr)
+        end_sample   = min(int(sec.end * sr), len(y))
+        duration     = (end_sample - start_sample) / sr
+
+        if duration < CONSTANTS.DIALOGUE_MIN_SECTION_DUR_S:
+            continue
+
+        y_slice = y[start_sample:end_sample]
+        score   = _dialogue_score(y_slice, sr)
+        results.append({
+            "label":          sec.label,
+            "start_s":        round(sec.start, 3),
+            "end_s":          round(sec.end, 3),
+            "dialogue_score": round(score, 3),
+            "dialogue_label": _classify_dialogue(score),
+        })
+    return results
+
+
 def _classify_loudness(
     integrated_lufs: float,
     true_peak_warning: bool,

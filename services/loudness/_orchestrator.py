@@ -18,6 +18,7 @@ from ._pure import (
     _classify_loudness,
     _compute_vo_headroom,
     _dialogue_score,
+    _dialogue_score_sections,
     _genre_lra_context,
     _measure_loudness,
     _measure_section_loudness,
@@ -77,8 +78,9 @@ class AudioQualityAnalyzer:
         integrated_lufs, true_peak, lra = _measure_loudness(y, sr)
         diag_score       = _dialogue_score(y, sr)
         diag_label       = _classify_dialogue(diag_score)
-        section_loudness = _measure_section_loudness(y, sr, sections) if sections else []
-        lra_context      = _genre_lra_context(genre, lra)
+        section_loudness  = _measure_section_loudness(y, sr, sections) if sections else []
+        section_dialogue  = _dialogue_score_sections(y, sr, sections) if sections else []
+        lra_context       = _genre_lra_context(genre, lra)
 
         delta_spotify     = round(integrated_lufs - CONSTANTS.LUFS_SPOTIFY,     1)
         delta_apple_music = round(integrated_lufs - CONSTANTS.LUFS_APPLE_MUSIC, 1)
@@ -104,5 +106,6 @@ class AudioQualityAnalyzer:
             dialogue_label=diag_label,
             vo_headroom_db=_compute_vo_headroom(diag_score, CONSTANTS.VO_HEADROOM_MAX_DB),
             section_loudness=section_loudness,
+            section_dialogue=section_dialogue,
             genre_lra_context=lra_context,
         )

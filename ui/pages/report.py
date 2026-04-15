@@ -1630,6 +1630,28 @@ def _render_gain_table(aq: "AudioQualityResult") -> None:
     )
 
 
+def _render_section_dialogue_table(sections: list[dict]) -> None:
+    """Render per-section dialogue compatibility scores as a table (#91)."""
+    if not sections:
+        st.markdown(
+            "<div style='color:var(--dim);font-size:.84rem;font-family:Figtree,sans-serif;'>"
+            "Sections too short for per-section dialogue scoring.</div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    rows = []
+    for s in sections:
+        rows.append({
+            "Section":   html_mod.escape(str(s["label"])),
+            "Start":     f"{s['start_s']:.1f}s",
+            "End":       f"{s['end_s']:.1f}s",
+            "Score":     f"{s['dialogue_score']:.0%}",
+            "Verdict":   html_mod.escape(str(s["dialogue_label"])),
+        })
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+
+
 def _render_section_loudness_table(sections: list[dict]) -> None:
     """Render per-section LUFS / LRA as a styled table (#96)."""
     if not sections:
@@ -1787,6 +1809,11 @@ def _render_audio_quality_card(aq: Optional["AudioQualityResult"]) -> None:
       </div>
     </div>
     """, unsafe_allow_html=True)
+
+    # ── Per-section dialogue compatibility (#91) ──────────────────────────
+    if aq.section_dialogue:
+        with st.expander("Per-section dialogue compatibility", expanded=False):
+            _render_section_dialogue_table(aq.section_dialogue)
 
 
 def _render_sync_readiness(compliance: Optional[ComplianceReport]) -> None:

@@ -474,6 +474,11 @@ class AudioQualityResult(BaseModel):
     # None when genre is unknown or not provided — no recommendation shown in that case.
     genre_lra_context: Optional[dict[str, Any]] = None
 
+    # Per-section dialogue compatibility scores (#91)
+    # Each entry: {label, start_s, end_s, dialogue_score, dialogue_label}
+    # Sections shorter than DIALOGUE_MIN_SECTION_DUR_S are omitted.
+    section_dialogue: list[dict[str, Any]] = Field(default_factory=list)
+
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()
 
