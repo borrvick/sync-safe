@@ -517,6 +517,27 @@ class PopularityResult(BaseModel):
         return self.model_dump()
 
 
+class PlacementProfile(BaseModel):
+    """
+    Threshold overrides for a specific sync placement context (#107).
+
+    When a profile is selected in the sidebar, compliance check functions
+    use profile values instead of the global CONSTANTS, allowing stricter
+    or looser rules per placement type.
+
+    Default field values match the current CONSTANTS so that callers can
+    always construct a PlacementProfile without changing behavior.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name:                  str   = "Standard"
+    intro_max_seconds:     int   = 15     # matches CONSTANTS.INTRO_MAX_SECONDS
+    bar_energy_delta_min:  float = 0.10   # matches CONSTANTS.ENERGY_DELTA_MIN
+    sting_rms_drop_ratio:  float = 0.75   # matches CONSTANTS.STING_RMS_DROP_RATIO
+    sting_spike_factor:    float = 3.0    # matches CONSTANTS.STING_SPIKE_FACTOR
+
+
 class TrackCandidate(BaseModel):
     """A similar track returned by the discovery service."""
 

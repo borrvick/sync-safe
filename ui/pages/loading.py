@@ -583,7 +583,8 @@ def render_loading(source: Any) -> None:
             from services.compliance import Compliance
             sections = structure.sections if structure else []
             beats    = structure.beats    if structure else []
-            compliance = Compliance().check(audio, transcript, sections, beats)
+            _profile = st.session_state.get("placement_profile")
+            compliance = Compliance().check(audio, transcript, sections, beats, profile=_profile)
     except StepTimeoutError as exc:
         st.toast("⏱ Compliance audit timed out — sync checks unavailable.", icon="⚠️")
         _advance("compliance", t0, error=str(exc))

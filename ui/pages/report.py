@@ -50,6 +50,7 @@ from services.export import (
     to_platform_csv,
     to_section_markers_csv,
 )
+from services.analysis import section_ibi_tightness
 from services.content import THEME_TAXONOMY, ThemeMoodAnalyzer
 from services.forensics import AI_VERDICTS
 from services.loudness import build_ebu_r128_csv
@@ -98,6 +99,14 @@ _MOOD_COLORS: dict[str, str] = {
     "Chill":       "var(--accent)",
     "Dark":        "var(--danger)",
     "Intense":     "var(--danger)",
+}
+
+# IBI tightness tag → CSS variable colour (#137).
+# Locked = sync-ready quantized grid; Loose = rubato/live, harder to hit-sync.
+_IBI_TIGHTNESS_COLORS: dict[str, str] = {
+    "Locked":   "var(--ok)",
+    "Moderate": "var(--muted)",
+    "Loose":    "var(--grade-c)",
 }
 
 # Category → CSS variable for theme pill/bar coloring (#168)
@@ -903,10 +912,28 @@ def _render_structure_card(sr: Optional[StructureResult]) -> None:
                     st.session_state.player_key = st.session_state.get("player_key", 0) + 1
                     st.rerun()
             with col_label:
+                tightness = section_ibi_tightness(
+                    s.start,
+                    s.end,
+                    beats,
+                    CONSTANTS.SECTION_IBI_LOCKED_MS,
+                    CONSTANTS.SECTION_IBI_LOOSE_MS,
+                    CONSTANTS.SECTION_IBI_MIN_BEATS,
+                )
+                tightness_pill = ""
+                if tightness:
+                    tc = _IBI_TIGHTNESS_COLORS.get(tightness, "var(--dim)")
+                    tightness_pill = (
+                        f"<span style='font-family:Figtree,sans-serif;font-size:.52rem;"
+                        f"color:{tc};border:1px solid {tc};border-radius:3px;"
+                        f"padding:1px 5px;white-space:nowrap;margin-left:6px;"
+                        f"vertical-align:middle;'>{tightness}</span>"
+                    )
                 st.markdown(
                     f"<div style='font-family:\"Chakra Petch\",monospace;font-size:.76rem;"
                     f"font-weight:600;letter-spacing:.08em;text-transform:uppercase;"
-                    f"color:var(--text);padding-top:6px;'>{html_mod.escape(s.label)}</div>",
+                    f"color:var(--text);padding-top:6px;'>"
+                    f"{html_mod.escape(s.label)}{tightness_pill}</div>",
                     unsafe_allow_html=True,
                 )
     else:
