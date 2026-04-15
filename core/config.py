@@ -248,6 +248,8 @@ class SystemConstants:
 
     # True peak warning threshold — exceeding causes clipping on loudness-normalised playback
     TRUE_PEAK_WARN_DBFS: float = -1.0
+    # Oversampling factor for inter-sample true peak (ITU-R BS.1770-4 minimum is 4×)
+    TRUE_PEAK_OVERSAMPLE: int = 4
 
     # Loudness verdict classification thresholds (#95)
     LOUDNESS_BROADCAST_DELTA_MAX: float = 2.0    # ±LU from broadcast target → "Broadcast-ready"

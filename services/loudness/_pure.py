@@ -9,10 +9,27 @@ import logging
 import librosa
 import numpy as np
 import pyloudnorm as pyln
+from scipy.signal import resample_poly
 
 from core.config import CONSTANTS
 
 _log = logging.getLogger(__name__)
+
+
+def _measure_true_peak(y: np.ndarray) -> float:
+    """
+    Inter-sample true peak via oversampling (ITU-R BS.1770-4).
+
+    Upsamples by TRUE_PEAK_OVERSAMPLE (4×) using a polyphase anti-aliasing
+    filter, then finds the maximum absolute value and converts to dBFS.
+    Inter-sample peak is always ≥ sample peak by definition.
+
+    Pure function — no I/O.
+    """
+    factor = CONSTANTS.TRUE_PEAK_OVERSAMPLE
+    upsampled = resample_poly(y.astype(np.float64), up=factor, down=1)
+    peak_linear = float(np.max(np.abs(upsampled)))
+    return float(20.0 * np.log10(max(peak_linear, 1e-9)))
 
 
 def _measure_loudness(y: np.ndarray, sr: int) -> tuple[float, float, float]:
@@ -31,8 +48,7 @@ def _measure_loudness(y: np.ndarray, sr: int) -> tuple[float, float, float]:
     meter    = pyln.Meter(sr)  # BS.1770-4
     loudness = meter.integrated_loudness(data)
 
-    true_peak_linear = float(np.max(np.abs(y)))
-    true_peak_dbfs   = float(20 * np.log10(true_peak_linear + 1e-12))
+    true_peak_dbfs = _measure_true_peak(y)
 
     try:
         lra = float(meter.loudness_range(data))
