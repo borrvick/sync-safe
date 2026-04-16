@@ -132,7 +132,7 @@ class Ingestion:
         max_bytes = CONSTANTS.MAX_UPLOAD_BYTES
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "sync-safe/1.0"})
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=30) as resp:  # nosec B310 — HTTPS scheme validated at line above via _urlparse(url).scheme != "https" guard
                 chunks: list[bytes] = []
                 total = 0
                 while True:

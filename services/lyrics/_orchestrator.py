@@ -124,7 +124,7 @@ class LRCLibClient:
             url,
             headers={"User-Agent": "sync-safe-forensic-portal/1.0"},
         )
-        with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT_S) as resp:
+        with urllib.request.urlopen(req, timeout=_REQUEST_TIMEOUT_S) as resp:  # nosec B310 — base URL is the hardcoded _LRCLIB_SEARCH_URL constant; only title/artist appended as query params
             if resp.status != 200:
                 raise OSError(f"LRCLib returned HTTP {resp.status}")
             return json.loads(resp.read().decode("utf-8"))
