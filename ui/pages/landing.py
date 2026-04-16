@@ -15,14 +15,22 @@ from ui.nav import render_site_nav, render_site_footer
 # ── Bento card data ───────────────────────────────────────────────────────────
 
 _CARDS = [
-    {"cls": "bc-c2pa",   "theme": "tb", "icon": "🔬", "cat": "VERIFICATION",      "label": "C2PA Manifest Check",    "desc": "Reads <code>c2pa-python</code> manifests. If a <strong>born-AI</strong> assertion is present, it provides a cryptographically certified AI verdict — the strongest possible signal."},
-    {"cls": "bc-groove", "theme": "ta", "icon": "🥁", "cat": "IBI VARIANCE",       "label": "Groove Analysis",         "desc": "Measures inter-beat timing deviations in microseconds. Humans rush and drag <strong>(&gt;8ms²)</strong>. AI generators lock to a perfect grid <strong>(&lt;0.5ms²)</strong>."},
-    {"cls": "bc-loop",   "theme": "ta", "icon": "🔁", "cat": "SPECTRAL MATCHING",  "label": "Loop Detection",          "desc": "Splits audio into 4-bar segments and cross-correlates spectral fingerprints. Scores above <strong>0.98</strong> flag stock loops or AI repetition artifacts."},
-    {"cls": "bc-struct", "theme": "ta", "icon": "🎼", "cat": "AI ENSEMBLE",        "label": "Structure & Key",         "desc": "Predicts BPM, musical key, and functional section boundaries — intro, verse, chorus, bridge, outro — to help you match scene pacing precisely."},
-    {"cls": "bc-sting",  "theme": "ta", "icon": "🔔", "cat": "SYNC READINESS",     "label": "Sting & Intro Check",     "desc": "Analyses the final 2s RMS energy ratio to detect sting endings that disrupt scene audio. Also flags intro sections exceeding <strong>15s</strong> — the sync readiness limit for sync pitches."},
+    # ── Row 1: AI Detection ───────────────────────────────────────────────────
+    {"cls": "bc-c2pa",   "theme": "tb", "icon": "🔬", "cat": "VERIFICATION",      "label": "C2PA Manifest Check",    "desc": "Reads <code>c2pa-python</code> manifests. If a <strong>born-AI</strong> assertion is present, it provides a cryptographically certified AI verdict — the strongest possible signal. Covers 8+ forensic signals including noise floor ratio, SynthID phase coherence, and decoder peak density."},
+    {"cls": "bc-groove", "theme": "ta", "icon": "🥁", "cat": "IBI VARIANCE",       "label": "Groove Analysis",         "desc": "Measures inter-beat timing deviations in microseconds. Humans rush and drag <strong>(&gt;8ms²)</strong>. AI generators lock to a perfect grid <strong>(&lt;0.5ms²)</strong>. Per-section beat-grid tightness (Locked / Moderate / Loose) is shown alongside each structural segment."},
+    {"cls": "bc-loop",   "theme": "ta", "icon": "🔁", "cat": "SPECTRAL MATCHING",  "label": "Structural Repetition",   "desc": "Splits audio into 4-bar windows and computes both cross-correlation and onset autocorrelation. The <strong>Repetition Index</strong> blends both scores — scores above <strong>0.98</strong> flag stock loops or AI repetition artifacts. Inter-section and intra-section heatmaps surface the worst offenders."},
+    {"cls": "bc-struct", "theme": "ta", "icon": "🎼", "cat": "STRUCTURE ANALYSIS", "label": "Structure & Key",         "desc": "Predicts BPM, musical key, and functional section boundaries — intro, verse, chorus, bridge, outro — to help you match scene pacing precisely. Section confidence, duration, and beat-grid tightness are shown per row."},
+    # ── Row 2: Sync & Loudness ────────────────────────────────────────────────
+    {"cls": "bc-sting",  "theme": "ta", "icon": "🔔", "cat": "SYNC READINESS",     "label": "Sting, Energy & Intro",   "desc": "Three Gallo-Method checks: <strong>sting</strong> (final 2s RMS ratio), <strong>4–8 bar energy evolution</strong> (stagnant windows flagged with timestamps), and <strong>intro timer</strong> (sections exceeding the 15s sync-pitch limit). Configurable via Placement Profile in the sidebar."},
+    {"cls": "bc-cut",    "theme": "ta", "icon": "✂️", "cat": "EDIT POINTS",        "label": "Sync Edit Points",        "desc": "Scores every 4-bar window for energy, section boundaries, and phrase alignment. Returns the <strong>top-3 edit candidates</strong> for 15 / 30 / 60-second ad formats — with start/end timestamps ready to paste into Premiere or DaVinci Resolve."},
+    {"cls": "bc-loud",   "theme": "ta", "icon": "📻", "cat": "BROADCAST LOUDNESS", "label": "Loudness Analysis",       "desc": "Full <strong>EBU R128 / ITU-R BS.1770-4</strong> measurement: integrated LUFS, true peak dBFS, and loudness range. Per-platform gain recommendations for Spotify (−14 LUFS), Apple Music (−16 LUFS), YouTube (−14 LUFS), and broadcast (−23 LUFS). Genre-aware LRA context included."},
+    {"cls": "bc-dial",   "theme": "ta", "icon": "🎙️", "cat": "DIALOGUE COMPAT",   "label": "Dialogue Compatibility",  "desc": "Measures the fraction of energy outside the 300–3 kHz voiceover band. Returns a <strong>Dialogue-Ready / Mixed / Dialogue-Heavy</strong> label, an estimated <strong>VO headroom (dB)</strong>, and per-section compatibility scores — so you know before the mix whether the track competes with spoken dialogue."},
+    # ── Row 3: Lyrics & Authorship ────────────────────────────────────────────
     {"cls": "bc-lyrics", "theme": "tc", "icon": "🎤", "cat": "WHISPER AI",         "label": "Lyric Transcription",     "desc": "Converts vocals to timestamped text via OpenAI Whisper. Essential for flagging explicit content, trademarked phrases, or co-writer obligations before broadcast clearance."},
-    {"cls": "bc-auth",   "theme": "tc", "icon": "✍️", "cat": "AUTHORSHIP DETECT", "label": "AI Lyric Detection",      "desc": "Scores lyrics across four linguistic signals — burstiness, vocabulary diversity, rhyme density, repetition — plus a RoBERTa classifier. Returns <strong>Likely Human / Uncertain / Likely AI</strong>."},
-    {"cls": "bc-sim",    "theme": "ta", "icon": "🔍", "cat": "DISCOVERY ENGINE",   "label": "Similar Tracks",          "desc": "Uses Last.fm's similarity graph to surface comparable tracks — fully stateless, no database. Each result is resolved to a YouTube preview URL live via yt-dlp."},
+    {"cls": "bc-auth",   "theme": "tc", "icon": "✍️", "cat": "AUTHORSHIP DETECT", "label": "AI Lyric Detection",      "desc": "Five-signal ensemble — burstiness, vocabulary diversity, rhyme density, repetition score, and an AI-phrase detector — plus a <strong>RoBERTa classifier</strong>. Returns <strong>Likely Human / Uncertain / Likely AI</strong> at track level and per structural section (verse, chorus, bridge)."},
+    {"cls": "bc-theme",  "theme": "tc", "icon": "🌗", "cat": "THEME & MOOD",       "label": "Theme & Mood",            "desc": "Keyword taxonomy maps lyrics to placement themes — <em>uplifting</em>, <em>melancholic</em>, <em>tense</em>, <em>triumphant</em>, and more — with confidence scores per theme. Optional <strong>Groq enrichment</strong> adds a one-to-two sentence mood summary for brief matching."},
+    # ── Row 4: Discovery & Rights ─────────────────────────────────────────────
+    {"cls": "bc-sim",    "theme": "ta", "icon": "🔍", "cat": "DISCOVERY ENGINE",   "label": "Similar Tracks",          "desc": "Last.fm + Spotify recommendations ranked by listener co-occurrence. Each result shows a <strong>popularity tier badge</strong> (Emerging / Regional / Mainstream / Global) and resolves to a live YouTube preview via yt-dlp — fully stateless, no database."},
     {"cls": "bc-pro",    "theme": "tb", "icon": "⚖️", "cat": "RIGHTS SEARCH",     "label": "PRO Licensing Links",     "desc": "Generates direct search links for ASCAP, BMI, and SESAC repertory databases — so you can identify publishers and rights holders before a single outreach email."},
 ]
 
@@ -44,8 +52,9 @@ body.light .ttl-a{{color:rgba(175,65,0,.92)}}
 @keyframes eq-c{{0%,100%{{transform:scaleY(.72)}}25%{{transform:scaleY(.42)}}50%{{transform:scaleY(.08)}}75%{{transform:scaleY(.82)}}}}
 .grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;overflow:visible;padding:2px}}
 .bc-c2pa{{grid-column:1/3}}.bc-groove{{grid-column:3}}.bc-loop{{grid-column:4}}
-.bc-struct{{grid-column:1}}.bc-sting{{grid-column:2}}.bc-lyrics{{grid-column:3/5}}
-.bc-auth{{grid-column:1/3}}.bc-sim{{grid-column:3}}.bc-pro{{grid-column:4}}
+.bc-struct{{grid-column:1}}.bc-sting{{grid-column:2}}.bc-cut{{grid-column:3}}.bc-loud{{grid-column:4}}
+.bc-dial{{grid-column:1/3}}.bc-lyrics{{grid-column:3}}.bc-auth{{grid-column:4}}
+.bc-theme{{grid-column:1}}.bc-sim{{grid-column:2/4}}.bc-pro{{grid-column:4}}
 .bc-ph{{display:none}}
 .card{{position:relative;border-radius:13px;border:1px solid var(--border);
        min-height:clamp(180px,22vw,220px);
@@ -84,8 +93,8 @@ body.light .ttl-a{{color:rgba(175,65,0,.92)}}
 .ph-t{{font-family:'Chakra Petch',monospace;font-size:.6rem;font-weight:500;color:var(--dim);letter-spacing:.14em;text-transform:uppercase}}
 @media(max-width:500px){{
   .grid{{grid-template-columns:repeat(2,1fr)}}
-  .bc-c2pa,.bc-lyrics,.bc-auth{{grid-column:1/3}}
-  .bc-groove,.bc-loop,.bc-struct,.bc-sting,.bc-sim,.bc-pro{{grid-column:auto}}
+  .bc-c2pa,.bc-dial,.bc-lyrics{{grid-column:1/3}}
+  .bc-groove,.bc-loop,.bc-struct,.bc-sting,.bc-cut,.bc-loud,.bc-auth,.bc-theme,.bc-sim,.bc-pro{{grid-column:auto}}
 }}
 </style></head><body>
 <div class="grid" id="g"></div>
@@ -106,7 +115,7 @@ C.forEach(c=>{{
       <span class="cat ${{isA?'cat-a':'cat-d'}}">${{c.cat}}</span>
       <div class="bot">
         <div class="eq">${{bars(9,isA)}}</div>
-        <div class="icon">${{c.icon}}</div>
+        <div class="icon" aria-hidden="true">${{c.icon}}</div>
         <div class="ttl ${{isA?'ttl-a':''}}">${{c.label}}</div>
       </div>
     </div>
@@ -168,9 +177,9 @@ def render_landing() -> None:
                       margin-bottom:30px;">PORTAL</div>
           <div style="font-family:'Figtree',sans-serif;font-size:.96rem;font-weight:400;
                       color:var(--muted);line-height:1.65;max-width:480px;margin:0 auto;">
-            Detect AI authorship · Audit sync compliance · Flag lyric risks<br>
+            Detect AI authorship · Audit sync compliance · Analyse loudness &amp; dialogue<br>
             <span style="font-family:'Figtree',sans-serif;font-size:.88rem;
-                         color:var(--muted);">before a track costs you a placement.</span>
+                         color:var(--muted);">Flag lyric risks before a track costs you a placement.</span>
           </div>
           <div style="display:flex;align-items:center;justify-content:center;gap:20px;
                       margin-top:22px;flex-wrap:wrap;">
@@ -217,6 +226,6 @@ def render_landing() -> None:
         </div>
         """, unsafe_allow_html=True)
 
-        components.html(_BENTO, height=740, scrolling=False)
+        components.html(_BENTO, height=1020, scrolling=False)
 
     render_site_footer()
