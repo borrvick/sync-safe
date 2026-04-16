@@ -12,6 +12,7 @@ Five checks, one class:
 from __future__ import annotations
 
 import re
+from typing import Optional
 
 import numpy as np
 
@@ -23,6 +24,7 @@ from core.models import (
     ComplianceReport,
     EnergyEvolutionResult,
     IntroResult,
+    PlacementProfile,
     Section,
     StingResult,
     TranscriptSegment,
@@ -100,6 +102,7 @@ class Compliance:
         transcript: list[TranscriptSegment],
         sections: list[Section],
         beats: list[float],
+        profile: Optional[PlacementProfile] = None,
     ) -> ComplianceReport:
         """
         Run all sync readiness checks and return a typed ComplianceReport.
@@ -109,6 +112,8 @@ class Compliance:
             transcript: Whisper segments for the lyric audit.
             sections:   allin1 structural sections for the intro check.
             beats:      allin1 beat timestamps for the energy evolution check.
+            profile:    Optional placement profile with threshold overrides (#107).
+                        When None, global CONSTANTS values are used (no behavior change).
 
         Returns:
             ComplianceReport with flags, sub-results, and an A–F grade.
@@ -118,9 +123,9 @@ class Compliance:
         """
         y, sr = audio.to_array(CONSTANTS.SAMPLE_RATE)
 
-        sting     = self._check_sting(y, sr, beats)
-        evolution = self._check_energy_evolution(y, sr, beats, sections)
-        intro     = self._check_intro(y, sr, beats, sections, transcript)
+        sting     = self._check_sting(y, sr, beats, profile=profile)
+        evolution = self._check_energy_evolution(y, sr, beats, sections, profile=profile)
+        intro     = self._check_intro(y, sr, beats, sections, transcript, profile=profile)
         flags     = self._audit_lyrics(transcript)
 
         grade = _compute_grade(flags=flags)
@@ -139,15 +144,20 @@ class Compliance:
 
     @spaces.GPU
     def _check_sting(
-        self, audio: np.ndarray, sr: int, beats: list[float]
+        self,
+        audio: np.ndarray,
+        sr: int,
+        beats: list[float],
+        profile: Optional[PlacementProfile] = None,
     ) -> StingResult:
         """
         Classify the track ending as sting, fade, or cut.
 
         Args:
-            audio: Pre-decoded mono array at CONSTANTS.SAMPLE_RATE.
-            sr:    Sample rate of the decoded array.
-            beats: Beat timestamps (seconds) for cut-type classification (#104).
+            audio:   Pre-decoded mono array at CONSTANTS.SAMPLE_RATE.
+            sr:      Sample rate of the decoded array.
+            beats:   Beat timestamps (seconds) for cut-type classification (#104).
+            profile: Optional placement profile; overrides CONSTANTS thresholds (#107).
         """
         import librosa
 
@@ -191,9 +201,11 @@ class Compliance:
             if post_end > peak_sample else pre_rms
         )
         energy_drop  = 1.0 - (post_rms / pre_rms)
-        is_sting     = (
-            onset_spike >= CONSTANTS.STING_SPIKE_FACTOR
-            and energy_drop >= CONSTANTS.STING_RMS_DROP_RATIO
+        spike_threshold = profile.sting_spike_factor    if profile else CONSTANTS.STING_SPIKE_FACTOR
+        drop_threshold  = profile.sting_rms_drop_ratio  if profile else CONSTANTS.STING_RMS_DROP_RATIO
+        is_sting        = (
+            onset_spike >= spike_threshold
+            and energy_drop >= drop_threshold
             and not is_fade
         )
 
@@ -246,6 +258,7 @@ class Compliance:
         sr: int,
         beats: list[float],
         sections: list[Section],
+        profile: Optional[PlacementProfile] = None,
     ) -> EnergyEvolutionResult:
         """
         Verify spectral contrast evolves across every 4-bar window.
@@ -255,6 +268,7 @@ class Compliance:
             sr:       Sample rate of the decoded array.
             beats:    allin1 beat timestamps; falls back to librosa if sparse.
             sections: allin1 sections for per-section breakdown (#106).
+            profile:  Optional placement profile; overrides CONSTANTS thresholds (#107).
         """
         import librosa
 
@@ -272,6 +286,7 @@ class Compliance:
             )
 
         beats_arr = np.asarray(beats, dtype=float)
+        energy_delta_min = profile.bar_energy_delta_min if profile else CONSTANTS.ENERGY_DELTA_MIN
 
         def _scan_windows(
             seg_audio: np.ndarray, seg_beats: np.ndarray
@@ -294,7 +309,7 @@ class Compliance:
             norm = [(c - cmin) / crange for c in cs]
             stag = sum(
                 1 for k in range(1, len(wins))
-                if abs(norm[k] - norm[k - 1]) < CONSTANTS.ENERGY_DELTA_MIN
+                if abs(norm[k] - norm[k - 1]) < energy_delta_min
             )
             return stag, len(wins) - 1
 
@@ -334,7 +349,7 @@ class Compliance:
         stagnant_ts: list[float] = [
             round(global_window_starts[i], 3)
             for i in range(1, len(global_windows))
-            if per_window_deltas[i - 1] < CONSTANTS.ENERGY_DELTA_MIN
+            if per_window_deltas[i - 1] < energy_delta_min
         ]
 
         stagnant = len(stagnant_ts)
@@ -342,7 +357,7 @@ class Compliance:
         flag  = stagnant > 0
         detail = (
             f"{stagnant} of {total} window{'s' if total != 1 else ''} below "
-            f"{CONSTANTS.ENERGY_DELTA_MIN:.0%} spectral contrast delta"
+            f"{energy_delta_min:.0%} spectral contrast delta"
             if flag else ""
         )
 
@@ -393,9 +408,10 @@ class Compliance:
         beats: list[float],
         sections: list[Section],
         transcript: list[TranscriptSegment],
+        profile: Optional[PlacementProfile] = None,
     ) -> IntroResult:
         """
-        Flag intros longer than CONSTANTS.INTRO_MAX_SECONDS.
+        Flag intros longer than INTRO_MAX_SECONDS (from profile or CONSTANTS).
 
         Three signals (#105):
           1. allin1 section label "intro" — most reliable structural signal
@@ -469,7 +485,8 @@ class Compliance:
                 confidence="",
             )
 
-        flagged = intro_secs > CONSTANTS.INTRO_MAX_SECONDS
+        intro_max_s = profile.intro_max_seconds if profile else CONSTANTS.INTRO_MAX_SECONDS
+        flagged = intro_secs > intro_max_s
         return IntroResult(
             intro_seconds=round(intro_secs, 1),
             flag=flagged,

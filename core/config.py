@@ -166,6 +166,17 @@ class SystemConstants:
     # means the track loops cleanly but isn't mechanical — most versatile for short spots.
     SYNC_CUT_LOOP_BONUS: float = 0.05
 
+    # ---- Section IBI tightness (#137) ----------------------------------------
+    # Std dev of inter-beat intervals within a section, in milliseconds.
+    # ≤ LOCKED → quantized / grid-locked (dance/sync-ready)
+    # ≥ LOOSE  → rubato or live feel (harder to hit-sync to picture)
+    # Between the two → Moderate
+    SECTION_IBI_LOCKED_MS: float = 5.0
+    SECTION_IBI_LOOSE_MS:  float = 20.0
+    # Minimum beats required inside a section for a reliable std dev estimate.
+    # Sections with fewer beats return None (no tag rendered).
+    SECTION_IBI_MIN_BEATS: int = 4
+
     # ---- Section-aware repetition (#143, #145) --------------------------------
     # Minimum section duration (seconds) to attempt fingerprinting.
     # Sections shorter than this are skipped — avoids noise in tiny blips.
@@ -858,6 +869,55 @@ SYNC_FEE_MULTIPLIERS: dict[str, dict[str, float]] = {
         "Exclusive":     1.8,
     },
 }
+
+
+# Placement profiles for compliance threshold overrides (#107).
+# Defined as module-level constants (not inside SystemConstants) to avoid
+# Pydantic's mutable-default error — same pattern as SYNC_FEE_MULTIPLIERS.
+# Import PlacementProfile lazily to avoid circular imports with core.models.
+def _build_placement_profiles() -> "dict[str, PlacementProfile]":
+    from core.models import PlacementProfile  # noqa: PLC0415
+    return {
+        "Standard": PlacementProfile(
+            name="Standard",
+            intro_max_seconds=15,
+            bar_energy_delta_min=0.10,
+            sting_rms_drop_ratio=0.75,
+            sting_spike_factor=3.0,
+        ),
+        "Broadcast (EBU R128)": PlacementProfile(
+            name="Broadcast (EBU R128)",
+            intro_max_seconds=10,
+            bar_energy_delta_min=0.12,
+            sting_rms_drop_ratio=0.08,
+            sting_spike_factor=2.5,
+        ),
+        "Commercial (30s spot)": PlacementProfile(
+            name="Commercial (30s spot)",
+            intro_max_seconds=5,
+            bar_energy_delta_min=0.15,
+            sting_rms_drop_ratio=0.10,
+            sting_spike_factor=3.0,
+        ),
+        "Trailer": PlacementProfile(
+            name="Trailer",
+            intro_max_seconds=8,
+            bar_energy_delta_min=0.20,
+            sting_rms_drop_ratio=0.05,
+            sting_spike_factor=4.0,
+        ),
+        "Library / Background": PlacementProfile(
+            name="Library / Background",
+            intro_max_seconds=15,
+            bar_energy_delta_min=0.08,
+            sting_rms_drop_ratio=0.04,
+            sting_spike_factor=1.5,
+        ),
+    }
+
+
+PLACEMENT_PROFILES: "dict[str, PlacementProfile]" = _build_placement_profiles()
+PLACEMENT_PROFILE_DEFAULT: str = "Standard"
 
 
 # ---------------------------------------------------------------------------
