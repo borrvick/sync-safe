@@ -69,9 +69,15 @@ from ._pure import (
     segment_ai_probabilities,
 )
 
+# Verdict strings that indicate AI origin — imported by consumers to avoid
+# hardcoding labels that must stay in sync with _aggregators._compute_verdict.
+AI_VERDICTS: frozenset[str] = frozenset({"AI", "Likely AI"})
+
 __all__ = [
     # Public class
     "Forensics",
+    # Verdict helpers
+    "AI_VERDICTS",
     # Bundle
     "_SignalBundle",
     # Aggregators

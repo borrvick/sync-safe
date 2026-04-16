@@ -30,7 +30,7 @@ def render_how_it_works() -> None:
           </div>
           <div style="font-family:'Figtree',sans-serif;font-size:1rem;color:var(--muted);
                       line-height:1.65;max-width:560px;margin-top:20px;">
-            Sync-Safe runs four independent analysis stages on every submitted track.
+            Sync-Safe runs seven independent analysis stages on every submitted track.
             Each stage answers a distinct question a music supervisor or clearance agent
             needs answered before a placement decision.
           </div>
@@ -63,7 +63,7 @@ def render_how_it_works() -> None:
               <div style="font-family:'Chakra Petch',monospace;font-size:.6rem;font-weight:700;
                           color:var(--text);letter-spacing:.06em;">AI DETECTION</div>
               <div style="font-family:'Figtree',sans-serif;font-size:.66rem;color:var(--muted);
-                          margin-top:4px;line-height:1.4;">C2PA · IBI · Spectral · Loop</div>
+                          margin-top:4px;line-height:1.4;">C2PA · IBI · Loop · SynthID · 8+ signals</div>
             </div>
             <div style="display:flex;align-items:center;padding:0 4px;color:var(--dim);
                         font-size:.9rem;">→</div>
@@ -94,7 +94,7 @@ def render_how_it_works() -> None:
               <div style="font-family:'Chakra Petch',monospace;font-size:.6rem;font-weight:700;
                           color:var(--accent);letter-spacing:.06em;">REPORT</div>
               <div style="font-family:'Figtree',sans-serif;font-size:.66rem;color:var(--muted);
-                          margin-top:4px;line-height:1.4;">Timestamped · Actionable</div>
+                          margin-top:4px;line-height:1.4;">Timestamped · Export-ready</div>
             </div>
           </div>
         </div>
@@ -105,9 +105,9 @@ def render_how_it_works() -> None:
             st.markdown("""
             <p style="font-family:'Figtree',sans-serif;font-size:.88rem;color:var(--muted);
                       line-height:1.7;margin:4px 0 20px;">
-              The authorship verdict draws on four independent signals. Each signal
-              can flag AI origin independently — they are combined for a final
-              <strong>Likely AI / Uncertain / Likely Human</strong> verdict.
+              The authenticity verdict draws on <strong>eight-plus independent forensic signals</strong>.
+              Each signal can flag AI origin independently — they are combined via a calibrated
+              weighted model for a final <strong>Likely AI / Uncertain / Likely Human</strong> verdict.
             </p>
             """, unsafe_allow_html=True)
             c1, c2 = st.columns(2, gap="small")
@@ -129,16 +129,28 @@ def render_how_it_works() -> None:
                   </p>
                 </div>""", unsafe_allow_html=True)
                 st.markdown("""
-                <div style="background:var(--s2);border-radius:10px;padding:18px;">
+                <div style="background:var(--s2);border-radius:10px;padding:18px;margin-bottom:12px;">
                   <div style="font-family:'Chakra Petch',monospace;font-size:.58rem;font-weight:700;
                               color:var(--accent);letter-spacing:.14em;text-transform:uppercase;
                               margin-bottom:8px;">📡 Spectral Fingerprint</div>
                   <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);line-height:1.6;margin:0;">
-                    Most AI audio synthesis models exhibit characteristic artifacts in the
-                    high-frequency spectrum (16 kHz+), shaped by mel-filterbank and vocoder layers.
-                    Sync-Safe analyzes spectral contrast across frequency bands and flags anomalous
-                    distributions in the 16 kHz+ range that deviate from patterns typical of
-                    recorded acoustic instruments and studio-produced audio.
+                    Most AI synthesis models leave characteristic artifacts in the high-frequency
+                    spectrum (16 kHz+), shaped by mel-filterbank and vocoder layers. Sync-Safe
+                    analyzes spectral contrast across frequency bands and flags anomalous
+                    distributions that deviate from patterns typical of recorded acoustic
+                    instruments and studio-produced audio.
+                  </p>
+                </div>""", unsafe_allow_html=True)
+                st.markdown("""
+                <div style="background:var(--s2);border-radius:10px;padding:18px;">
+                  <div style="font-family:'Chakra Petch',monospace;font-size:.58rem;font-weight:700;
+                              color:var(--accent);letter-spacing:.14em;text-transform:uppercase;
+                              margin-bottom:8px;">🔕 Noise Floor Ratio</div>
+                  <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);line-height:1.6;margin:0;">
+                    Real recordings contain ambient room noise during quiet passages. VST-rendered
+                    and AI-synthesised tracks tend toward a near-zero noise floor in silent frames.
+                    Sync-Safe computes the quiet-frame RMS / mean RMS ratio — values near zero
+                    are a strong signal of a rendered, non-acoustic source.
                   </p>
                 </div>""", unsafe_allow_html=True)
             with c2:
@@ -154,24 +166,39 @@ def render_how_it_works() -> None:
                     <code style="font-family:'JetBrains Mono',monospace;font-size:.72rem;
                     background:var(--badge-bg);padding:1px 5px;border-radius:3px;">librosa</code>
                     beat tracking and flags "Perfect Quantization" when variance falls below threshold.
+                    Per-section tightness (Locked / Moderate / Loose) is shown alongside each section.
+                  </p>
+                </div>""", unsafe_allow_html=True)
+                st.markdown("""
+                <div style="background:var(--s2);border-radius:10px;padding:18px;margin-bottom:12px;">
+                  <div style="font-family:'Chakra Petch',monospace;font-size:.58rem;font-weight:700;
+                              color:var(--accent);letter-spacing:.14em;text-transform:uppercase;
+                              margin-bottom:8px;">🔁 Structural Repetition</div>
+                  <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);line-height:1.6;margin:0;">
+                    Sync-Safe splits audio into 4-bar and 8-bar windows, extracts mel-spectrogram
+                    fingerprints for each, and computes both cross-correlation and onset autocorrelation.
+                    The <strong>Repetition Index</strong> (0.6 × loop + 0.4 × autocorr) blends both
+                    scores. Above 0.98 flags a likely stock loop or AI repetition artifact. Inter-section
+                    and intra-section heatmaps surface the worst-offending regions.
                   </p>
                 </div>""", unsafe_allow_html=True)
                 st.markdown("""
                 <div style="background:var(--s2);border-radius:10px;padding:18px;">
                   <div style="font-family:'Chakra Petch',monospace;font-size:.58rem;font-weight:700;
                               color:var(--accent);letter-spacing:.14em;text-transform:uppercase;
-                              margin-bottom:8px;">🔁 Loop Detection</div>
+                              margin-bottom:8px;">🎵 SynthID &amp; Decoder Peak</div>
                   <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);line-height:1.6;margin:0;">
-                    Sync-Safe splits audio into 4-bar and 8-bar windows, extracts mel-spectrogram
-                    fingerprints for each, and computes cross-correlation across all segment pairs.
-                    A score above <strong>0.98</strong> flags the pair as a likely stock loop or
-                    AI repetition artifact — a signal the track may not be original compositional work.
+                    Diffusion-based generators leave periodic phase-coherence patterns in the
+                    18–22 kHz band (SynthID proxy) and predictable deconvolution peaks in the
+                    1–16 kHz band from decoder upsampling. Sync-Safe measures both and weights
+                    them in the final AI probability score — calibrated from ISMIR/TISMIR 2025
+                    and arXiv 2506.19108.
                   </p>
                 </div>""", unsafe_allow_html=True)
             st.markdown('<div style="padding-bottom:8px;"></div>', unsafe_allow_html=True)
 
         # ── Stage 2: Sync Compliance ──────────────────────────────────────────
-        with st.expander("Stage 2 — Sync Compliance Auditing"):
+        with st.expander("Stage 2 — Sync Readiness Checks"):
             st.markdown("""
             <p style="font-family:'Figtree',sans-serif;font-size:.88rem;color:var(--muted);
                       line-height:1.7;margin:4px 0 20px;">
@@ -230,8 +257,72 @@ def render_how_it_works() -> None:
             </div>
             """, unsafe_allow_html=True)
 
-        # ── Stage 3: Lyric Audit ──────────────────────────────────────────────
-        with st.expander("Stage 3 — Lyric Risk Audit"):
+        # ── Stage 4: Broadcast & Post-Production ─────────────────────────────
+        with st.expander("Stage 4 — Loudness, Dialogue &amp; Sync Edit Points"):
+            st.markdown("""
+            <p style="font-family:'Figtree',sans-serif;font-size:.88rem;color:var(--muted);
+                      line-height:1.7;margin:4px 0 20px;">
+              Three practical checks for post-production and broadcast delivery.
+            </p>
+            """, unsafe_allow_html=True)
+            for title, body in [
+                ("📻 Loudness Analysis (EBU R128 / ITU-R BS.1770-4)",
+                 "Integrated programme loudness (LUFS), true peak (dBFS), and Loudness Range (LU). "
+                 "Per-platform gain recommendations for Spotify (−14 LUFS), Apple Music (−16 LUFS), "
+                 "YouTube (−14 LUFS), and broadcast (−23 LUFS). Genre-aware LRA context compares "
+                 "the track's dynamic range against typical peers. Per-section LUFS and LRA breakdown "
+                 "surfaces loud/quiet section imbalances before the mix."),
+                ("🎙️ Dialogue Compatibility",
+                 "Measures the fraction of spectral energy falling outside the 300–3 kHz voiceover band — "
+                 "the range where spoken dialogue lives. Returns a <strong>Dialogue-Ready / Mixed / "
+                 "Dialogue-Heavy</strong> label, an estimated <strong>VO headroom (dB)</strong> scaled "
+                 "from the dialogue score, and per-section compatibility scores so you know which "
+                 "sections sit cleanly under voice and which compete with it."),
+                ("✂️ Sync Edit Points",
+                 "Beat-aligned scoring of every 4-bar window for energy variation, section-boundary "
+                 "alignment, and phrase completeness. Returns the <strong>top-3 edit candidates</strong> "
+                 "for 15 / 30 / 60-second ad formats — each with a start timestamp, end timestamp, "
+                 "actual duration, confidence score, and a plain-English note ready to paste into "
+                 "Premiere Pro or DaVinci Resolve."),
+            ]:
+                st.markdown(
+                    f'<div style="background:var(--s2);border-radius:10px;padding:18px;'
+                    f'border-left:3px solid var(--accent);margin-bottom:12px;">'
+                    f'<div style="font-family:\'Chakra Petch\',monospace;font-size:.62rem;font-weight:700;'
+                    f'color:var(--text);letter-spacing:.1em;margin-bottom:10px;">{title}</div>'
+                    f'<p style="font-family:\'Figtree\',sans-serif;font-size:.8rem;color:var(--muted);'
+                    f'line-height:1.65;margin:0;">{body}</p></div>',
+                    unsafe_allow_html=True,
+                )
+
+        # ── Stage 5: Theme & Mood ─────────────────────────────────────────────
+        with st.expander("Stage 5 — Theme &amp; Mood"):
+            st.markdown("""
+            <p style="font-family:'Figtree',sans-serif;font-size:.88rem;color:var(--muted);
+                      line-height:1.7;margin:4px 0 20px;">
+              Keyword taxonomy maps lyrics to placement themes with per-theme confidence scores.
+              Optional Groq enrichment adds a brief mood narrative for brief matching.
+            </p>
+            """, unsafe_allow_html=True)
+            st.markdown("""
+            <div style="background:var(--s2);border-radius:10px;padding:18px;
+                        border-left:3px solid var(--accent);margin-bottom:4px;">
+              <div style="font-family:'Chakra Petch',monospace;font-size:.62rem;font-weight:700;
+                          color:var(--text);letter-spacing:.1em;margin-bottom:10px;">
+                🌗 Theme Classification + Groq Mood Summary
+              </div>
+              <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);line-height:1.65;">
+                Sync-Safe maps lyrics against a curated theme taxonomy spanning energy, emotional,
+                seasonal, and narrative categories — returning a ranked theme list with per-theme
+                confidence scores for UI visualisation. When Groq enrichment is enabled, the model
+                generates a one-to-two sentence mood summary in brief-matching language: the kind
+                of plain-English description a music supervisor would write in a track brief.
+              </p>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # ── Stage 6: Lyric Audit ──────────────────────────────────────────────
+        with st.expander("Stage 6 — Lyric Risk Audit"):
             st.markdown("""
             <p style="font-family:'Figtree',sans-serif;font-size:.88rem;color:var(--muted);
                       line-height:1.7;margin:4px 0 20px;">
@@ -266,7 +357,7 @@ def render_how_it_works() -> None:
                 c_num, c_body = st.columns([0.06, 0.94], gap="small")
                 with c_num:
                     st.markdown(
-                        f'<div style="font-family:\'Chakra Petch\',monospace;font-size:1.2rem;'
+                        f'<div aria-hidden="true" style="font-family:\'Chakra Petch\',monospace;font-size:1.2rem;'
                         f'padding-top:18px;text-align:center;color:var(--text);">{num}</div>',
                         unsafe_allow_html=True,
                     )
@@ -280,8 +371,8 @@ def render_how_it_works() -> None:
                         unsafe_allow_html=True,
                     )
 
-        # ── Stage 4: Rights Discovery ─────────────────────────────────────────
-        with st.expander("Stage 4 — Rights Discovery"):
+        # ── Stage 7: Rights Discovery ─────────────────────────────────────────
+        with st.expander("Stage 7 — Rights Discovery"):
             st.markdown("""
             <p style="font-family:'Figtree',sans-serif;font-size:.88rem;color:var(--muted);
                       line-height:1.7;margin:4px 0 20px;">
@@ -296,12 +387,14 @@ def render_how_it_works() -> None:
                 <div style="background:var(--s2);border-radius:10px;padding:18px;">
                   <div style="font-family:'Chakra Petch',monospace;font-size:.58rem;font-weight:700;
                               color:var(--accent);letter-spacing:.14em;text-transform:uppercase;
-                              margin-bottom:8px;">🔍 Audio Similarity</div>
+                              margin-bottom:8px;">🔍 Similar Tracks</div>
                   <p style="font-family:'Figtree',sans-serif;font-size:.8rem;color:var(--muted);line-height:1.6;margin:0;">
                     Last.fm's <code style="font-family:'JetBrains Mono',monospace;font-size:.72rem;
                     background:var(--badge-bg);padding:1px 5px;border-radius:3px;">track.getSimilar</code>
-                    API returns a ranked list of comparable tracks based on listener co-occurrence.
-                    Each result is resolved to a live YouTube preview via
+                    API returns a ranked list of comparable tracks based on listener co-occurrence,
+                    supplemented by Spotify recommendations. Each result carries a
+                    <strong>popularity tier badge</strong> (Emerging / Regional / Mainstream / Global)
+                    and resolves to a live YouTube preview via
                     <code style="font-family:'JetBrains Mono',monospace;font-size:.72rem;
                     background:var(--badge-bg);padding:1px 5px;border-radius:3px;">yt-dlp ytsearch1:</code>
                     — fully stateless, no database required.

@@ -72,14 +72,22 @@ class Discovery:
     # Public interface (TrackDiscovery protocol)
     # ------------------------------------------------------------------
 
-    def find_similar(self, title: str, artist: str) -> list[TrackCandidate]:
+    def find_similar(
+        self,
+        title: str,
+        artist: str,
+        mood_tags: list[str] | None = None,
+    ) -> list[TrackCandidate]:
         """
         Return up to CONSTANTS.MAX_SIMILAR_TRACKS similar tracks with
         resolved YouTube URLs.
 
         Args:
-            title:  Track title string.
-            artist: Artist name string.
+            title:     Track title string.
+            artist:    Artist name string.
+            mood_tags: Optional mood labels from Essentia feature extraction (#74).
+                       When provided, feeds the first tag into Last.fm
+                       tag.getTopArtists as a third discovery source.
 
         Returns:
             List of TrackCandidate objects ordered by similarity descending.
@@ -99,7 +107,54 @@ class Discovery:
         if not title and not artist:
             return []
 
-        triples = _fetch_similar(title, artist, api_key)
+        settings = get_settings()
+        lastfm_triples = _fetch_similar(title, artist, api_key)
+
+        # ── Spotify recommendations (#126) ────────────────────────────────────
+        # When Spotify credentials are available, fetch recommendations seeded by
+        # the input track and interleave them with the Last.fm results.
+        spotify_pairs: list[tuple[str, str]] = []
+        if settings.spotify_client_id and settings.spotify_client_secret:
+            token = _get_spotify_token(
+                settings.spotify_client_id, settings.spotify_client_secret
+            )
+            if token:
+                pop_result = _fetch_spotify_popularity(
+                    title, artist,
+                    settings.spotify_client_id,
+                    settings.spotify_client_secret,
+                    token=token,  # reuse already-fetched token — avoids a second round-trip
+                )
+                if pop_result is not None:
+                    _, track_id = pop_result
+                    spotify_pairs = _fetch_spotify_recommendations(
+                        track_id, token, limit=CONSTANTS.MAX_SIMILAR_TRACKS
+                    )
+
+        # ── Essentia mood-tag discovery (#74) ─────────────────────────────────
+        # Use the top mood tag to query Last.fm tag.getTopArtists → top tracks.
+        # Falls back silently — mood_tags is None when Essentia is not installed
+        # or extraction failed upstream.
+        mood_pairs: list[tuple[str, str]] = []
+        if mood_tags:
+            mood_pairs = _fetch_lastfm_tag_artists(mood_tags[0], api_key)
+
+        # Three-way merge: Last.fm track similarity → Spotify → mood-tag path.
+        # _merge_candidates accepts a flat second list — concatenate spotify and
+        # mood pairs so all three sources are deduped in a single pass.
+        triples = _merge_candidates(
+            lastfm_triples,
+            spotify_pairs + mood_pairs,
+            max_results=CONSTANTS.MAX_SIMILAR_TRACKS,
+        )
+
+        # Build source lookup sets once — used per-candidate to assign source label.
+        lfm_keys = {
+            (a.lower().strip(), ttl.lower().strip()) for a, ttl, _ in lastfm_triples
+        }
+        mood_keys = {
+            (a.lower().strip(), ttl.lower().strip()) for a, ttl in mood_pairs
+        }
 
         candidates: list[TrackCandidate] = []
         for i, (sim_artist, sim_title, listeners) in enumerate(triples):
@@ -108,14 +163,22 @@ class Discovery:
             # expose a numeric score in the getSimilar response we consume
             similarity = round(1.0 - (i / max(len(triples), 1)) * 0.5, 3)
             # Tier from Last.fm listeners already in the similar-tracks response (#124).
-            # None when listeners=0 (fallback path returns 0 → unreliable signal).
+            # None when listeners=0 (fallback path, Spotify-sourced, or mood-sourced).
             tier = _listeners_to_tier(listeners) if listeners > 0 else None
+            norm_key = (sim_artist.lower().strip(), sim_title.lower().strip())
+            if norm_key in lfm_keys:
+                source = "lastfm"
+            elif norm_key in mood_keys:
+                source = "audio"   # mood-based audio feature path
+            else:
+                source = "spotify"
             candidates.append(TrackCandidate(
                 title=sim_title,
                 artist=sim_artist,
                 youtube_url=yt_url,
                 similarity=similarity,
                 popularity_tier=tier,
+                source=source,
             ))
 
         return candidates
@@ -192,11 +255,12 @@ class Discovery:
 
         # ── Spotify ───────────────────────────────────────────────────────────
         if settings.spotify_client_id and settings.spotify_client_secret:
-            spotify_score = _fetch_spotify_popularity(
+            result = _fetch_spotify_popularity(
                 title, artist,
                 settings.spotify_client_id,
                 settings.spotify_client_secret,
             )
+            spotify_score = result[0] if result is not None else None
 
         # ── Bail if nothing at all ────────────────────────────────────────────
         if not listeners and not playcount and spotify_score is None and not metrics:
@@ -254,6 +318,53 @@ def _fetch_similar(title: str, artist: str, api_key: str) -> list[tuple[str, str
         return _fetch_artist_similar(artist, api_key)
 
     return []
+
+
+def _fetch_lastfm_tag_artists(
+    tag: str,
+    api_key: str,
+) -> list[tuple[str, str]]:
+    """
+    Fetch top artists for a Last.fm mood/genre tag, then each artist's top track (#74).
+
+    Uses tag.getTopArtists to find artists associated with the tag, then
+    artist.getTopTracks to get a representative track per artist.  This is the
+    Essentia mood-tag discovery path — a third source alongside track.getSimilar
+    (Last.fm) and Spotify recommendations.
+
+    Returns:
+        List of (artist, title) pairs; empty on any failure.
+        Listeners count is omitted — tag-sourced entries carry no reliable count.
+
+    Pure I/O boundary — no business logic.
+    """
+    if not tag or not tag.strip():
+        return []
+
+    params = {
+        "method":  "tag.getTopArtists",
+        "tag":     tag.strip().lower(),
+        "api_key": api_key,
+        "format":  "json",
+        "limit":   CONSTANTS.MAX_SIMILAR_TRACKS,
+    }
+
+    try:
+        resp = requests.get(_LASTFM_BASE, params=params, timeout=10)
+        resp.raise_for_status()
+        artists = resp.json().get("topartists", {}).get("artist", [])
+
+        results: list[tuple[str, str]] = []
+        for entry in artists[:CONSTANTS.MAX_SIMILAR_TRACKS]:
+            artist_name = entry.get("name", "")
+            if not artist_name:
+                continue
+            top_track = _fetch_top_track(artist_name, api_key)
+            if top_track:
+                results.append((artist_name, top_track))
+        return results
+    except Exception:  # noqa: BLE001 — mood path is always best-effort
+        return []
 
 
 def _fetch_artist_similar(artist: str, api_key: str) -> list[tuple[str, str, int]]:
@@ -468,41 +579,57 @@ def _classify_popularity(
     )
 
 
+def _get_spotify_token(client_id: str, client_secret: str) -> Optional[str]:
+    """
+    Fetch a Spotify client credentials OAuth token.
+
+    Returns the access token string, or None on any failure.
+    Pure I/O boundary — no business logic.
+    """
+    try:
+        credentials = base64.b64encode(
+            f"{client_id}:{client_secret}".encode()
+        ).decode()
+        resp = requests.post(
+            "https://accounts.spotify.com/api/token",
+            headers={"Authorization": f"Basic {credentials}"},
+            data={"grant_type": "client_credentials"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json().get("access_token") or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _fetch_spotify_popularity(
     title: str,
     artist: str,
     client_id: str,
     client_secret: str,
-) -> Optional[int]:
+    token: Optional[str] = None,
+) -> Optional[tuple[int, str]]:
     """
-    Fetch Spotify popularity score (0–100) via the Web API search endpoint.
+    Fetch Spotify popularity score (0–100) and track ID via the Web API.
 
-    Uses client credentials OAuth — no user login required.  The token is
-    fetched fresh on each call; caching across calls is intentionally omitted
-    here because popularity is already a best-effort supplementary signal and
-    adding token state would complicate testing.
+    Uses client credentials OAuth — no user login required.  Returns a
+    (score, track_id) tuple so the caller can reuse track_id for recommendations
+    (#126) without a second search round-trip.
+
+    Args:
+        token: Optional pre-fetched OAuth token.  When provided, skips the
+               internal _get_spotify_token() call to avoid a redundant round-trip.
 
     Returns None on any failure (missing credentials, network error, no match).
 
     Pure I/O boundary — no business logic.
     """
     try:
-        # ── Step 1: client credentials token ─────────────────────────────────
-        credentials = base64.b64encode(
-            f"{client_id}:{client_secret}".encode()
-        ).decode()
-        token_resp = requests.post(
-            "https://accounts.spotify.com/api/token",
-            headers={"Authorization": f"Basic {credentials}"},
-            data={"grant_type": "client_credentials"},
-            timeout=10,
-        )
-        token_resp.raise_for_status()
-        token = token_resp.json().get("access_token", "")
-        if not token:
+        resolved_token = token or _get_spotify_token(client_id, client_secret)
+        if not resolved_token:
             return None
+        token = resolved_token
 
-        # ── Step 2: search for the track ──────────────────────────────────────
         query = f"track:{title} artist:{artist}" if artist else f"track:{title}"
         search_resp = requests.get(
             "https://api.spotify.com/v1/search",
@@ -515,9 +642,97 @@ def _fetch_spotify_popularity(
         if not items:
             return None
 
-        return int(items[0].get("popularity", 0))
+        item      = items[0]
+        score     = int(item.get("popularity", 0))
+        track_id  = item.get("id", "")
+        if not track_id:
+            return None
+
+        return (score, track_id)
     except Exception:  # noqa: BLE001 — Spotify is always best-effort
         return None
+
+
+def _fetch_spotify_recommendations(
+    track_id: str,
+    token: str,
+    limit: int,
+) -> list[tuple[str, str]]:
+    """
+    Fetch Spotify track recommendations seeded by a single track ID (#126).
+
+    Returns a list of (artist, title) tuples up to `limit` entries.
+    Returns an empty list on any failure — recommendations are always best-effort.
+
+    Pure I/O boundary — no business logic.
+    """
+    try:
+        resp = requests.get(
+            "https://api.spotify.com/v1/recommendations",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"seed_tracks": track_id, "limit": limit},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        tracks = resp.json().get("tracks", [])
+        results: list[tuple[str, str]] = []
+        for t in tracks:
+            artists = t.get("artists", [])
+            artist  = artists[0].get("name", "") if artists else ""
+            title   = t.get("name", "")
+            if artist and title:
+                results.append((artist, title))
+        return results
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _merge_candidates(
+    lastfm: list[tuple[str, str, int]],
+    extra_pairs: list[tuple[str, str]],
+    max_results: int,
+) -> list[tuple[str, str, int]]:
+    """
+    Round-robin interleave Last.fm and extra candidates; dedup by normalised key.
+
+    `extra_pairs` may come from any non-Last.fm source (Spotify recommendations,
+    Essentia mood-tag path, or a concatenation of both).  Entries carry no
+    listener count — they are assigned 0.
+
+    Normalisation: lowercase, strip leading/trailing whitespace.  The first
+    occurrence of each (artist, title) pair is kept; duplicates are dropped.
+
+    Pure function — no I/O.
+    """
+    seen: set[tuple[str, str]] = set()
+    merged: list[tuple[str, str, int]] = []
+
+    # Convert extra pairs to the same 3-tuple shape (listeners=0)
+    extra_triples: list[tuple[str, str, int]] = [
+        (art, ttl, 0) for art, ttl in extra_pairs
+    ]
+
+    # Round-robin interleave
+    for lfm, extra in zip(lastfm, extra_triples):
+        for entry in (lfm, extra):
+            key = (entry[0].lower().strip(), entry[1].lower().strip())
+            if key not in seen:
+                seen.add(key)
+                merged.append(entry)
+            if len(merged) >= max_results:
+                return merged
+
+    # Drain whichever list is longer
+    for remainder in (lastfm[len(extra_triples):], extra_triples[len(lastfm):]):
+        for entry in remainder:
+            key = (entry[0].lower().strip(), entry[1].lower().strip())
+            if key not in seen:
+                seen.add(key)
+                merged.append(entry)
+            if len(merged) >= max_results:
+                return merged
+
+    return merged
 
 
 def _find_binary(name: str) -> Optional[str]:

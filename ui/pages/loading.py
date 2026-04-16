@@ -15,6 +15,7 @@ Design rules:
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import time
@@ -582,7 +583,8 @@ def render_loading(source: Any) -> None:
             from services.compliance import Compliance
             sections = structure.sections if structure else []
             beats    = structure.beats    if structure else []
-            compliance = Compliance().check(audio, transcript, sections, beats)
+            _profile = st.session_state.get("placement_profile")
+            compliance = Compliance().check(audio, transcript, sections, beats, profile=_profile)
     except StepTimeoutError as exc:
         st.toast("⏱ Compliance audit timed out — sync checks unavailable.", icon="⚠️")
         _advance("compliance", t0, error=str(exc))
@@ -635,6 +637,17 @@ def render_loading(source: Any) -> None:
         _advance("theme_mood", t0)
 
     # ── Step 8: Track discovery ───────────────────────────────────────────
+    # Best-effort Essentia mood extraction (#74) — always non-fatal.
+    # Runs before the timed discovery step; feeds mood_tags into find_similar().
+    _mood_tags: list[str] = []
+    try:
+        from services.essentia_similarity import EssentiaSimilarity  # noqa: PLC0415
+        with step_timeout(CONSTANTS.ESSENTIA_FEATURE_TIMEOUT_S, "essentia_mood"):
+            _feats = EssentiaSimilarity().extract_features(audio.raw)
+            _mood_tags = _feats.get("mood_tags", [])
+    except Exception:  # noqa: BLE001 — mood extraction is always best-effort
+        pass
+
     _tick("Track Discovery", "discovery")
     t0 = time.time()
     similar = []
@@ -642,7 +655,7 @@ def render_loading(source: Any) -> None:
     try:
         with step_timeout(_STEP_TIMEOUT_S["discovery"], "discovery"):
             from services.discovery import Discovery
-            similar = Discovery().find_similar(title, artist) or []
+            similar = Discovery().find_similar(title, artist, mood_tags=_mood_tags) or []
     except StepTimeoutError as exc:
         st.toast("⏱ Track discovery timed out — similar tracks unavailable.", icon="⚠️")
         _advance("discovery", t0, error=str(exc))
@@ -675,7 +688,22 @@ def render_loading(source: Any) -> None:
                 title, artist,
                 platform_metrics=dict(audio.engagement),
             )
-            audio_quality = AudioQualityAnalyzer().analyze(audio)
+            # Session-state cache — avoids recompute when the same audio is
+            # re-submitted within the same browser session (#102).
+            # SHA-256 of first 64 KB is cheap and sufficient for identity.
+            audio_hash = hashlib.sha256(audio.raw[:CONSTANTS.LOUDNESS_CACHE_HASH_BYTES]).hexdigest()
+            if (
+                st.session_state.get("_loudness_audio_hash") == audio_hash
+                and st.session_state.get("_loudness_result") is not None
+            ):
+                audio_quality = st.session_state["_loudness_result"]
+            else:
+                audio_quality = AudioQualityAnalyzer().analyze(
+                    audio,
+                    sections=structure.sections if structure is not None else None,
+                )
+                st.session_state["_loudness_audio_hash"] = audio_hash
+                st.session_state["_loudness_result"]     = audio_quality
     except StepTimeoutError as exc:
         st.toast("⏱ Legal/loudness step timed out — PRO links and loudness data unavailable.", icon="⚠️")
         _advance("legal", t0, error=str(exc))

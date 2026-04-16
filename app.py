@@ -9,7 +9,7 @@ lives in pipeline.py and services/.
 import streamlit as st
 import streamlit.components.v1 as components
 
-from core.config import get_settings
+from core.config import PLACEMENT_PROFILES, PLACEMENT_PROFILE_DEFAULT, get_settings
 from core.logging import DEFAULT_LOG_DIR, LogCleaner
 from ui.styles import STYLES
 
@@ -151,14 +151,16 @@ components.html(_THEME_JS, height=0, scrolling=False)
 # start_time, player_key — Audio State Manager (clickable timestamps)
 
 for key, default in [
-    ("page",            "landing"),
-    ("source",          None),
-    ("audio",           None),
-    ("analysis",        None),
+    ("page",                "landing"),
+    ("source",              None),
+    ("audio",               None),
+    ("analysis",            None),
     ("track_report",        None),
     ("_report_analysis_id", None),
     ("start_time",          0),
     ("player_key",          0),
+    ("placement_profile",   PLACEMENT_PROFILES[PLACEMENT_PROFILE_DEFAULT]),
+    ("_placement_name",     PLACEMENT_PROFILE_DEFAULT),
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -220,6 +222,40 @@ if st.session_state.page == "raw_data":
     from ui.pages.raw_data import render_raw_data
     render_raw_data(analysis)
     st.stop()
+
+# ── Placement profile sidebar selector (#107) ────────────────────────────────
+# Only shown on the report page (analysis is complete).
+# When the user changes the profile, clear the analysis from session state so
+# the loading page re-runs compliance with the new thresholds on next submit.
+
+_profile_options = list(PLACEMENT_PROFILES.keys())
+_current_name    = st.session_state.get("_placement_name", PLACEMENT_PROFILE_DEFAULT)
+# Guard against stale session state if profile options changed between deploys
+if _current_name not in _profile_options:
+    _current_name = PLACEMENT_PROFILE_DEFAULT
+
+with st.sidebar:
+    st.markdown(
+        "<div style='font-family:\"Chakra Petch\",monospace;font-size:.58rem;"
+        "font-weight:600;letter-spacing:.12em;text-transform:uppercase;"
+        "color:var(--dim);margin-bottom:4px;'>Placement Type</div>",
+        unsafe_allow_html=True,
+    )
+    selected_name = st.selectbox(
+        "Placement Type",
+        _profile_options,
+        index=_profile_options.index(_current_name),
+        key="placement_selectbox",
+        label_visibility="collapsed",
+        help="Adjusts intro, energy, and sting thresholds for the target placement context.",
+    )
+    if selected_name != st.session_state["_placement_name"]:
+        st.session_state["placement_profile"] = PLACEMENT_PROFILES[selected_name]
+        st.session_state["_placement_name"]   = selected_name
+        # Clear analysis so the loading page re-runs compliance with new thresholds
+        st.session_state["analysis"] = None
+        st.session_state["page"]     = "loading"
+        st.rerun()
 
 from ui.pages.report import render_report
 render_report(audio, analysis)

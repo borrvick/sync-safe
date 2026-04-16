@@ -53,6 +53,8 @@ class SystemConstants:
     # ---- Audio ----------------------------------------------------------------
     SAMPLE_RATE: int = 22_050           # Hz; librosa default, balances quality/memory
     MAX_UPLOAD_BYTES: int = 50 * 1024 * 1024  # 50 MB hard ceiling
+    # Bytes to hash for session-state loudness cache key — enough for reliable identity (#102)
+    LOUDNESS_CACHE_HASH_BYTES: int = 65_536  # 64 KB
 
     # ---- Forensics ------------------------------------------------------------
     # Inter-beat interval variance below this → "Perfect Quantization" (AI signal)
@@ -137,6 +139,8 @@ class SystemConstants:
 
     # ---- Discovery ------------------------------------------------------------
     MAX_SIMILAR_TRACKS: int = 5
+    ESSENTIA_MAX_MOOD_TAGS: int    = 3   # top-N mood tags passed to Last.fm tag discovery
+    ESSENTIA_FEATURE_TIMEOUT_S: int = 30  # max seconds for MusicExtractor per track
 
     # ---- Sync-Cut Detection ---------------------------------------------------
     # Standard ad/TV edit durations (seconds) to find edit points for.
@@ -161,6 +165,17 @@ class SystemConstants:
     # Moderate repetition (REPETITION_INDEX_MODERATE ≤ loop_score < REPETITION_INDEX_HIGH)
     # means the track loops cleanly but isn't mechanical — most versatile for short spots.
     SYNC_CUT_LOOP_BONUS: float = 0.05
+
+    # ---- Section IBI tightness (#137) ----------------------------------------
+    # Std dev of inter-beat intervals within a section, in milliseconds.
+    # ≤ LOCKED → quantized / grid-locked (dance/sync-ready)
+    # ≥ LOOSE  → rubato or live feel (harder to hit-sync to picture)
+    # Between the two → Moderate
+    SECTION_IBI_LOCKED_MS: float = 5.0
+    SECTION_IBI_LOOSE_MS:  float = 20.0
+    # Minimum beats required inside a section for a reliable std dev estimate.
+    # Sections with fewer beats return None (no tag rendered).
+    SECTION_IBI_MIN_BEATS: int = 4
 
     # ---- Section-aware repetition (#143, #145) --------------------------------
     # Minimum section duration (seconds) to attempt fingerprinting.
@@ -248,6 +263,10 @@ class SystemConstants:
 
     # True peak warning threshold — exceeding causes clipping on loudness-normalised playback
     TRUE_PEAK_WARN_DBFS: float = -1.0
+    # Oversampling factor for inter-sample true peak (ITU-R BS.1770-4 minimum is 4×)
+    TRUE_PEAK_OVERSAMPLE: int = 4
+    # Minimum section duration (s) for per-section LUFS/LRA — pyloudnorm needs several 400ms gating blocks
+    DIALOGUE_MIN_SECTION_DUR_S: float = 2.0
 
     # Loudness verdict classification thresholds (#95)
     LOUDNESS_BROADCAST_DELTA_MAX: float = 2.0    # ±LU from broadcast target → "Broadcast-ready"
@@ -810,6 +829,95 @@ class SystemConstants:
 
 # Module-level singleton — import directly, never instantiate.
 CONSTANTS = SystemConstants()
+
+# Genre-aware LRA context ranges (LU low, LU high) — soft recommendation only (#99).
+# Kept as a module-level dict (not on SystemConstants) to avoid Pydantic mutable-default errors.
+GENRE_LRA_RANGES: dict[str, tuple[float, float]] = {
+    "pop":        (4.0,  8.0),
+    "hip-hop":    (4.0,  8.0),
+    "electronic": (5.0,  9.0),
+    "rock":       (6.0, 10.0),
+    "country":    (6.0, 10.0),
+    "r&b":        (5.0,  9.0),
+    "jazz":       (10.0, 16.0),
+    "classical":  (12.0, 20.0),
+    "cinematic":  (12.0, 18.0),
+    "ambient":    (10.0, 18.0),
+    "folk":       (8.0,  14.0),
+}
+GENRE_LRA_DEFAULT: tuple[float, float] = (6.0, 14.0)  # fallback for unrecognised genres
+
+
+# Sync fee scenario multipliers (#110).
+# Defined as a module-level constant (not inside SystemConstants) to avoid
+# Pydantic's mutable-default error on nested dicts — same pattern as GENRE_LRA_RANGES.
+SYNC_FEE_MULTIPLIERS: dict[str, dict[str, float]] = {
+    "usage": {
+        "Documentary":   1.0,
+        "TV Scene":      1.5,
+        "Ad (30s)":      2.5,
+        "Trailer":       3.5,
+        "Online/Social": 0.6,
+    },
+    "territory": {
+        "US-only":   1.0,
+        "Europe":    1.3,
+        "Worldwide": 2.0,
+    },
+    "exclusivity": {
+        "Non-exclusive": 1.0,
+        "Exclusive":     1.8,
+    },
+}
+
+
+# Placement profiles for compliance threshold overrides (#107).
+# Defined as module-level constants (not inside SystemConstants) to avoid
+# Pydantic's mutable-default error — same pattern as SYNC_FEE_MULTIPLIERS.
+# Import PlacementProfile lazily to avoid circular imports with core.models.
+def _build_placement_profiles() -> "dict[str, PlacementProfile]":
+    from core.models import PlacementProfile  # noqa: PLC0415
+    return {
+        "Standard": PlacementProfile(
+            name="Standard",
+            intro_max_seconds=15,
+            bar_energy_delta_min=0.10,
+            sting_rms_drop_ratio=0.75,
+            sting_spike_factor=3.0,
+        ),
+        "Broadcast (EBU R128)": PlacementProfile(
+            name="Broadcast (EBU R128)",
+            intro_max_seconds=10,
+            bar_energy_delta_min=0.12,
+            sting_rms_drop_ratio=0.08,
+            sting_spike_factor=2.5,
+        ),
+        "Commercial (30s spot)": PlacementProfile(
+            name="Commercial (30s spot)",
+            intro_max_seconds=5,
+            bar_energy_delta_min=0.15,
+            sting_rms_drop_ratio=0.10,
+            sting_spike_factor=3.0,
+        ),
+        "Trailer": PlacementProfile(
+            name="Trailer",
+            intro_max_seconds=8,
+            bar_energy_delta_min=0.20,
+            sting_rms_drop_ratio=0.05,
+            sting_spike_factor=4.0,
+        ),
+        "Library / Background": PlacementProfile(
+            name="Library / Background",
+            intro_max_seconds=15,
+            bar_energy_delta_min=0.08,
+            sting_rms_drop_ratio=0.04,
+            sting_spike_factor=1.5,
+        ),
+    }
+
+
+PLACEMENT_PROFILES: "dict[str, PlacementProfile]" = _build_placement_profiles()
+PLACEMENT_PROFILE_DEFAULT: str = "Standard"
 
 
 # ---------------------------------------------------------------------------

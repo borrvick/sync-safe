@@ -4,15 +4,38 @@ Pure loudness measurement and dialogue-readiness functions — no I/O, no Stream
 """
 from __future__ import annotations
 
+import csv
+import io
 import logging
+import math
 
 import librosa
 import numpy as np
 import pyloudnorm as pyln
+from scipy.signal import resample_poly
 
-from core.config import CONSTANTS
+from typing import Any
+
+from core.config import CONSTANTS, GENRE_LRA_DEFAULT, GENRE_LRA_RANGES
+from core.models import AudioQualityResult, Section
 
 _log = logging.getLogger(__name__)
+
+
+def _measure_true_peak(y: np.ndarray) -> float:
+    """
+    Inter-sample true peak via oversampling (ITU-R BS.1770-4).
+
+    Upsamples by TRUE_PEAK_OVERSAMPLE (4×) using a polyphase anti-aliasing
+    filter, then finds the maximum absolute value and converts to dBFS.
+    Inter-sample peak is always ≥ sample peak by definition.
+
+    Pure function — no I/O.
+    """
+    factor = CONSTANTS.TRUE_PEAK_OVERSAMPLE
+    upsampled = resample_poly(y.astype(np.float64), up=factor, down=1)
+    peak_linear = float(np.max(np.abs(upsampled)))
+    return float(20.0 * np.log10(max(peak_linear, 1e-9)))
 
 
 def _measure_loudness(y: np.ndarray, sr: int) -> tuple[float, float, float]:
@@ -31,8 +54,7 @@ def _measure_loudness(y: np.ndarray, sr: int) -> tuple[float, float, float]:
     meter    = pyln.Meter(sr)  # BS.1770-4
     loudness = meter.integrated_loudness(data)
 
-    true_peak_linear = float(np.max(np.abs(y)))
-    true_peak_dbfs   = float(20 * np.log10(true_peak_linear + 1e-12))
+    true_peak_dbfs = _measure_true_peak(y)
 
     try:
         lra = float(meter.loudness_range(data))
@@ -41,6 +63,68 @@ def _measure_loudness(y: np.ndarray, sr: int) -> tuple[float, float, float]:
         lra = 0.0
 
     return round(float(loudness), 1), round(true_peak_dbfs, 1), round(lra, 1)
+
+
+def _measure_section_loudness(
+    y: np.ndarray,
+    sr: int,
+    sections: list[Section],
+) -> list[dict[str, str | float | bool]]:
+    """
+    Compute integrated LUFS and LRA for each structural section (#96).
+
+    Sections shorter than CONSTANTS.DIALOGUE_MIN_SECTION_DUR_S are skipped
+    (pyloudnorm's gating algorithm requires several 400ms blocks to converge).
+    Skipped sections carry nan values so the UI can render "—" instead of crashing.
+    The loudest valid section is annotated with is_peak=True.
+
+    Pure function — no I/O.
+    """
+    meter   = pyln.Meter(sr)
+    results: list[dict[str, str | float | bool]] = []
+
+    for sec in sections:
+        start_sample = int(sec.start * sr)
+        end_sample   = min(int(sec.end * sr), len(y))
+        slice_       = y[start_sample:end_sample]
+        duration     = len(slice_) / sr
+
+        if duration < CONSTANTS.DIALOGUE_MIN_SECTION_DUR_S:
+            results.append({
+                "label":            sec.label,
+                "start_s":          round(sec.start, 1),
+                "end_s":            round(sec.end, 1),
+                "integrated_lufs":  float("nan"),
+                "lra_lu":           float("nan"),
+            })
+            continue
+
+        data = slice_.astype(np.float64).reshape(-1, 1)
+        try:
+            lufs = float(meter.integrated_loudness(data))
+        except ValueError:
+            lufs = float("nan")
+
+        try:
+            lra = float(meter.loudness_range(data))
+        except ValueError:
+            lra = float("nan")
+
+        results.append({
+            "label":            sec.label,
+            "start_s":          round(sec.start, 1),
+            "end_s":            round(sec.end, 1),
+            "integrated_lufs":  round(lufs, 1) if not math.isnan(lufs) else float("nan"),
+            "lra_lu":           round(lra, 1)  if not math.isnan(lra)  else float("nan"),
+        })
+
+    # Mark the loudest valid section
+    valid = [r for r in results if not math.isnan(float(r["integrated_lufs"]))]
+    if valid:
+        peak = max(valid, key=lambda r: float(r["integrated_lufs"]))
+        peak["is_peak"] = True
+
+    return results
 
 
 def _dialogue_score(y: np.ndarray, sr: int) -> float:
@@ -62,6 +146,41 @@ def _dialogue_score(y: np.ndarray, sr: int) -> float:
 
     competition_ratio = dialogue_energy / total_energy
     return round(float(max(0.0, min(1.0, 1.0 - competition_ratio))), 3)
+
+
+def _dialogue_score_sections(
+    y: np.ndarray,
+    sr: int,
+    sections: list[Section],
+) -> list[dict[str, Any]]:
+    """
+    Compute per-section dialogue-readiness scores (#91).
+
+    Reuses _dialogue_score() and _classify_dialogue() on each waveform slice.
+    Sections shorter than CONSTANTS.DIALOGUE_MIN_SECTION_DUR_S are omitted —
+    too little audio for a reliable spectral energy ratio.
+
+    Pure function — no I/O.
+    """
+    results: list[dict[str, Any]] = []
+    for sec in sections:
+        start_sample = int(sec.start * sr)
+        end_sample   = min(int(sec.end * sr), len(y))
+        duration     = (end_sample - start_sample) / sr
+
+        if duration < CONSTANTS.DIALOGUE_MIN_SECTION_DUR_S:
+            continue
+
+        y_slice = y[start_sample:end_sample]
+        score   = _dialogue_score(y_slice, sr)
+        results.append({
+            "label":          sec.label,
+            "start_s":        round(sec.start, 3),
+            "end_s":          round(sec.end, 3),
+            "dialogue_score": round(score, 3),
+            "dialogue_label": _classify_dialogue(score),
+        })
+    return results
 
 
 def _classify_loudness(
@@ -111,3 +230,97 @@ def _classify_dialogue(score: float) -> str:
     if score >= CONSTANTS.DIALOGUE_READY_LOW:
         return "Mixed"
     return "Dialogue-Heavy"
+
+
+def _genre_lra_context(
+    genre: str | None,
+    measured_lra: float,
+) -> dict[str, Any] | None:
+    """
+    Return a soft LRA recommendation dict for the detected genre (#99).
+
+    Performs an exact key lookup in GENRE_LRA_RANGES, then a substring
+    fallback (e.g. "trap hip-hop" → "hip-hop"), then GENRE_LRA_DEFAULT.
+    Returns None when genre is None or an empty string — callers treat
+    None as "no recommendation to show."
+
+    Pure function — no I/O.
+    """
+    if not genre or not genre.strip():
+        return None
+
+    key = genre.lower().strip()
+
+    # Exact match first, then substring fallback
+    if key in GENRE_LRA_RANGES:
+        low, high = GENRE_LRA_RANGES[key]
+        matched = key
+    else:
+        matched = next(
+            (k for k in GENRE_LRA_RANGES if k in key),
+            None,
+        )
+        if matched:
+            low, high = GENRE_LRA_RANGES[matched]
+        else:
+            low, high = GENRE_LRA_DEFAULT
+            matched = None
+
+    # Use the canonical key name for display when matched; fall back to the
+    # raw genre string title-cased only when no key matched at all.
+    display = matched.title() if matched else genre.strip().title()
+
+    if measured_lra < low:
+        note = f"Low for {display} ({low:.0f}–{high:.0f} LU typical) — over-compressed"
+    elif measured_lra > high:
+        note = f"High for {display} ({low:.0f}–{high:.0f} LU typical) — wide dynamics"
+    else:
+        note = f"Within typical {display} range ({low:.0f}–{high:.0f} LU)"
+
+    return {
+        "genre":    genre,
+        "lra_low":  low,
+        "lra_high": high,
+        "note":     note,
+    }
+
+
+def _fmt_float(val: float, fmt: str = ".1f") -> str:
+    """Format a float with the given format spec; return 'N/A' for nan/inf."""
+    return f"{val:{fmt}}" if math.isfinite(val) else "N/A"
+
+
+def build_ebu_r128_csv(track_name: str, aq: AudioQualityResult) -> str:
+    """
+    Build an EBU R128 delivery report as a CSV string (#101).
+
+    Returns a standalone CSV suitable for mastering engineers and sync
+    supervisors.  All numeric fields are guarded against nan — written as
+    "N/A" so the file is always parseable.
+
+    Pure function — no I/O (uses io.StringIO internally).
+    """
+    buf    = io.StringIO()
+    writer = csv.writer(buf)
+
+    writer.writerow(["EBU R128 Delivery Report"])
+    writer.writerow(["Track", track_name])
+    writer.writerow([])
+
+    writer.writerow(["Metric", "Value", "Standard"])
+    writer.writerow(["Integrated LUFS",    _fmt_float(aq.integrated_lufs),   "ITU-R BS.1770-4 / EBU R128"])
+    writer.writerow(["True Peak (dBFS)",   _fmt_float(aq.true_peak_dbfs),    "ITU-R BS.1770-4"])
+    writer.writerow(["Loudness Range (LU)", _fmt_float(aq.loudness_range_lu), "EBU R128"])
+    writer.writerow([])
+
+    writer.writerow(["Platform", "Target LUFS", "Delta (LU)", "Gain Adjustment"])
+    writer.writerow(["Spotify",     f"{CONSTANTS.LUFS_SPOTIFY:.1f}",     _fmt_float(aq.delta_spotify),     f"{_fmt_float(-aq.delta_spotify)} dB"])
+    writer.writerow(["Apple Music", f"{CONSTANTS.LUFS_APPLE_MUSIC:.1f}", _fmt_float(aq.delta_apple_music), f"{_fmt_float(-aq.delta_apple_music)} dB"])
+    writer.writerow(["YouTube",     f"{CONSTANTS.LUFS_YOUTUBE:.1f}",     _fmt_float(aq.delta_youtube),     f"{_fmt_float(-aq.delta_youtube)} dB"])
+    writer.writerow(["Broadcast",   f"{CONSTANTS.LUFS_BROADCAST:.1f}",   _fmt_float(aq.delta_broadcast),   f"{_fmt_float(-aq.delta_broadcast)} dB"])
+    writer.writerow([])
+
+    writer.writerow(["Verdict",           aq.loudness_verdict])
+    writer.writerow(["True Peak Warning", "YES" if aq.true_peak_warning else "NO"])
+
+    return buf.getvalue()
