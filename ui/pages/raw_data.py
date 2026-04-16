@@ -1,17 +1,26 @@
 """
 ui/pages/raw_data.py
 
-Raw Data page — renders the flat TrackReport for a completed analysis.
+Raw Data page — full pipeline output as structured, downloadable JSON.
 
-Shows every pipeline data point in grouped tables and expanders, plus a
-CSV download button. Intended for internal use / QA, not end-user facing.
+Every field produced by every pipeline stage is included, including fields
+not rendered on the report page (gain recommendations, per-section loudness,
+per-section authorship, section similarities, sting enrichment, etc.).
 
-TrackReport is computed lazily on first render and cached in session_state
-so navigating back to the report and returning here doesn't recompute it.
+Source of truth: AnalysisResult.to_dict() — all nested model fields are
+captured automatically, so new pipeline signals appear here without any
+changes to this file. TrackReport contributes _meta identity/scalar fields
+(track_id, scan_timestamp, derived counts) that are not part of AnalysisResult.
+
+Use this view to:
+  - Inspect raw signal values and verify computations
+  - Reference complete data during future DB schema design
+  - Export a full JSON payload for external tooling
 """
 from __future__ import annotations
 
 import json
+from typing import Any, Optional
 
 import streamlit as st
 
@@ -23,135 +32,98 @@ _EXPORTER = ReportExporter()
 
 
 # ---------------------------------------------------------------------------
-# Field groups for display (ordered)
-# ---------------------------------------------------------------------------
-
-_SCALAR_GROUPS: list[tuple[str, list[str]]] = [
-    ("Identity", [
-        "track_id", "scan_timestamp",
-    ]),
-    ("Audio / Ingestion", [
-        "title", "artist", "source", "sample_rate",
-        "yt_view_count", "yt_like_count",
-    ]),
-    ("Structure", [
-        "bpm", "key", "duration_s", "beat_count", "section_count",
-        "intro_s", "verse_count", "chorus_count", "bridge_count",
-    ]),
-    ("Forensics — Verdict", [
-        "forensic_verdict", "ai_probability", "forensic_flag_count",
-        "c2pa_flag", "c2pa_origin", "is_vocal",
-    ]),
-    ("Forensics — Raw Signals", [
-        "ibi_variance", "loop_score", "loop_autocorr_score",
-        "spectral_slop", "synthid_score",
-        "centroid_instability_score", "harmonic_ratio_score",
-        "kurtosis_variability", "decoder_peak_score", "spectral_centroid_mean",
-        "self_similarity_entropy", "noise_floor_ratio", "onset_strength_cv",
-        "spectral_flatness_var", "subbeat_grid_deviation",
-        "pitch_quantization_score", "ultrasonic_noise_ratio",
-        "infrasonic_energy_ratio", "phase_coherence_differential",
-        "plr_std", "voiced_noise_floor",
-    ]),
-    ("Audio Quality / Loudness", [
-        "integrated_lufs", "true_peak_dbfs", "loudness_range_lu",
-        "delta_spotify", "delta_apple_music", "delta_youtube", "delta_broadcast",
-        "true_peak_warning", "dialogue_score", "dialogue_label",
-    ]),
-    ("Stem Validation", [
-        "mono_compatible", "phase_correlation",
-        "cancellation_db", "mid_side_ratio", "stem_flag_count",
-    ]),
-    ("Compliance", [
-        "compliance_grade",
-        "total_flag_count", "confirmed_flag_count", "potential_flag_count",
-        "hard_flag_count", "soft_flag_count",
-        "sting_flag", "sting_ending_type", "sting_final_energy_ratio",
-        "energy_evolution_flag", "stagnant_windows", "total_windows",
-        "intro_flag", "intro_seconds", "intro_source",
-    ]),
-    ("Authorship", [
-        "authorship_verdict", "authorship_signal_count", "roberta_score",
-        "burstiness_score", "unique_word_ratio", "rhyme_density", "repetition_score",
-    ]),
-    ("Theme & Mood", [
-        "mood", "theme_confidence", "groq_enriched",
-    ]),
-    ("Popularity & Cost", [
-        "popularity_score", "popularity_tier",
-        "lastfm_listeners", "lastfm_playcount", "spotify_score",
-        "sync_cost_low", "sync_cost_high",
-    ]),
-    ("Legal", [
-        "isrc", "pro_match",
-    ]),
-    ("Metadata Validation", [
-        "metadata_valid", "missing_fields_count",
-        "split_total", "split_error", "isrc_valid",
-    ]),
-]
-
-_JSON_BLOBS: list[tuple[str, str]] = [
-    ("Compliance Flags",    "compliance_flags_json"),
-    ("AI Segments",         "ai_segments_json"),
-    ("Sections",            "sections_json"),
-    ("Transcript",          "transcript_json"),
-    ("Similar Tracks",      "similar_tracks_json"),
-    ("Sync Cuts",           "sync_cuts_json"),
-    ("Forensic Flags",      "forensic_flags_json"),
-    ("Forensic Notes",      "forensic_notes_json"),
-    ("Themes",              "themes_json"),
-    ("Theme Keywords",      "theme_keywords_json"),
-]
-
-
-# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 def _get_or_build_report(analysis: AnalysisResult) -> TrackReport:
-    """Return cached TrackReport or build it on first call."""
+    """Return cached TrackReport or build on first call."""
     if st.session_state.get("track_report") is None:
         st.session_state["track_report"] = _EXPORTER.build(analysis)
     return st.session_state["track_report"]  # type: ignore[return-value]
 
 
-def _render_scalar_group(label: str, fields: list[str], row: dict) -> None:
-    with st.expander(label, expanded=True):
-        pairs = [(k, row[k]) for k in fields if k in row]
-        if not pairs:
-            st.caption("No data.")
-            return
-        col_field, col_val = st.columns([2, 3])
-        col_field.markdown("**Field**")
-        col_val.markdown("**Value**")
-        for field, value in pairs:
-            col_field.text(field)
-            col_val.text("—" if value is None else str(value))
+def _enrich_structure(
+    raw_structure: Optional[dict[str, Any]],
+    report: TrackReport,
+) -> Optional[dict[str, Any]]:
+    """Add derived scalar counts to the structure section."""
+    if raw_structure is None:
+        return None
+    return {
+        **raw_structure,
+        # Derived counts not stored on StructureResult itself
+        "duration_s":     report.duration_s,
+        "beat_count":     report.beat_count,
+        "section_count":  report.section_count,
+        "intro_s":        report.intro_s,
+        "verse_count":    report.verse_count,
+        "chorus_count":   report.chorus_count,
+        "bridge_count":   report.bridge_count,
+    }
 
 
-def _render_json_blob(label: str, key: str, row: dict) -> None:
-    raw = row.get(key, "[]")
-    parse_error = False
-    try:
-        parsed = json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        parsed = raw
-        parse_error = True
+def _build_full_json(analysis: AnalysisResult, report: TrackReport) -> dict[str, Any]:
+    """
+    Build a complete, ordered JSON object from the analysis result.
 
-    count = len(parsed) if isinstance(parsed, list) else 1
-    header = f"{label}  ({count} item{'s' if count != 1 else ''})"
+    Uses AnalysisResult.to_dict() as the authoritative data source so that
+    every field — including ones added after this file was written — is
+    captured automatically without code changes here.
 
-    with st.expander(header, expanded=False):
-        if parse_error:
-            st.caption("⚠️ Could not parse JSON blob.")
-            st.text(str(raw))
-        elif not parsed or parsed == []:
-            st.caption("Empty.")
-        elif isinstance(parsed, list):
-            st.dataframe(parsed, use_container_width=True)
-        else:
-            st.json(parsed)
+    Pure function — no I/O.
+    """
+    r = analysis.to_dict()
+
+    return {
+        # ── Identity ──────────────────────────────────────────────────────
+        "_meta": {
+            "track_id":       report.track_id,
+            "scan_timestamp": report.scan_timestamp,
+            "schema_version": "2.0",
+        },
+
+        # ── Ingestion ─────────────────────────────────────────────────────
+        "audio": r.get("audio"),
+
+        # ── Structure + derived counts ────────────────────────────────────
+        "structure": _enrich_structure(r.get("structure"), report),
+
+        # ── AI / Humanity Forensics ───────────────────────────────────────
+        "forensics": r.get("forensics"),
+
+        # ── Sync Readiness Compliance ─────────────────────────────────────
+        "compliance": r.get("compliance"),
+
+        # ── Lyric Authorship ──────────────────────────────────────────────
+        "authorship": r.get("authorship"),
+
+        # ── Theme & Mood ──────────────────────────────────────────────────
+        "theme_mood": r.get("theme_mood"),
+
+        # ── Broadcast Loudness & Dialogue ─────────────────────────────────
+        "audio_quality": r.get("audio_quality"),
+
+        # ── Lyric Transcript ──────────────────────────────────────────────
+        "transcript": r.get("transcript"),
+
+        # ── Sync Edit Points ──────────────────────────────────────────────
+        "sync_cuts": r.get("sync_cuts"),
+
+        # ── Similar Tracks ────────────────────────────────────────────────
+        "similar_tracks": r.get("similar_tracks"),
+
+        # ── Popularity & Sync Fees ────────────────────────────────────────
+        "popularity": r.get("popularity"),
+
+        # ── PRO / Legal Links ─────────────────────────────────────────────
+        "legal": r.get("legal"),
+
+        # ── Rights Metadata Validation ────────────────────────────────────
+        "metadata_validation": r.get("metadata_validation"),
+
+        # ── Stem / Mono Compatibility ─────────────────────────────────────
+        "stem_validation": r.get("stem_validation"),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -159,43 +131,44 @@ def _render_json_blob(label: str, key: str, row: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def render_raw_data(analysis: AnalysisResult) -> None:
-    report = _get_or_build_report(analysis)
-    row    = report.to_dict()
+    """Render the raw data page."""
+    report   = _get_or_build_report(analysis)
+    payload  = _build_full_json(analysis, report)
 
     # ── Header ───────────────────────────────────────────────────────────────
     st.markdown("## Raw Data")
     st.caption(
         f"Track ID `{report.track_id}` · "
-        f"Scanned {report.scan_timestamp[:19].replace('T', ' ')} UTC · "
-        f"{len(row)} fields"
+        f"Scanned {report.scan_timestamp[:19].replace('T', ' ')} UTC"
     )
 
-    # ── Download ─────────────────────────────────────────────────────────────
+    # ── Downloads ────────────────────────────────────────────────────────────
+    col_json, col_csv, col_back = st.columns([2, 2, 3])
+
+    json_bytes = json.dumps(payload, indent=2, default=str).encode("utf-8")
+    json_name  = f"sync_safe_{report.track_id}_{report.scan_timestamp[:10]}.json"
+    col_json.download_button(
+        label     = "Download JSON",
+        data      = json_bytes,
+        file_name = json_name,
+        mime      = "application/json",
+    )
+
     csv_bytes = _EXPORTER.to_csv(report)
-    filename  = f"sync_safe_{report.track_id}_{report.scan_timestamp[:10]}.csv"
-    st.download_button(
-        label       = "Download CSV",
-        data        = csv_bytes,
-        file_name   = filename,
-        mime        = "text/csv",
+    csv_name  = f"sync_safe_{report.track_id}_{report.scan_timestamp[:10]}.csv"
+    col_csv.download_button(
+        label     = "Download CSV",
+        data      = csv_bytes,
+        file_name = csv_name,
+        mime      = "text/csv",
     )
 
-    st.divider()
-
-    # ── Scalar groups ────────────────────────────────────────────────────────
-    st.markdown("### Scalar Fields")
-    for group_label, fields in _SCALAR_GROUPS:
-        _render_scalar_group(group_label, fields, row)
+    with col_back:
+        if st.button("← Back to Report", use_container_width=True):
+            st.session_state.page = "report"
+            st.rerun()
 
     st.divider()
 
-    # ── JSON blobs ───────────────────────────────────────────────────────────
-    st.markdown("### Collections (JSON)")
-    for blob_label, blob_key in _JSON_BLOBS:
-        _render_json_blob(blob_label, blob_key, row)
-
-    # ── Back navigation ──────────────────────────────────────────────────────
-    st.divider()
-    if st.button("← Back to Report"):
-        st.session_state.page = "report"
-        st.rerun()
+    # ── JSON viewer ───────────────────────────────────────────────────────────
+    st.json(payload, expanded=2)
