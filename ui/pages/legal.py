@@ -66,10 +66,11 @@ def render_legal() -> None:
               <p style="font-family:'Figtree',sans-serif;font-size:.88rem;color:var(--muted);
                         line-height:1.7;margin-bottom:24px;">
                 The sync compliance auditing logic — specifically the automated analysis of
-                sting endings, 4–8 bar energy evolution, and broadcast-standard intro length
-                metrics — represents a proprietary implementation developed by [OWNER NAME].
-                Unauthorized reverse engineering, replication, or redistribution of these
-                analysis frameworks is strictly prohibited.
+                sting endings, 4–8 bar energy evolution, broadcast-standard intro length
+                metrics, broadcast loudness measurement (EBU R128 / ITU-R BS.1770-4), and
+                dialogue compatibility scoring — represents a proprietary implementation
+                developed by [OWNER NAME]. Unauthorized reverse engineering, replication,
+                or redistribution of these analysis frameworks is strictly prohibited.
               </p>
 
               <h3 style="font-family:'Chakra Petch',monospace;font-size:.88rem;font-weight:700;
