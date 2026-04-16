@@ -175,6 +175,11 @@ class Ingestion:
     def _load_upload(self, file: object) -> AudioBuffer:
         """Wrap a Streamlit UploadedFile in an AudioBuffer."""
         try:
+            # seek(0) before read: UploadedFile cursor may be at EOF if Streamlit
+            # consumed the stream internally during widget evaluation / session-state
+            # serialisation.  This is a no-op for fresh buffers.
+            if hasattr(file, "seek"):
+                file.seek(0)              # type: ignore[union-attr]
             raw: bytes = file.read()        # type: ignore[union-attr]
             name: str  = getattr(file, "name", "upload")
         except (AttributeError, OSError, ValueError) as exc:
