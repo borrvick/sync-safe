@@ -3,21 +3,37 @@ apps/analyses/views.py
 """
 from __future__ import annotations
 
+from django.conf import settings
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from core.providers.stub import StubMLWorkerProvider
+from core.protocols import MLWorkerProvider
 
 from .models import Analysis
 from .serializers import AnalysisSerializer, SubmitAnalysisSerializer
 
-# Module-level singleton is intentional: StubMLWorkerProvider is fully stateless
-# (no DB connection, no GPU handle, no resources). Swap for ModalMLWorkerProvider
-# in Effort 2 via a settings-based factory — no changes to this view required.
-_worker: StubMLWorkerProvider = StubMLWorkerProvider()
+
+def _build_worker() -> MLWorkerProvider:
+    """
+    Return the appropriate MLWorkerProvider based on settings.
+
+    USE_MODAL_WORKER=False (default) → StubMLWorkerProvider (safe for dev/tests).
+    USE_MODAL_WORKER=True            → ModalMLWorkerProvider (requires modal package).
+
+    Called once at module load; the result is cached in _worker.
+    """
+    if settings.APP_SETTINGS.USE_MODAL_WORKER:
+        from core.providers.modal_worker import ModalMLWorkerProvider
+        return ModalMLWorkerProvider()
+    from core.providers.stub import StubMLWorkerProvider
+    return StubMLWorkerProvider()
+
+
+# Module-level singleton: provider is stateless so one instance per process is fine.
+_worker: MLWorkerProvider = _build_worker()
 
 
 class AnalysisListCreateView(APIView):
