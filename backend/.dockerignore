@@ -1,0 +1,36 @@
+# Version control
+.git
+.gitignore
+
+# Local environment and secrets
+.env
+*.env
+
+# SQLite dev database
+db.sqlite3
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Test artifacts
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# User-uploaded media (should live on a volume or S3, not in the image)
+media/
+
+# Editor / OS noise
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Already collected at build time — no need to re-copy
+staticfiles/
