@@ -201,11 +201,19 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
+    "DEFAULT_THROTTLE_CLASSES": [],   # throttles applied per-view, not globally
+    "DEFAULT_THROTTLE_RATES": {
+        "login":    "5/min",   # LoginRateThrottle — brute-force protection
+        "register": "3/hour",  # RegisterRateThrottle — spam/abuse protection
+    },
 }
 
 # ---------------------------------------------------------------------------
 # simplejwt
 # ---------------------------------------------------------------------------
+
+# Password reset token expires in 1 hour (Django default is 3 days)
+PASSWORD_RESET_TIMEOUT = 3600  # seconds
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
