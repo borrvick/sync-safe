@@ -144,17 +144,23 @@ class ReportExporter:
             plr_std                     = forensics.plr_std if forensics else -1.0,
             voiced_noise_floor          = forensics.voiced_noise_floor if forensics else -1.0,
 
-            # Audio Quality
+            # Audio Quality / Loudness
             integrated_lufs     = quality.integrated_lufs if quality else None,
             true_peak_dbfs      = quality.true_peak_dbfs if quality else None,
             loudness_range_lu   = quality.loudness_range_lu if quality else None,
+            loudness_verdict    = quality.loudness_verdict if quality else "",
+            true_peak_warning   = quality.true_peak_warning if quality else None,
             delta_spotify       = quality.delta_spotify if quality else None,
             delta_apple_music   = quality.delta_apple_music if quality else None,
             delta_youtube       = quality.delta_youtube if quality else None,
             delta_broadcast     = quality.delta_broadcast if quality else None,
-            true_peak_warning   = quality.true_peak_warning if quality else None,
+            gain_spotify_db     = quality.gain_spotify_db if quality else None,
+            gain_apple_music_db = quality.gain_apple_music_db if quality else None,
+            gain_youtube_db     = quality.gain_youtube_db if quality else None,
+            gain_broadcast_db   = quality.gain_broadcast_db if quality else None,
             dialogue_score      = quality.dialogue_score if quality else None,
             dialogue_label      = quality.dialogue_label if quality else "",
+            vo_headroom_db      = quality.vo_headroom_db if quality else None,
 
             # Stem Validation
             mono_compatible     = stems.mono_compatible if stems else None,
@@ -164,25 +170,34 @@ class ReportExporter:
             stem_flag_count     = len(stems.flags) if stems else 0,
 
             # Compliance
-            compliance_grade        = compliance.grade if compliance else "",
-            total_flag_count        = len(c_flags),
-            confirmed_flag_count    = len(confirmed),
-            potential_flag_count    = len(potential),
-            hard_flag_count         = len(hard),
-            soft_flag_count         = len(soft),
-            sting_flag              = compliance.sting.flag if compliance else None,
-            sting_ending_type       = compliance.sting.ending_type if compliance else "",
-            sting_final_energy_ratio = compliance.sting.final_energy_ratio if compliance else None,
-            energy_evolution_flag   = compliance.evolution.flag if compliance else None,
-            stagnant_windows        = compliance.evolution.stagnant_windows if compliance else 0,
-            total_windows           = compliance.evolution.total_windows if compliance else 0,
-            intro_flag              = compliance.intro.flag if compliance else None,
-            intro_seconds           = compliance.intro.intro_seconds if compliance else 0.0,
-            intro_source            = compliance.intro.source if compliance else "",
+            compliance_grade            = compliance.grade if compliance else "",
+            total_flag_count            = len(c_flags),
+            confirmed_flag_count        = len(confirmed),
+            potential_flag_count        = len(potential),
+            hard_flag_count             = len(hard),
+            soft_flag_count             = len(soft),
+            sting_flag                  = compliance.sting.flag if compliance else None,
+            sting_ending_type           = compliance.sting.ending_type if compliance else "",
+            sting_final_energy_ratio    = compliance.sting.final_energy_ratio if compliance else None,
+            sting_fade_severity         = compliance.sting.fade_severity if compliance else 0.0,
+            sting_fade_tail_seconds     = compliance.sting.fade_tail_seconds if compliance else 0.0,
+            sting_cut_type              = compliance.sting.cut_type if compliance else None,
+            sting_norm_slope            = compliance.sting.norm_slope if compliance else 0.0,
+            sting_onset_spike_factor    = compliance.sting.onset_spike_factor if compliance else 0.0,
+            energy_evolution_flag       = compliance.evolution.flag if compliance else None,
+            stagnant_windows            = compliance.evolution.stagnant_windows if compliance else 0,
+            total_windows               = compliance.evolution.total_windows if compliance else 0,
+            energy_evolution_detail     = compliance.evolution.detail if compliance else "",
+            energy_evolution_ending_section = compliance.evolution.ending_section if compliance else None,
+            intro_flag                  = compliance.intro.flag if compliance else None,
+            intro_seconds               = compliance.intro.intro_seconds if compliance else 0.0,
+            intro_source                = compliance.intro.source if compliance else "",
+            intro_confidence            = compliance.intro.confidence if compliance else "",
 
             # Authorship
             authorship_verdict      = authorship.verdict if authorship else "",
             authorship_signal_count = authorship.signal_count if authorship else 0,
+            authorship_skip_reason  = authorship.skip_reason if authorship else None,
             roberta_score           = authorship.roberta_score if authorship else None,
             burstiness_score        = a_scores.get("burstiness"),
             unique_word_ratio       = a_scores.get("unique_word_ratio"),
@@ -192,6 +207,8 @@ class ReportExporter:
             # Theme & Mood
             mood                = theme_mood.mood if theme_mood else "",
             theme_confidence    = theme_mood.confidence if theme_mood else 0.0,
+            top_category        = theme_mood.top_category if theme_mood else "",
+            mood_summary        = theme_mood.mood_summary if theme_mood else None,
             groq_enriched       = theme_mood.groq_enriched if theme_mood else False,
 
             # Popularity & Cost
@@ -204,8 +221,9 @@ class ReportExporter:
             sync_cost_high      = popularity.sync_cost_high if popularity else None,
 
             # Legal
-            isrc        = legal.isrc if legal else None,
-            pro_match   = legal.pro_match if legal else None,
+            isrc            = legal.isrc if legal else None,
+            pro_match       = legal.pro_match if legal else None,
+            pro_confidence  = legal.pro_confidence if legal else None,
 
             # Metadata Validation
             metadata_valid      = meta_val.valid if meta_val else None,
@@ -214,17 +232,44 @@ class ReportExporter:
             split_error         = meta_val.split_error if meta_val else None,
             isrc_valid          = meta_val.isrc_valid if meta_val else None,
 
-            # JSON Blobs
-            compliance_flags_json   = _dumps(c_flags),
-            ai_segments_json        = _dumps(forensics.ai_segments if forensics else []),
-            sections_json           = _dumps(sections),
-            transcript_json         = _dumps(result.transcript),
-            similar_tracks_json     = _dumps(result.similar_tracks),
-            sync_cuts_json          = _dumps(result.sync_cuts),
-            forensic_notes_json     = _dumps(f_notes),
-            forensic_flags_json     = _dumps(f_flags),
-            themes_json             = _dumps(theme_mood.themes if theme_mood else []),
-            theme_keywords_json     = _dumps(theme_mood.raw_keywords if theme_mood else []),
+            # JSON Blobs — compliance flags & forensics
+            compliance_flags_json               = _dumps(c_flags),
+            ai_segments_json                    = _dumps(forensics.ai_segments if forensics else []),
+            forensic_notes_json                 = _dumps(f_notes),
+            forensic_flags_json                 = _dumps(f_flags),
+
+            # JSON Blobs — structural repetition (#142, #143, #145)
+            loop_window_scores_json             = _dumps(forensics.loop_window_scores if forensics else []),
+            section_similarities_json           = _dumps(forensics.section_similarities if forensics else {}),
+            section_internal_repetition_json    = _dumps(forensics.section_internal_repetition if forensics else {}),
+
+            # JSON Blobs — structure & transcript
+            sections_json                       = _dumps(sections),
+            transcript_json                     = _dumps(result.transcript),
+
+            # JSON Blobs — sync & discovery
+            similar_tracks_json                 = _dumps(result.similar_tracks),
+            sync_cuts_json                      = _dumps(result.sync_cuts),
+
+            # JSON Blobs — theme & mood (#167)
+            themes_json                         = _dumps(theme_mood.themes if theme_mood else []),
+            theme_keywords_json                 = _dumps(theme_mood.raw_keywords if theme_mood else []),
+            theme_scores_json                   = _dumps(theme_mood.theme_scores if theme_mood else {}),
+
+            # JSON Blobs — authorship (#156)
+            per_section_authorship_json         = _dumps(authorship.per_section if authorship else {}),
+
+            # JSON Blobs — popularity engagement (#124)
+            platform_metrics_json               = _dumps(popularity.platform_metrics if popularity else {}),
+
+            # JSON Blobs — audio quality (#91, #96, #99)
+            section_loudness_json               = _dumps(quality.section_loudness if quality else []),
+            section_dialogue_json               = _dumps(quality.section_dialogue if quality else []),
+            genre_lra_context_json              = _dumps(quality.genre_lra_context if quality else None),
+
+            # JSON Blobs — energy evolution diagnostics (#108)
+            energy_stagnant_timestamps_json     = _dumps(compliance.evolution.stagnant_timestamps if compliance else []),
+            energy_per_window_contrasts_json    = _dumps(compliance.evolution.per_window_contrasts if compliance else []),
         )
 
     def to_csv(self, report: TrackReport) -> bytes:

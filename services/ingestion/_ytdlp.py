@@ -126,12 +126,12 @@ class YtDlpClient:
         ytdlp_proc: subprocess.Popen | None = None
         ffmpeg_proc: subprocess.Popen | None = None
         try:
-            ytdlp_proc = subprocess.Popen(
+            ytdlp_proc = subprocess.Popen(  # nosec B603 — cmd is a list (no shell=True); URL is validated upstream (HTTPS-only) before reaching this call
                 ytdlp_cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
-            ffmpeg_proc = subprocess.Popen(
+            ffmpeg_proc = subprocess.Popen(  # nosec B603 — ffmpeg_cmd is a hardcoded list of flags; no user input interpolated
                 ffmpeg_cmd,
                 stdin=ytdlp_proc.stdout,
                 stdout=subprocess.PIPE,
@@ -187,7 +187,7 @@ class YtDlpClient:
         """
         print_template = "\n".join(f"%({f})s" for f in _ENGAGEMENT_FIELDS)
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 — list form, no shell=True; url validated as HTTPS upstream before fetch_engagement is called
                 [
                     self._ytdlp,
                     "--quiet",
@@ -240,7 +240,7 @@ class YtDlpClient:
             query,
         ]
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)  # nosec B603 — list form, no shell=True; query string passed as single argv element, not interpolated into a shell
             url    = result.stdout.strip()
             if url.startswith("https://"):
                 return url

@@ -114,7 +114,9 @@ class TestLoadUpload:
             self.svc.load(_make_upload(b""))
 
     def test_raises_audio_source_error_when_exceeds_limit(self):
-        large = b"x" * (51 * 1024 * 1024)
+        # Limit is 300 MB; use a 1-byte-over-limit payload to stay memory-efficient.
+        from core.config import CONSTANTS
+        large = b"x" * (CONSTANTS.MAX_UPLOAD_BYTES + 1)
         with pytest.raises(AudioSourceError, match="size limit"):
             self.svc.load(_make_upload(large))
 

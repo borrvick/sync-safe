@@ -29,7 +29,7 @@ def _fetch_youtube_metadata(url: str) -> dict[str, str]:
             oembed_url,
             headers={"User-Agent": "sync-safe-forensic-portal/1.0"},
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310 — base URL is hardcoded (youtube.com/oembed); only title/artist are interpolated as query params
             data: dict = json.loads(resp.read().decode("utf-8"))
 
         title_raw   = str(data.get("title") or "")

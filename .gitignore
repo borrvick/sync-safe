@@ -22,6 +22,10 @@ cookies.txt
 .env
 .env.*
 
+# Django
+backend/db.sqlite3
+backend/*.sqlite3
+
 # Python
 .venv/
 __pycache__/

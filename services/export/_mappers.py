@@ -176,7 +176,8 @@ _DAVINCI_COLORS: frozenset[str] = frozenset({
     "Sand", "Cocoa", "Cream",
 })
 _DAVINCI_DEFAULT_COLOR: str = "Cyan"
-assert _DAVINCI_DEFAULT_COLOR in _DAVINCI_COLORS  # guard: color must be a valid DaVinci named color
+if _DAVINCI_DEFAULT_COLOR not in _DAVINCI_COLORS:
+    raise ValueError(f"_DAVINCI_DEFAULT_COLOR {_DAVINCI_DEFAULT_COLOR!r} is not in _DAVINCI_COLORS")
 
 
 def _seconds_to_timecode(seconds: float, framerate: float) -> str:

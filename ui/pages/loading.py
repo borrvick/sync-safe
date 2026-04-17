@@ -34,7 +34,7 @@ from ui.components import eq_bars
 
 # (key, display label, estimated wall-clock seconds on ZeroGPU free tier, tooltip description)
 _STEPS: list[tuple[str, str, int, str]] = [
-    ("ingestion",     "Fetching Audio",      8,
+    ("ingestion",     "Loading Audio",       8,
      "Downloads audio from YouTube via yt-dlp, or reads your uploaded file. "
      "Audio is held as a BytesIO buffer in memory — nothing is written to disk."),
     ("structure",     "Analysing Structure", 20,
@@ -449,7 +449,9 @@ def render_loading(source: Any) -> None:
             log.step_end(key, duration_s=duration)
 
     # ── Step 1: Ingestion (fatal on failure) ──────────────────────────────
-    _tick("Fetching Audio", "ingestion")
+    # Label differs by source type so the UI is accurate for file uploads.
+    _ingestion_label = "Fetching Audio" if isinstance(source, str) else "Reading File"
+    _tick(_ingestion_label, "ingestion")
     t0 = time.time()
     log.step_start("ingestion")
     try:

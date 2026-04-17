@@ -1,0 +1,233 @@
+"""
+tests/test_auth.py
+Auth endpoint tests: register, login, token refresh, /me, resend-verification.
+"""
+from __future__ import annotations
+
+from unittest.mock import patch
+
+import pytest
+from django.contrib.auth import get_user_model
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
+from rest_framework.test import APIClient
+
+User = get_user_model()
+
+
+@pytest.fixture
+def client() -> APIClient:
+    return APIClient()
+
+
+@pytest.fixture
+def registered_user(db):
+    return User.objects.create_user(email="user@example.com", password="strongpass1")
+
+
+@pytest.fixture
+def auth_client(client: APIClient, registered_user) -> APIClient:
+    resp = client.post("/api/auth/login/", {"email": "user@example.com", "password": "strongpass1"}, format="json")
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {resp.data['access']}")
+    return client
+
+
+# ---------------------------------------------------------------------------
+# Register
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_register_success(client: APIClient) -> None:
+    resp = client.post("/api/auth/register/", {"email": "new@example.com", "password": "strongpass1"}, format="json")
+    assert resp.status_code == 201
+    assert resp.data["email"] == "new@example.com"
+    assert resp.data["tier"] == "free"
+    assert "password" not in resp.data
+
+
+@pytest.mark.django_db
+def test_register_duplicate_email(client: APIClient, registered_user) -> None:
+    resp = client.post("/api/auth/register/", {"email": "user@example.com", "password": "strongpass1"}, format="json")
+    assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+def test_register_weak_password(client: APIClient) -> None:
+    resp = client.post("/api/auth/register/", {"email": "weak@example.com", "password": "short"}, format="json")
+    assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+def test_register_missing_email(client: APIClient) -> None:
+    resp = client.post("/api/auth/register/", {"password": "strongpass1"}, format="json")
+    assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Login
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_login_success(client: APIClient, registered_user) -> None:
+    resp = client.post("/api/auth/login/", {"email": "user@example.com", "password": "strongpass1"}, format="json")
+    assert resp.status_code == 200
+    assert "access" in resp.data
+    assert "refresh" in resp.data
+
+
+@pytest.mark.django_db
+def test_login_wrong_password(client: APIClient, registered_user) -> None:
+    resp = client.post("/api/auth/login/", {"email": "user@example.com", "password": "wrongpass"}, format="json")
+    assert resp.status_code == 401
+
+
+@pytest.mark.django_db
+def test_login_unknown_email(client: APIClient) -> None:
+    resp = client.post("/api/auth/login/", {"email": "nobody@example.com", "password": "strongpass1"}, format="json")
+    assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Token refresh + blacklist
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_token_refresh_success(client: APIClient, registered_user) -> None:
+    login = client.post("/api/auth/login/", {"email": "user@example.com", "password": "strongpass1"}, format="json")
+    resp = client.post("/api/auth/token/refresh/", {"refresh": login.data["refresh"]}, format="json")
+    assert resp.status_code == 200
+    assert "access" in resp.data
+
+
+@pytest.mark.django_db
+def test_token_refresh_blacklisted_replay(client: APIClient, registered_user) -> None:
+    """Rotated refresh token must be rejected on second use."""
+    login = client.post("/api/auth/login/", {"email": "user@example.com", "password": "strongpass1"}, format="json")
+    old_refresh = login.data["refresh"]
+    # First use — rotates token
+    client.post("/api/auth/token/refresh/", {"refresh": old_refresh}, format="json")
+    # Replay old token — must be blacklisted
+    resp = client.post("/api/auth/token/refresh/", {"refresh": old_refresh}, format="json")
+    assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# /me
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_me_authenticated(auth_client: APIClient, registered_user) -> None:
+    resp = auth_client.get("/api/auth/me/")
+    assert resp.status_code == 200
+    assert resp.data["email"] == "user@example.com"
+    assert str(registered_user.id) == resp.data["id"]
+
+
+@pytest.mark.django_db
+def test_me_unauthenticated(client: APIClient) -> None:
+    resp = client.get("/api/auth/me/")
+    assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Resend verification
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_resend_verification_success(auth_client: APIClient) -> None:
+    with patch("apps.users.views.send_verification_email_for_user") as mock_send:
+        resp = auth_client.post("/api/auth/resend-verification/")
+    assert resp.status_code == 200
+    assert resp.data["detail"] == "Verification email sent."
+    mock_send.assert_called_once()
+
+
+@pytest.mark.django_db
+def test_resend_verification_unauthenticated(client: APIClient) -> None:
+    resp = client.post("/api/auth/resend-verification/")
+    assert resp.status_code == 401
+
+
+@pytest.mark.django_db
+def test_resend_verification_smtp_failure(auth_client: APIClient) -> None:
+    """SMTP failure must return 503, not 500."""
+    with patch("apps.users.views.send_verification_email_for_user", side_effect=OSError("SMTP down")):
+        resp = auth_client.post("/api/auth/resend-verification/")
+    assert resp.status_code == 503
+    assert "detail" in resp.data
+
+
+# ---------------------------------------------------------------------------
+# Password reset (#217)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_password_reset_registered_email(client: APIClient, registered_user) -> None:
+    """Always returns 200 — does not reveal whether email exists."""
+    with patch("apps.users.views.send_mail") as mock_mail:
+        resp = client.post("/api/auth/password/reset/", {"email": "user@example.com"}, format="json")
+    assert resp.status_code == 200
+    assert "detail" in resp.data
+    mock_mail.assert_called_once()
+
+
+@pytest.mark.django_db
+def test_password_reset_unknown_email_still_200(client: APIClient) -> None:
+    """Enumeration-proof: unknown email must return 200, not 404."""
+    resp = client.post("/api/auth/password/reset/", {"email": "nobody@example.com"}, format="json")
+    assert resp.status_code == 200
+    assert "detail" in resp.data
+
+
+@pytest.mark.django_db
+def test_password_reset_confirm_success(client: APIClient, registered_user) -> None:
+    uid = urlsafe_base64_encode(force_bytes(registered_user.pk))
+    token = default_token_generator.make_token(registered_user)
+    resp = client.post(
+        "/api/auth/password/reset/confirm/",
+        {"uid": uid, "token": token, "new_password": "newstrongpass1"},
+        format="json",
+    )
+    assert resp.status_code == 200
+    registered_user.refresh_from_db()
+    assert registered_user.check_password("newstrongpass1")
+
+
+@pytest.mark.django_db
+def test_password_reset_confirm_invalid_token(client: APIClient, registered_user) -> None:
+    uid = urlsafe_base64_encode(force_bytes(registered_user.pk))
+    resp = client.post(
+        "/api/auth/password/reset/confirm/",
+        {"uid": uid, "token": "invalid-token", "new_password": "newstrongpass1"},
+        format="json",
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+def test_password_reset_confirm_invalid_uid(client: APIClient) -> None:
+    resp = client.post(
+        "/api/auth/password/reset/confirm/",
+        {"uid": "not-valid-uid", "token": "sometoken", "new_password": "newstrongpass1"},
+        format="json",
+    )
+    assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting (#218)
+# ---------------------------------------------------------------------------
+
+def test_login_throttle_scope() -> None:
+    """LoginRateThrottle must declare scope=login and rate=5/min."""
+    from apps.users.throttles import LoginRateThrottle
+    assert LoginRateThrottle.scope == "login"
+    assert LoginRateThrottle.rate == "5/min"
+
+
+def test_register_throttle_scope() -> None:
+    """RegisterRateThrottle must declare scope=register and rate=3/hour."""
+    from apps.users.throttles import RegisterRateThrottle
+    assert RegisterRateThrottle.scope == "register"
+    assert RegisterRateThrottle.rate == "3/hour"

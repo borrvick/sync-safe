@@ -2153,10 +2153,10 @@ def _build_source_pill_html(source: str) -> str:
     color = _SIMILAR_TRACK_SOURCE_COLORS.get(source, "var(--muted)")
     label = _SIMILAR_TRACK_SOURCE_LABELS.get(source, html_mod.escape(source))
     return (
-        f"<span style='font-family:Figtree,sans-serif;font-size:.52rem;"
-        f"color:{color};border:1px solid {color}66;border-radius:3px;"
-        f"padding:1px 5px;white-space:nowrap;opacity:.85;'>"
-        f"{label}</span>"
+        f'<span style="font-family:Figtree,sans-serif;font-size:.52rem;'
+        f'color:{color};border:1px solid {color}66;border-radius:3px;'
+        f'padding:1px 5px;white-space:nowrap;opacity:.85;">'
+        f'{label}</span>'
     )
 
 
@@ -2751,25 +2751,25 @@ def _render_legal_and_discovery(result: AnalysisResult) -> None:
             if t.popularity_tier:
                 tc = _POPULARITY_TIER_COLORS.get(t.popularity_tier, "var(--dim)")
                 tier_pill = (
-                    f"<span style='font-family:Figtree,sans-serif;font-size:.55rem;"
-                    f"color:{tc};border:1px solid {tc};border-radius:3px;"
-                    f"padding:1px 5px;white-space:nowrap;'>"
-                    f"{html_mod.escape(t.popularity_tier)}</span>"
+                    f'<span style="font-family:Figtree,sans-serif;font-size:.55rem;'
+                    f'color:{tc};border:1px solid {tc};border-radius:3px;'
+                    f'padding:1px 5px;white-space:nowrap;">'
+                    f'{html_mod.escape(t.popularity_tier)}</span>'
                 )
             source_pill = _build_source_pill_html(t.source)
 
             # Sync status badge — shown inline in the pill row after check (#127)
             if sync_status is True:
                 sync_badge = (
-                    "<span style='font-family:Figtree,sans-serif;font-size:.55rem;"
-                    "color:var(--ok);border:1px solid var(--ok);border-radius:3px;"
-                    "padding:1px 5px;white-space:nowrap;'>Sync-ready</span>"
+                    '<span style="font-family:Figtree,sans-serif;font-size:.55rem;'
+                    'color:var(--ok);border:1px solid var(--ok);border-radius:3px;'
+                    'padding:1px 5px;white-space:nowrap;">Sync-ready</span>'
                 )
             elif sync_status is False:
                 sync_badge = (
-                    "<span style='font-family:Figtree,sans-serif;font-size:.55rem;"
-                    "color:var(--danger);border:1px solid var(--danger);border-radius:3px;"
-                    "padding:1px 5px;white-space:nowrap;'>Not ready</span>"
+                    '<span style="font-family:Figtree,sans-serif;font-size:.55rem;'
+                    'color:var(--danger);border:1px solid var(--danger);border-radius:3px;'
+                    'padding:1px 5px;white-space:nowrap;">Not ready</span>'
                 )
             else:
                 sync_badge = ""
@@ -2781,27 +2781,27 @@ def _render_legal_and_discovery(result: AnalysisResult) -> None:
                 else '<button disabled class="t-btn" style="opacity:.3;cursor:not-allowed;">No link</button>'
             )
 
+            # Join pills without intervening newlines — blank lines between inline
+            # spans trigger a markdown paragraph break which causes Streamlit's
+            # parser to escape the subsequent <span> tags as raw text.
+            pills_html = "".join(filter(None, [tier_pill, source_pill, sync_badge]))
+
             col_row, col_check = st.columns([8, 2])
             with col_row:
-                st.markdown(f"""
-                <div class="t-row">
-                  <div style="flex:1;min-width:0;">
-                    <div class="t-art">{safe_artist}</div>
-                    <div class="t-nm">{safe_title}</div>
-                    <div style="display:flex;align-items:center;gap:8px;margin-top:5px;">
-                      <div style="width:72px;height:3px;border-radius:2px;background:var(--border-hr);overflow:hidden;flex-shrink:0;">
-                        <div style="height:3px;border-radius:2px;background:var(--accent);width:72px;
-                                    transform:scaleX({sim_bar});transform-origin:left;"></div>
-                      </div>
-                      <span style="font-family:'JetBrains Mono',monospace;font-size:.62rem;
-                                   color:var(--dim);">{sim_pct}</span>
-                      {tier_pill}
-                      {source_pill}
-                      {sync_badge}
-                    </div>
-                  </div>
-                  {preview_btn}
-                </div>""", unsafe_allow_html=True)
+                st.markdown(
+                    f'<div class="t-row">'
+                    f'<div style="flex:1;min-width:0;">'
+                    f'<div class="t-art">{safe_artist}</div>'
+                    f'<div class="t-nm">{safe_title}</div>'
+                    f'<div style="display:flex;align-items:center;gap:8px;margin-top:5px;">'
+                    f'<div style="width:72px;height:3px;border-radius:2px;background:var(--border-hr);overflow:hidden;flex-shrink:0;">'
+                    f'<div style="height:3px;border-radius:2px;background:var(--accent);width:72px;'
+                    f'transform:scaleX({sim_bar});transform-origin:left;"></div></div>'
+                    f'<span style="font-family:\'JetBrains Mono\',monospace;font-size:.62rem;color:var(--dim);">{sim_pct}</span>'
+                    f'{pills_html}'
+                    f'</div></div>{preview_btn}</div>',
+                    unsafe_allow_html=True,
+                )
             with col_check:
                 # Only show the check button for unchecked tracks with a YouTube URL
                 if t.youtube_url and sync_status is None:

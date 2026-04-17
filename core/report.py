@@ -17,6 +17,7 @@ Design rules:
 """
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 from datetime import datetime, timezone
@@ -31,7 +32,31 @@ def _track_id(title: str, artist: str, duration: float) -> str:
 
 
 def _dumps(obj: Any) -> str:
-    """Serialise a list of Pydantic models (or plain dicts) to a compact JSON string."""
+    """
+    Serialise an object to a compact JSON string.
+
+    Handles:
+    - None                                → "null"
+    - dict (Pydantic/dataclass/plain vals) → JSON object string
+    - list of Pydantic models             → JSON array of .model_dump() results
+    - list of plain values (str, float, tuple, dict, …) → JSON array
+    - empty list / dict                   → "[]" / "{}"
+    """
+    if obj is None:
+        return "null"
+    if isinstance(obj, dict):
+        if not obj:
+            return "{}"
+
+        def _val(v: Any) -> Any:
+            if hasattr(v, "model_dump"):
+                return v.model_dump()
+            if dataclasses.is_dataclass(v) and not isinstance(v, type):
+                return dataclasses.asdict(v)
+            return v
+
+        return json.dumps({k: _val(v) for k, v in obj.items()}, separators=(",", ":"))
+    # list branch
     if not obj:
         return "[]"
     if hasattr(obj[0], "model_dump"):
@@ -116,29 +141,6 @@ class TrackReport(BaseModel):
     voiced_noise_floor: float               = -1.0
 
     # ------------------------------------------------------------------
-    # Audio Quality / Loudness
-    # ------------------------------------------------------------------
-    integrated_lufs: Optional[float]    = None
-    true_peak_dbfs: Optional[float]     = None
-    loudness_range_lu: Optional[float]  = None
-    delta_spotify: Optional[float]      = None
-    delta_apple_music: Optional[float]  = None
-    delta_youtube: Optional[float]      = None
-    delta_broadcast: Optional[float]    = None
-    true_peak_warning: Optional[bool]   = None
-    dialogue_score: Optional[float]     = None
-    dialogue_label: str                 = ""
-
-    # ------------------------------------------------------------------
-    # Stem Validation
-    # ------------------------------------------------------------------
-    mono_compatible: Optional[bool]     = None
-    phase_correlation: Optional[float]  = None
-    cancellation_db: Optional[float]    = None
-    mid_side_ratio: Optional[float]     = None
-    stem_flag_count: int                = 0
-
-    # ------------------------------------------------------------------
     # Compliance
     # ------------------------------------------------------------------
     compliance_grade: str               = ""
@@ -147,21 +149,33 @@ class TrackReport(BaseModel):
     potential_flag_count: int           = 0
     hard_flag_count: int                = 0
     soft_flag_count: int                = 0
+    # Sting enrichment (#103, #104, #108)
     sting_flag: Optional[bool]          = None
     sting_ending_type: str              = ""
     sting_final_energy_ratio: Optional[float] = None
+    sting_fade_severity: float          = 0.0
+    sting_fade_tail_seconds: float      = 0.0
+    sting_cut_type: Optional[str]       = None
+    sting_norm_slope: float             = 0.0
+    sting_onset_spike_factor: float     = 0.0
+    # Energy evolution enrichment (#106, #108)
     energy_evolution_flag: Optional[bool]     = None
     stagnant_windows: int               = 0
     total_windows: int                  = 0
+    energy_evolution_detail: str        = ""
+    energy_evolution_ending_section: Optional[str] = None
+    # Intro enrichment (#105)
     intro_flag: Optional[bool]          = None
     intro_seconds: float                = 0.0
     intro_source: str                   = ""
+    intro_confidence: str               = ""
 
     # ------------------------------------------------------------------
     # Authorship
     # ------------------------------------------------------------------
     authorship_verdict: str             = ""
-    authorship_signal_count: int        = 0
+    authorship_signal_count: float      = 0.0   # float: supports 0.5-weight phrase signal (#160)
+    authorship_skip_reason: Optional[str] = None
     roberta_score: Optional[float]      = None
     burstiness_score: Optional[float]   = None
     unique_word_ratio: Optional[float]  = None
@@ -171,9 +185,40 @@ class TrackReport(BaseModel):
     # ------------------------------------------------------------------
     # Theme & Mood
     # ------------------------------------------------------------------
-    mood: str               = ""
-    theme_confidence: float = 0.0
-    groq_enriched: bool     = False
+    mood: str                       = ""
+    theme_confidence: float         = 0.0
+    top_category: str               = ""        # "energy"|"emotional"|"seasonal"|"" (#167)
+    mood_summary: Optional[str]     = None      # Groq one-sentence summary (#169)
+    groq_enriched: bool             = False
+
+    # ------------------------------------------------------------------
+    # Audio Quality / Loudness
+    # ------------------------------------------------------------------
+    integrated_lufs: Optional[float]    = None
+    true_peak_dbfs: Optional[float]     = None
+    loudness_range_lu: Optional[float]  = None
+    loudness_verdict: str               = ""    # e.g. "Broadcast-ready" (#95)
+    true_peak_warning: Optional[bool]   = None
+    delta_spotify: Optional[float]      = None
+    delta_apple_music: Optional[float]  = None
+    delta_youtube: Optional[float]      = None
+    delta_broadcast: Optional[float]    = None
+    gain_spotify_db: Optional[float]    = None  # (#94)
+    gain_apple_music_db: Optional[float] = None
+    gain_youtube_db: Optional[float]    = None
+    gain_broadcast_db: Optional[float]  = None
+    dialogue_score: Optional[float]     = None
+    dialogue_label: str                 = ""
+    vo_headroom_db: Optional[float]     = None  # (#92)
+
+    # ------------------------------------------------------------------
+    # Stem Validation
+    # ------------------------------------------------------------------
+    mono_compatible: Optional[bool]     = None
+    phase_correlation: Optional[float]  = None
+    cancellation_db: Optional[float]    = None
+    mid_side_ratio: Optional[float]     = None
+    stem_flag_count: int                = 0
 
     # ------------------------------------------------------------------
     # Popularity & Cost
@@ -189,8 +234,9 @@ class TrackReport(BaseModel):
     # ------------------------------------------------------------------
     # Legal
     # ------------------------------------------------------------------
-    isrc: Optional[str]         = None
-    pro_match: Optional[str]    = None
+    isrc: Optional[str]             = None
+    pro_match: Optional[str]        = None
+    pro_confidence: Optional[str]   = None      # "High"|"Medium"|"Low" (#118)
 
     # ------------------------------------------------------------------
     # Metadata Validation
@@ -204,16 +250,27 @@ class TrackReport(BaseModel):
     # ------------------------------------------------------------------
     # JSON Blobs — one-to-many relations (become child DB tables later)
     # ------------------------------------------------------------------
-    compliance_flags_json: str  = Field(default="[]")   # list[ComplianceFlag]
-    ai_segments_json: str       = Field(default="[]")   # list[AiSegment]
-    sections_json: str          = Field(default="[]")   # list[Section]
-    transcript_json: str        = Field(default="[]")   # list[TranscriptSegment]
-    similar_tracks_json: str    = Field(default="[]")   # list[TrackCandidate]
-    sync_cuts_json: str         = Field(default="[]")   # list[SyncCut]
-    forensic_notes_json: str    = Field(default="[]")   # list[str]
-    forensic_flags_json: str    = Field(default="[]")   # list[str]
-    themes_json: str            = Field(default="[]")   # list[str]
-    theme_keywords_json: str    = Field(default="[]")   # list[str]
+    compliance_flags_json: str              = Field(default="[]")   # list[ComplianceFlag]
+    ai_segments_json: str                   = Field(default="[]")   # list[AiSegment]
+    loop_window_scores_json: str            = Field(default="[]")   # list[tuple[float,float]] (#142)
+    section_similarities_json: str          = Field(default="{}")   # dict[str,SectionRepetition] (#143)
+    section_internal_repetition_json: str   = Field(default="{}")   # dict[str,SectionRepetition] (#145)
+    sections_json: str                      = Field(default="[]")   # list[Section]
+    transcript_json: str                    = Field(default="[]")   # list[TranscriptSegment]
+    similar_tracks_json: str                = Field(default="[]")   # list[TrackCandidate]
+    sync_cuts_json: str                     = Field(default="[]")   # list[SyncCut]
+    forensic_notes_json: str                = Field(default="[]")   # list[str]
+    forensic_flags_json: str                = Field(default="[]")   # list[str]
+    themes_json: str                        = Field(default="[]")   # list[str]
+    theme_keywords_json: str                = Field(default="[]")   # list[str]
+    theme_scores_json: str                  = Field(default="{}")   # dict[str,float] (#167)
+    per_section_authorship_json: str        = Field(default="{}")   # dict[str,SectionAuthorshipResult] (#156)
+    platform_metrics_json: str              = Field(default="{}")   # dict[str,int] (engagement)
+    section_loudness_json: str              = Field(default="[]")   # list[dict] (#96)
+    section_dialogue_json: str              = Field(default="[]")   # list[dict] (#91)
+    genre_lra_context_json: str             = Field(default="null") # dict|null (#99)
+    energy_stagnant_timestamps_json: str    = Field(default="[]")   # list[float] (#108)
+    energy_per_window_contrasts_json: str   = Field(default="[]")   # list[float] (#108)
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()

@@ -52,7 +52,7 @@ class SystemConstants:
 
     # ---- Audio ----------------------------------------------------------------
     SAMPLE_RATE: int = 22_050           # Hz; librosa default, balances quality/memory
-    MAX_UPLOAD_BYTES: int = 50 * 1024 * 1024  # 50 MB hard ceiling
+    MAX_UPLOAD_BYTES: int = 300 * 1024 * 1024  # 300 MB — covers 24-bit/96kHz stereo WAV up to ~9 min
     # Bytes to hash for session-state loudness cache key — enough for reliable identity (#102)
     LOUDNESS_CACHE_HASH_BYTES: int = 65_536  # 64 KB
 
@@ -998,10 +998,10 @@ class Settings(BaseSettings):
 
     # ---- Infrastructure -------------------------------------------------------
     max_upload_mb: int = Field(
-        default=50,
+        default=300,
         description="Maximum permitted file upload size in megabytes.",
         ge=1,
-        le=500,
+        le=1000,
     )
 
     # ---- Logging --------------------------------------------------------------

@@ -653,7 +653,7 @@ class Compliance:
                     url,
                     headers={"User-Agent": "sync-safe-forensic-portal/1.0"},
                 )
-                with urllib.request.urlopen(req, timeout=10) as resp:
+                with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310 — URL is a hardcoded constant, not user input
                     ldnoobw_words = [
                         line.strip()
                         for line in resp.read().decode("utf-8").splitlines()
