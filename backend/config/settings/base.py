@@ -27,9 +27,11 @@ class AppSettings(BaseSettings):
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
 
-    # Modal (wired in Effort 2)
+    # Modal (wired in Effort 3)
     MODAL_WEBHOOK_SECRET: str = ""
     DJANGO_BASE_URL: str = "http://localhost:8000"
+    # Set to True in prod to dispatch jobs to Modal instead of StubMLWorkerProvider
+    USE_MODAL_WORKER: bool = False
 
     model_config = SettingsConfigDict(
         env_file=Path(__file__).resolve().parents[3] / ".env",
