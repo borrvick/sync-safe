@@ -8,6 +8,9 @@ from unittest.mock import patch
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
 from rest_framework.test import APIClient
 
 User = get_user_model()
@@ -153,3 +156,78 @@ def test_resend_verification_smtp_failure(auth_client: APIClient) -> None:
         resp = auth_client.post("/api/auth/resend-verification/")
     assert resp.status_code == 503
     assert "detail" in resp.data
+
+
+# ---------------------------------------------------------------------------
+# Password reset (#217)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_password_reset_registered_email(client: APIClient, registered_user) -> None:
+    """Always returns 200 — does not reveal whether email exists."""
+    with patch("apps.users.views.send_mail") as mock_mail:
+        resp = client.post("/api/auth/password/reset/", {"email": "user@example.com"}, format="json")
+    assert resp.status_code == 200
+    assert "detail" in resp.data
+    mock_mail.assert_called_once()
+
+
+@pytest.mark.django_db
+def test_password_reset_unknown_email_still_200(client: APIClient) -> None:
+    """Enumeration-proof: unknown email must return 200, not 404."""
+    resp = client.post("/api/auth/password/reset/", {"email": "nobody@example.com"}, format="json")
+    assert resp.status_code == 200
+    assert "detail" in resp.data
+
+
+@pytest.mark.django_db
+def test_password_reset_confirm_success(client: APIClient, registered_user) -> None:
+    uid = urlsafe_base64_encode(force_bytes(registered_user.pk))
+    token = default_token_generator.make_token(registered_user)
+    resp = client.post(
+        "/api/auth/password/reset/confirm/",
+        {"uid": uid, "token": token, "new_password": "newstrongpass1"},
+        format="json",
+    )
+    assert resp.status_code == 200
+    registered_user.refresh_from_db()
+    assert registered_user.check_password("newstrongpass1")
+
+
+@pytest.mark.django_db
+def test_password_reset_confirm_invalid_token(client: APIClient, registered_user) -> None:
+    uid = urlsafe_base64_encode(force_bytes(registered_user.pk))
+    resp = client.post(
+        "/api/auth/password/reset/confirm/",
+        {"uid": uid, "token": "invalid-token", "new_password": "newstrongpass1"},
+        format="json",
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+def test_password_reset_confirm_invalid_uid(client: APIClient) -> None:
+    resp = client.post(
+        "/api/auth/password/reset/confirm/",
+        {"uid": "not-valid-uid", "token": "sometoken", "new_password": "newstrongpass1"},
+        format="json",
+    )
+    assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting (#218)
+# ---------------------------------------------------------------------------
+
+def test_login_throttle_scope() -> None:
+    """LoginRateThrottle must declare scope=login and rate=5/min."""
+    from apps.users.throttles import LoginRateThrottle
+    assert LoginRateThrottle.scope == "login"
+    assert LoginRateThrottle.rate == "5/min"
+
+
+def test_register_throttle_scope() -> None:
+    """RegisterRateThrottle must declare scope=register and rate=3/hour."""
+    from apps.users.throttles import RegisterRateThrottle
+    assert RegisterRateThrottle.scope == "register"
+    assert RegisterRateThrottle.rate == "3/hour"

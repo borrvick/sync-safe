@@ -30,3 +30,13 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ("id", "email", "tier", "created_at")
         read_only_fields = ("id", "tier", "created_at")
+
+
+class PasswordResetSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    uid          = serializers.CharField()
+    token        = serializers.CharField()
+    new_password = serializers.CharField(write_only=True, min_length=8)
