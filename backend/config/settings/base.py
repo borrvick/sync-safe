@@ -8,7 +8,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import dj_database_url
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 # ---------------------------------------------------------------------------
@@ -31,9 +31,10 @@ class AppSettings(BaseSettings):
     MODAL_WEBHOOK_SECRET: str = ""
     DJANGO_BASE_URL: str = "http://localhost:8000"
 
-    class Config:
-        env_file = Path(__file__).resolve().parents[3] / ".env"
-        extra = "ignore"  # .env has Streamlit keys (LASTFM_API_KEY etc.) we don't need
+    model_config = SettingsConfigDict(
+        env_file=Path(__file__).resolve().parents[3] / ".env",
+        extra="ignore",  # .env has Streamlit keys (LASTFM_API_KEY etc.) we don't need
+    )
 
 
 _app_settings = AppSettings()  # type: ignore[call-arg]
