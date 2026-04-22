@@ -64,7 +64,8 @@ CMD ["gunicorn", "config.wsgi:application", \
      "--bind", "0.0.0.0:8000", \
      "--workers", "2", \
      "--timeout", "120", \
-     "--log-file", "-"]
+     "--log-file", "-", \
+     "--capture-output"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD python -c '\
