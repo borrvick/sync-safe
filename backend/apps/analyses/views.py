@@ -10,12 +10,14 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.throttling import BaseThrottle
 from rest_framework.views import APIView
 
 from core.protocols import MLWorkerProvider
 
 from .models import Analysis
 from .serializers import AnalysisSerializer, LabelSerializer, SubmitAnalysisSerializer
+from .throttles import AnalyzeRateThrottle
 
 class AnalysisPagination(PageNumberPagination):
     page_size = 20
@@ -45,6 +47,12 @@ _worker: MLWorkerProvider = _build_worker()
 
 class AnalysisListCreateView(APIView):
     permission_classes = [IsAuthenticated]
+
+    def get_throttles(self) -> list[BaseThrottle]:
+        # Only throttle POST (submit) — GET (list) is cheap.
+        if self.request.method == "POST":
+            return [AnalyzeRateThrottle()]
+        return []
 
     def get(self, request: Request) -> Response:
         analyses = Analysis.objects.filter(user=request.user)

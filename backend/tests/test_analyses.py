@@ -253,3 +253,39 @@ def test_health_check_no_auth_required(client: APIClient) -> None:
     """Health endpoint must be public — Railway has no JWT token."""
     resp = client.get("/health/")
     assert resp.status_code != 401
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting (throttle class attributes — exhaustion not tested; DummyCache)
+# ---------------------------------------------------------------------------
+
+def test_analyze_throttle_scope() -> None:
+    from apps.analyses.throttles import AnalyzeRateThrottle
+    assert AnalyzeRateThrottle.scope == "analyze"
+
+
+def test_analyze_throttle_rate_from_app_settings() -> None:
+    from django.conf import settings
+    from apps.analyses.throttles import AnalyzeRateThrottle
+    # rate is set at class definition from AppSettings — not from DEFAULT_THROTTLE_RATES
+    # (which test fixtures wipe). This verifies the env-var path is wired correctly.
+    assert AnalyzeRateThrottle.rate == settings.APP_SETTINGS.ANALYZE_RATE_LIMIT
+    assert settings.APP_SETTINGS.ANALYZE_RATE_LIMIT == "10/hour"  # default
+
+
+@pytest.mark.django_db
+def test_analyze_throttle_applied_on_post(client_a: APIClient) -> None:
+    """POST /api/analyses/ must pass through AnalyzeRateThrottle (DummyCache always allows)."""
+    resp = client_a.post(
+        "/api/analyses/",
+        {"source_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"},
+        format="json",
+    )
+    assert resp.status_code == 202  # throttle allowed — DummyCache never blocks
+
+
+@pytest.mark.django_db
+def test_analyze_throttle_not_applied_on_get(client_a: APIClient) -> None:
+    """GET /api/analyses/ must NOT be throttled — list is cheap."""
+    resp = client_a.get("/api/analyses/")
+    assert resp.status_code == 200
