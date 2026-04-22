@@ -18,6 +18,12 @@ SECURE_SSL_REDIRECT = True
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 
+# HSTS — tells browsers to always use HTTPS for this domain for 1 year.
+# Do NOT set SECURE_HSTS_PRELOAD=True until the domain is stable and registered
+# in the browser preload list (that step is essentially irreversible).
+SECURE_HSTS_SECONDS = 31536000
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+
 # Static files — whitenoise serves them directly from gunicorn (no nginx needed)
 STATIC_ROOT = Path(__file__).resolve().parents[3] / "staticfiles"
 
