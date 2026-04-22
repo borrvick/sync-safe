@@ -21,6 +21,7 @@ tests/fixtures/forensics/*
 cookies.txt
 .env
 .env.*
+!.env.example
 
 # Django
 backend/db.sqlite3
