@@ -70,7 +70,8 @@ class AnalysisCompleteWebhookView(APIView):
     def _verify_secret(self, request: Request) -> bool:
         webhook_secret = settings.APP_SETTINGS.MODAL_WEBHOOK_SECRET
         if not webhook_secret:
-            # Secret not configured — allow through in local dev (stub worker)
-            return True
+            # In prod (USE_MODAL_WORKER=True) a missing secret is a misconfiguration —
+            # deny all requests rather than silently accepting unauthenticated payloads.
+            return not settings.APP_SETTINGS.USE_MODAL_WORKER
         provided = request.headers.get("X-Modal-Webhook-Secret", "")
         return hmac.compare_digest(provided, webhook_secret)
