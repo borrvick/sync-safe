@@ -24,6 +24,14 @@ CSRF_COOKIE_SECURE = True
 SECURE_HSTS_SECONDS = 31536000
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 
+# Prevent browsers from MIME-sniffing the content-type (belt and suspenders —
+# Django's SecurityMiddleware also sets this, but explicit is better in prod).
+SECURE_CONTENT_TYPE_NOSNIFF = True
+
+# Restrict Referer header to same origin — prevents leaking the URL path to
+# third-party requests (analytics, CDN assets) embedded in future frontend pages.
+SECURE_REFERRER_POLICY = "same-origin"
+
 # Static files — whitenoise serves them directly from gunicorn (no nginx needed)
 STATIC_ROOT = Path(__file__).resolve().parents[3] / "staticfiles"
 

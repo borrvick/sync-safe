@@ -33,6 +33,18 @@ class AppSettings(BaseSettings):
     # Set to True in prod to dispatch jobs to Modal instead of StubMLWorkerProvider
     USE_MODAL_WORKER: bool = False
 
+    # Seconds to cache complete/failed analysis results in the detail endpoint.
+    # Pending/running results are never cached — they change on every webhook tick.
+    ANALYSIS_CACHE_TTL_SECONDS: int = 300
+
+    # Max analysis submissions per authenticated user per window (e.g. "10/hour").
+    # GPU quota makes this endpoint expensive — keep this conservative.
+    ANALYZE_RATE_LIMIT: str = "10/hour"
+
+    # Deployed frontend origin added to CORS_ALLOWED_ORIGINS when non-empty.
+    # Format: scheme + host only, no trailing slash — e.g. https://app.sync-safe.com
+    FRONTEND_URL: str = ""
+
     model_config = SettingsConfigDict(
         env_file=Path(__file__).resolve().parents[3] / ".env",
         extra="ignore",  # .env has Streamlit keys (LASTFM_API_KEY etc.) we don't need
@@ -207,6 +219,7 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "login":    "5/min",   # LoginRateThrottle — brute-force protection
         "register": "3/hour",  # RegisterRateThrottle — spam/abuse protection
+        "analyze":  _app_settings.ANALYZE_RATE_LIMIT,  # AnalyzeRateThrottle — GPU is expensive
     },
 }
 
@@ -231,10 +244,14 @@ SIMPLE_JWT = {
 # CORS (dev allows localhost:3000 for future Next.js frontend)
 # ---------------------------------------------------------------------------
 
-CORS_ALLOWED_ORIGINS = [
+_cors_origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
+if _app_settings.FRONTEND_URL:
+    _cors_origins.append(_app_settings.FRONTEND_URL)
+
+CORS_ALLOWED_ORIGINS = _cors_origins
 
 # ---------------------------------------------------------------------------
 # Expose app settings for use in views / tasks

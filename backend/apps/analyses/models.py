@@ -32,6 +32,7 @@ class Analysis(models.Model):
     source_url  = models.URLField(blank=True)
     title       = models.CharField(max_length=255, blank=True)
     artist      = models.CharField(max_length=255, blank=True)
+    label       = models.CharField(max_length=100, blank=True)
     # Full AnalysisResult.to_dict() payload written by webhook receiver on completion.
     # Stored opaque — never queried by column; the frontend reads it whole.
     result_json = models.JSONField(null=True, blank=True)
