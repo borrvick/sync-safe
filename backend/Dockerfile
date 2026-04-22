@@ -2,9 +2,9 @@
 # ---------------------------------------------------------------------------
 # Stage 1 — dependency layer (cached unless requirements change)
 # ---------------------------------------------------------------------------
-# Pin by digest so upstream tag mutations never silently change the build.
-# To update: docker pull python:3.11-slim and replace the digest below.
-FROM python:3.11-slim@sha256:ad48f611c72c03e8da1f8b9bb23f97e8c8ad4db63975e69d7a9a50e3b0435d79 AS deps
+# Using tag rather than digest — digest pinning breaks cross-platform builds
+# (ARM64 digest from local Mac is not found on Railway's AMD64 builders).
+FROM python:3.11-slim AS deps
 
 LABEL org.opencontainers.image.source="https://github.com/benjaminorrvick/music-sync-app" \
       org.opencontainers.image.description="Sync-Safe backend — Django/DRF API" \
@@ -23,7 +23,7 @@ RUN pip install --no-cache-dir -r requirements-django.txt
 # ---------------------------------------------------------------------------
 # Stage 2 — runtime image
 # ---------------------------------------------------------------------------
-FROM python:3.11-slim@sha256:ad48f611c72c03e8da1f8b9bb23f97e8c8ad4db63975e69d7a9a50e3b0435d79 AS runtime
+FROM python:3.11-slim AS runtime
 
 WORKDIR /app
 
