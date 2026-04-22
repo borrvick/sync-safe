@@ -33,6 +33,10 @@ class AppSettings(BaseSettings):
     # Set to True in prod to dispatch jobs to Modal instead of StubMLWorkerProvider
     USE_MODAL_WORKER: bool = False
 
+    # Seconds to cache complete/failed analysis results in the detail endpoint.
+    # Pending/running results are never cached — they change on every webhook tick.
+    ANALYSIS_CACHE_TTL_SECONDS: int = 300
+
     model_config = SettingsConfigDict(
         env_file=Path(__file__).resolve().parents[3] / ".env",
         extra="ignore",  # .env has Streamlit keys (LASTFM_API_KEY etc.) we don't need

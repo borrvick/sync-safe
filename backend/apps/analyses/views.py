@@ -4,7 +4,9 @@ apps/analyses/views.py
 from __future__ import annotations
 
 from django.conf import settings
+from django.core.cache import cache
 from rest_framework import status
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -13,7 +15,12 @@ from rest_framework.views import APIView
 from core.protocols import MLWorkerProvider
 
 from .models import Analysis
-from .serializers import AnalysisSerializer, SubmitAnalysisSerializer
+from .serializers import AnalysisSerializer, LabelSerializer, SubmitAnalysisSerializer
+
+class AnalysisPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
 
 
 def _build_worker() -> MLWorkerProvider:
@@ -41,7 +48,9 @@ class AnalysisListCreateView(APIView):
 
     def get(self, request: Request) -> Response:
         analyses = Analysis.objects.filter(user=request.user)
-        return Response(AnalysisSerializer(analyses, many=True).data)
+        paginator = AnalysisPagination()
+        page = paginator.paginate_queryset(analyses, request)
+        return paginator.get_paginated_response(AnalysisSerializer(page, many=True).data)
 
     def post(self, request: Request) -> Response:
         serializer = SubmitAnalysisSerializer(data=request.data)
@@ -69,8 +78,33 @@ class AnalysisDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request: Request, pk: str) -> Response:
+        # Cache key is user-scoped to prevent cross-user data leakage.
+        cache_key = f"analysis:{pk}:{request.user.id}"
+        data = cache.get(cache_key)
+        if data is None:
+            try:
+                analysis = Analysis.objects.get(pk=pk, user=request.user)
+            except Analysis.DoesNotExist:
+                return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+            data = AnalysisSerializer(analysis).data
+            # Only cache terminal states — pending/running change on every webhook tick.
+            if analysis.status in (Analysis.Status.COMPLETE, Analysis.Status.FAILED):
+                cache.set(cache_key, data, timeout=settings.APP_SETTINGS.ANALYSIS_CACHE_TTL_SECONDS)
+        return Response(data)
+
+
+class AnalysisLabelView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request: Request, pk: str) -> Response:
         try:
             analysis = Analysis.objects.get(pk=pk, user=request.user)
         except Analysis.DoesNotExist:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = LabelSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        analysis.label = serializer.validated_data["label"]
+        analysis.save(update_fields=["label", "updated_at"])
+        # Invalidate detail cache so the next poll reflects the new label.
+        cache.delete(f"analysis:{pk}:{request.user.id}")
         return Response(AnalysisSerializer(analysis).data)

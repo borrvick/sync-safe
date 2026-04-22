@@ -55,6 +55,11 @@ class AnalysisCompleteWebhookView(APIView):
             logger.error("Webhook for unknown job_id=%s", job_id)
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
+        # Idempotence: terminal states are final — ignore duplicate deliveries.
+        if analysis.status in (Analysis.Status.COMPLETE, Analysis.Status.FAILED):
+            logger.info("Webhook duplicate for already-terminal job_id=%s — skipping", job_id)
+            return Response({"detail": "ok"})
+
         if outcome == "complete":
             analysis.status      = Analysis.Status.COMPLETE
             analysis.result_json = request.data.get("result")

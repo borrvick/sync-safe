@@ -140,3 +140,45 @@ def test_webhook_invalid_status(client: APIClient, pending_analysis) -> None:
 def test_webhook_unknown_job_id(client: APIClient) -> None:
     resp = _post(client, {"job_id": str(uuid.uuid4()), "status": "complete", "result": {}})
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Idempotence — duplicate delivery must not clobber terminal state
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_webhook_duplicate_complete_is_ignored(client: APIClient, user) -> None:
+    """A second complete callback for an already-complete job must return 200 without re-writing."""
+    analysis = Analysis.objects.create(
+        user=user,
+        source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        status=Analysis.Status.COMPLETE,
+        result_json={"bpm": 120.0},
+    )
+    resp = _post(client, {
+        "job_id": str(analysis.id),
+        "status": "complete",
+        "result": {"bpm": 999.0},  # different payload — must be ignored
+    })
+    assert resp.status_code == 200
+    analysis.refresh_from_db()
+    assert analysis.result_json == {"bpm": 120.0}  # original result preserved
+
+
+@pytest.mark.django_db
+def test_webhook_duplicate_failed_is_ignored(client: APIClient, user) -> None:
+    """A second failed callback for an already-failed job must return 200 without re-writing."""
+    analysis = Analysis.objects.create(
+        user=user,
+        source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        status=Analysis.Status.FAILED,
+        error="original error",
+    )
+    resp = _post(client, {
+        "job_id": str(analysis.id),
+        "status": "failed",
+        "error": "duplicate error",
+    })
+    assert resp.status_code == 200
+    analysis.refresh_from_db()
+    assert analysis.error == "original error"  # original error preserved
