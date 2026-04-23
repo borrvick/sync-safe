@@ -330,6 +330,26 @@ def test_track_label_list_returns_seeded_labels(client: APIClient) -> None:
     assert "test-cat" in slugs
 
 
+# ---------------------------------------------------------------------------
+# Malformed / missing auth (#256)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_malformed_auth_header_returns_401(client: APIClient) -> None:
+    """Non-Bearer scheme must be rejected before hitting any view logic."""
+    client.credentials(HTTP_AUTHORIZATION="Token not-a-jwt")
+    resp = client.get("/api/analyses/")
+    assert resp.status_code == 401
+
+
+@pytest.mark.django_db
+def test_missing_bearer_prefix_returns_401(client: APIClient) -> None:
+    """Raw token without 'Bearer ' prefix must be rejected."""
+    client.credentials(HTTP_AUTHORIZATION="rawtoken")
+    resp = client.get("/api/analyses/")
+    assert resp.status_code == 401
+
+
 @pytest.mark.django_db
 def test_track_label_serializer_fields(client: APIClient) -> None:
     from apps.analyses.models import TrackLabel

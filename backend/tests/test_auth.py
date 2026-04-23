@@ -231,3 +231,40 @@ def test_register_throttle_scope() -> None:
     from apps.users.throttles import RegisterRateThrottle
     assert RegisterRateThrottle.scope == "register"
     assert RegisterRateThrottle.rate == "3/hour"
+
+
+# ---------------------------------------------------------------------------
+# Invalid / malformed JWT (#257)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_malformed_jwt_returns_401(client: APIClient) -> None:
+    """A syntactically invalid token must be rejected with 401, not 500."""
+    client.credentials(HTTP_AUTHORIZATION="Bearer not.a.jwt")
+    resp = client.get("/api/auth/me/")
+    assert resp.status_code == 401
+
+
+@pytest.mark.django_db
+def test_expired_jwt_returns_401(client: APIClient, registered_user) -> None:
+    """An expired access token (crafted with past lifetime) must be rejected."""
+    from datetime import timedelta as _timedelta
+    from rest_framework_simplejwt.tokens import AccessToken
+
+    token = AccessToken.for_user(registered_user)
+    # Backdating the expiry to the epoch makes it immediately expired
+    token.set_exp(lifetime=_timedelta(seconds=-1))
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {str(token)}")
+    resp = client.get("/api/auth/me/")
+    assert resp.status_code == 401
+
+
+@pytest.mark.django_db
+def test_wrong_token_type_returns_401(client: APIClient, registered_user) -> None:
+    """Sending a refresh token where an access token is expected must be rejected."""
+    from rest_framework_simplejwt.tokens import RefreshToken
+
+    refresh = RefreshToken.for_user(registered_user)
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {str(refresh)}")
+    resp = client.get("/api/auth/me/")
+    assert resp.status_code == 401
