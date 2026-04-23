@@ -1,13 +1,23 @@
 """
 apps/analyses/models.py
 Analysis job lifecycle — pending → running → complete | failed.
+TrackLabel — predefined sync category taxonomy for the label dropdown.
 """
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from django.conf import settings
 from django.db import models
+
+
+class AnalysisQuerySet(models.QuerySet["Analysis"]):
+    """Custom queryset that enforces user-scoped access in one place."""
+
+    def for_user(self, user: Any) -> "AnalysisQuerySet":
+        """Return only analyses owned by `user`. Use in every authenticated view."""
+        return self.filter(user=user)
 
 
 class Analysis(models.Model):
@@ -16,6 +26,8 @@ class Analysis(models.Model):
         RUNNING  = "running",  "Running"
         COMPLETE = "complete", "Complete"
         FAILED   = "failed",   "Failed"
+
+    objects = AnalysisQuerySet.as_manager()
 
     id          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user        = models.ForeignKey(
@@ -44,5 +56,25 @@ class Analysis(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self) -> str:
-        label = self.title or self.source_url or str(self.id)
-        return f"{label} [{self.status}]"
+        display = self.title or self.source_url or str(self.id)
+        return f"{display} [{self.status}]"
+
+
+class TrackLabel(models.Model):
+    """
+    Predefined sync licensing category — populates the label dropdown in the UI.
+
+    Managed via Django admin or data migrations; not user-editable directly.
+    slug is the stored value on Analysis.label (e.g. "tv-commercial").
+    """
+
+    slug        = models.CharField(max_length=50, unique=True)
+    name        = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+    sort_order  = models.PositiveSmallIntegerField(default=0, db_index=True)
+
+    class Meta:
+        ordering = ["sort_order", "name"]
+
+    def __str__(self) -> str:
+        return self.name

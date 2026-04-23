@@ -289,3 +289,57 @@ def test_analyze_throttle_not_applied_on_get(client_a: APIClient) -> None:
     """GET /api/analyses/ must NOT be throttled — list is cheap."""
     resp = client_a.get("/api/analyses/")
     assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# AnalysisQuerySet.for_user
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_for_user_returns_only_own_analyses(user_a, user_b) -> None:
+    Analysis.objects.create(user=user_a, source_url="https://www.youtube.com/watch?v=aaa")
+    Analysis.objects.create(user=user_b, source_url="https://www.youtube.com/watch?v=bbb")
+
+    qs_a = Analysis.objects.for_user(user_a)
+    assert qs_a.count() == 1
+    assert qs_a.first().user == user_a
+
+
+@pytest.mark.django_db
+def test_for_user_empty_when_no_analyses(user_a) -> None:
+    assert Analysis.objects.for_user(user_a).count() == 0
+
+
+# ---------------------------------------------------------------------------
+# TrackLabel list endpoint
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_track_label_list_is_public(client: APIClient) -> None:
+    """GET /api/analyses/labels/ must not require authentication."""
+    resp = client.get("/api/analyses/labels/")
+    assert resp.status_code == 200
+
+
+@pytest.mark.django_db
+def test_track_label_list_returns_seeded_labels(client: APIClient) -> None:
+    from apps.analyses.models import TrackLabel
+    TrackLabel.objects.create(slug="test-cat", name="Test Category", sort_order=0)
+    resp = client.get("/api/analyses/labels/")
+    slugs = [item["slug"] for item in resp.data]
+    assert "test-cat" in slugs
+
+
+@pytest.mark.django_db
+def test_track_label_serializer_fields(client: APIClient) -> None:
+    from apps.analyses.models import TrackLabel
+    # film-feature is seeded by migration 0005 — use get_or_create to be idempotent
+    TrackLabel.objects.get_or_create(
+        slug="film-feature",
+        defaults={"name": "Film (Feature)", "description": "Theatrical", "sort_order": 30},
+    )
+    resp = client.get("/api/analyses/labels/")
+    item = next(i for i in resp.data if i["slug"] == "film-feature")
+    assert item["name"] == "Film (Feature)"
+    assert "description" in item
+    assert item["sort_order"] == 30

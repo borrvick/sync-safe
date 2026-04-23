@@ -13,10 +13,12 @@ from rest_framework.response import Response
 from rest_framework.throttling import BaseThrottle
 from rest_framework.views import APIView
 
+from rest_framework.permissions import AllowAny
+
 from core.protocols import MLWorkerProvider
 
-from .models import Analysis
-from .serializers import AnalysisSerializer, LabelSerializer, SubmitAnalysisSerializer
+from .models import Analysis, TrackLabel
+from .serializers import AnalysisSerializer, LabelSerializer, SubmitAnalysisSerializer, TrackLabelSerializer
 from .throttles import AnalyzeRateThrottle
 
 class AnalysisPagination(PageNumberPagination):
@@ -55,7 +57,7 @@ class AnalysisListCreateView(APIView):
         return []
 
     def get(self, request: Request) -> Response:
-        analyses = Analysis.objects.filter(user=request.user)
+        analyses = Analysis.objects.for_user(request.user)
         paginator = AnalysisPagination()
         page = paginator.paginate_queryset(analyses, request)
         return paginator.get_paginated_response(AnalysisSerializer(page, many=True).data)
@@ -91,7 +93,7 @@ class AnalysisDetailView(APIView):
         data = cache.get(cache_key)
         if data is None:
             try:
-                analysis = Analysis.objects.get(pk=pk, user=request.user)
+                analysis = Analysis.objects.for_user(request.user).get(pk=pk)
             except Analysis.DoesNotExist:
                 return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
             data = AnalysisSerializer(analysis).data
@@ -106,7 +108,7 @@ class AnalysisLabelView(APIView):
 
     def patch(self, request: Request, pk: str) -> Response:
         try:
-            analysis = Analysis.objects.get(pk=pk, user=request.user)
+            analysis = Analysis.objects.for_user(request.user).get(pk=pk)
         except Analysis.DoesNotExist:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         serializer = LabelSerializer(data=request.data)
@@ -116,3 +118,13 @@ class AnalysisLabelView(APIView):
         # Invalidate detail cache so the next poll reflects the new label.
         cache.delete(f"analysis:{pk}:{request.user.id}")
         return Response(AnalysisSerializer(analysis).data)
+
+
+class TrackLabelListView(APIView):
+    """Return the predefined sync category list. Public — no auth required."""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request: Request) -> Response:
+        labels = TrackLabel.objects.all()
+        return Response(TrackLabelSerializer(labels, many=True).data)
