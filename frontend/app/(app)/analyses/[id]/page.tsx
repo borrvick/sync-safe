@@ -4,6 +4,8 @@ import { apiFetch } from "@/app/lib/api";
 import type { Analysis, TrackLabel } from "@/app/lib/definitions";
 import { Poller } from "./poller";
 import { LabelSelector } from "./label-selector";
+import { YouTubePlayer } from "./youtube-player";
+import { TimestampButton } from "./timestamp-button";
 
 // ---------------------------------------------------------------------------
 // Data fetching
@@ -284,15 +286,15 @@ function LyricsAudit({ result }: { result: ResultJson }) {
               <tbody className="divide-y divide-gray-50">
                 {lyricFlags.map((flag, i) => (
                   <tr key={i}>
-                    <td className="py-2 pr-3 text-xs text-gray-500 whitespace-nowrap">
-                      {typeof flag.timestamp_s === "number"
-                        ? fmt(flag.timestamp_s)
-                        : "—"}
+                    <td className="py-2 pr-3 text-xs whitespace-nowrap">
+                      {typeof flag.timestamp_s === "number" ? (
+                        <TimestampButton seconds={flag.timestamp_s}>
+                          {fmt(flag.timestamp_s)}
+                        </TimestampButton>
+                      ) : "—"}
                     </td>
                     <td className="py-2 pr-3">
-                      <Pill variant="fail">
-                        {String(flag.issue_type ?? "—")}
-                      </Pill>
+                      <Pill variant="fail">{String(flag.issue_type ?? "—")}</Pill>
                     </td>
                     <td className="py-2 pr-3 text-gray-700 max-w-xs truncate">
                       {String(flag.text ?? "—")}
@@ -316,9 +318,11 @@ function LyricsAudit({ result }: { result: ResultJson }) {
           <div className="mt-2 space-y-1 max-h-64 overflow-y-auto pr-1">
             {transcription.map((seg, i) => (
               <div key={i} className="flex gap-2 text-sm">
-                <span className="text-xs text-gray-400 w-14 shrink-0 pt-0.5">
-                  {fmt(seg.start)}
-                </span>
+                <TimestampButton seconds={seg.start}>
+                  <span className="text-xs text-gray-400 w-14 block">
+                    {fmt(seg.start)}
+                  </span>
+                </TimestampButton>
                 <span className="text-gray-700">{seg.text}</span>
               </div>
             ))}
@@ -447,6 +451,7 @@ export default async function AnalysisPage({
       {/* Report sections */}
       {analysis.status === "complete" && (
         <div className="space-y-4">
+          <YouTubePlayer sourceUrl={analysis.source_url} />
           <TrackOverview analysis={analysis} result={result} />
           <AuthenticityAudit result={result} />
           <SyncReadiness result={result} />
