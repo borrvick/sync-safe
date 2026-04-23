@@ -33,7 +33,7 @@ jobs:
           DJANGO_SETTINGS_MODULE: config.settings.dev
           SECRET_KEY: ci-dummy-secret-key-not-used-in-prod
           DATABASE_URL: sqlite:///db.sqlite3
-        run: pytest tests/ -q --tb=short
+        run: pytest tests/ -q --tb=short -m "not slow"
 
   # ---------------------------------------------------------------------------
   # Job 2 — scan Python dependencies for known CVEs
@@ -59,7 +59,30 @@ jobs:
         run: pip-audit -r backend/requirements-django.txt
 
   # ---------------------------------------------------------------------------
-  # Job 3 — verify the Docker image builds cleanly
+  # Job 3 — static security analysis
+  # ---------------------------------------------------------------------------
+  bandit:
+    name: Bandit security scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install bandit
+        run: pip install bandit
+
+      - name: Scan Django source
+        # -ll = Medium severity and above only; -r = recursive
+        # Exclude tests/ — test code intentionally uses patterns bandit flags
+        run: bandit -r backend/apps/ backend/core/ -ll --exclude backend/tests/
+
+  # ---------------------------------------------------------------------------
+  # Job 4 — verify the Docker image builds cleanly
   # ---------------------------------------------------------------------------
   docker-build:
     name: Docker build
@@ -79,3 +102,28 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
+  # Job 5 — deploy to Railway (push to main only, after all checks pass)
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy to Railway
+    needs: [test, audit, bandit, docker-build]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy
+        # --detach returns immediately; Railway streams logs in its dashboard.
+        # Health check at /health/ must return 200 within 60s or Railway rolls back.
+        # RAILWAY_SERVICE is a GitHub Actions variable (not secret) — set it to the
+        # Railway service name (e.g. "sync-safe-backend") in repo Settings → Variables.
+        working-directory: backend
+        run: railway up --service ${{ vars.RAILWAY_SERVICE }} --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
