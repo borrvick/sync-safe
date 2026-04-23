@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { apiFetch } from "@/app/lib/api";
 import type { Analysis, PaginatedAnalyses } from "@/app/lib/definitions";
+import { SubmitForm } from "./submit-form";
 
 const STATUS_BADGE: Record<Analysis["status"], string> = {
   pending: "bg-yellow-100 text-yellow-800",
@@ -37,15 +39,16 @@ export default async function DashboardPage() {
 
   return (
     <>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-semibold text-gray-900">Analyses</h1>
+        <SubmitForm />
       </div>
 
       {!data || data.results.length === 0 ? (
         <div className="rounded-xl border border-dashed border-gray-300 bg-white px-6 py-12 text-center">
           <p className="text-sm text-gray-500">No analyses yet.</p>
           <p className="mt-1 text-xs text-gray-400">
-            Submit a YouTube URL to get started.
+            Click &ldquo;New analysis&rdquo; to get started.
           </p>
         </div>
       ) : (
@@ -71,12 +74,17 @@ export default async function DashboardPage() {
               {data.results.map((a) => (
                 <tr key={a.id} className="hover:bg-gray-50 transition-colors">
                   <td className="px-4 py-3">
-                    <p className="text-sm font-medium text-gray-900 truncate max-w-xs">
-                      {a.title || a.artist || "—"}
-                    </p>
-                    <p className="text-xs text-gray-400 truncate max-w-xs">
-                      {a.source_url}
-                    </p>
+                    <Link
+                      href={`/analyses/${a.id}`}
+                      className="block focus:outline-none focus:underline"
+                    >
+                      <p className="text-sm font-medium text-gray-900 truncate max-w-xs hover:text-indigo-600">
+                        {a.title || a.artist || "Untitled"}
+                      </p>
+                      <p className="text-xs text-gray-400 truncate max-w-xs">
+                        {a.source_url}
+                      </p>
+                    </Link>
                   </td>
                   <td className="px-4 py-3">
                     <StatusBadge status={a.status} />
@@ -86,10 +94,8 @@ export default async function DashboardPage() {
                       </p>
                     )}
                   </td>
-                  <td className="px-4 py-3 hidden sm:table-cell">
-                    <span className="text-sm text-gray-600">
-                      {a.label || <span className="text-gray-300">—</span>}
-                    </span>
+                  <td className="px-4 py-3 hidden sm:table-cell text-sm text-gray-600">
+                    {a.label || <span className="text-gray-300">—</span>}
                   </td>
                   <td className="px-4 py-3 hidden md:table-cell text-sm text-gray-500">
                     {formatDate(a.created_at)}

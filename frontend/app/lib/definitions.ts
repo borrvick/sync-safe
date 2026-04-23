@@ -38,6 +38,13 @@ export interface Analysis {
   error: string;
 }
 
+export interface TrackLabel {
+  slug: string;
+  name: string;
+  description: string;
+  sort_order: number;
+}
+
 export interface PaginatedAnalyses {
   count: number;
   next: string | null;
