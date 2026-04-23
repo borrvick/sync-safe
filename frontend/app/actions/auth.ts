@@ -11,6 +11,10 @@ import { clearSession, setSession } from "@/app/lib/session";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+const SERVER_ERROR: FormState = {
+  message: "Could not reach the server. Please try again.",
+};
+
 export async function login(
   _state: FormState,
   formData: FormData
@@ -24,11 +28,16 @@ export async function login(
     return { errors: validated.error.flatten().fieldErrors };
   }
 
-  const res = await fetch(`${BASE_URL}/api/auth/login/`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(validated.data),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}/api/auth/login/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(validated.data),
+    });
+  } catch {
+    return SERVER_ERROR;
+  }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -60,11 +69,16 @@ export async function register(
     return { errors: validated.error.flatten().fieldErrors };
   }
 
-  const res = await fetch(`${BASE_URL}/api/auth/register/`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(validated.data),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}/api/auth/register/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(validated.data),
+    });
+  } catch {
+    return SERVER_ERROR;
+  }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -89,13 +103,17 @@ export async function forgotPassword(
     return { errors: validated.error.flatten().fieldErrors };
   }
 
-  await fetch(`${BASE_URL}/api/auth/password/reset/`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(validated.data),
-  });
+  try {
+    await fetch(`${BASE_URL}/api/auth/password/reset/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(validated.data),
+    });
+  } catch {
+    // Network failure: still return success — enumeration-proof behaviour must
+    // be preserved even when the backend is unreachable.
+  }
 
-  // Always return success — Django never reveals whether the email exists.
   return { message: "ok" };
 }
 

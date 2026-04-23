@@ -25,6 +25,20 @@ async function getLabels(): Promise<TrackLabel[]> {
 }
 
 // ---------------------------------------------------------------------------
+// Security helpers
+// ---------------------------------------------------------------------------
+
+// Reject anything that isn't http or https to prevent javascript: injection.
+function safeUrl(url: string): string | null {
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "https:" || protocol === "http:" ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
 
@@ -104,19 +118,21 @@ function TrackOverview({
       <div className="mb-4">
         <Row label="Title" value={analysis.title || "—"} />
         <Row label="Artist" value={analysis.artist || "—"} />
-        <Row
-          label="Source"
-          value={
-            <a
-              href={analysis.source_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-indigo-600 hover:underline truncate max-w-xs block"
-            >
-              YouTube ↗
-            </a>
-          }
-        />
+        {safeUrl(analysis.source_url) && (
+          <Row
+            label="Source"
+            value={
+              <a
+                href={safeUrl(analysis.source_url)!}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-indigo-600 hover:underline truncate max-w-xs block"
+              >
+                YouTube ↗
+              </a>
+            }
+          />
+        )}
         {bpm !== undefined && bpm > 0 && (
           <Row label="BPM" value={bpm.toFixed(1)} />
         )}
@@ -358,10 +374,10 @@ function DiscoveryLicensing({ analysis }: { analysis: Analysis }) {
           </a>
         ))}
       </div>
-      {analysis.source_url && (
+      {safeUrl(analysis.source_url) && (
         <div className="mt-3 pt-3 border-t border-gray-100">
           <a
-            href={analysis.source_url}
+            href={safeUrl(analysis.source_url)!}
             target="_blank"
             rel="noopener noreferrer"
             className="text-sm text-indigo-600 hover:underline"
@@ -425,7 +441,7 @@ export default async function AnalysisPage({
       {!isTerminal && (
         <div className="bg-white rounded-xl border border-gray-200 p-8 text-center mb-6">
           <div className="inline-flex items-center gap-2 text-sm text-gray-600">
-            <span className="animate-spin text-indigo-500 text-lg">⟳</span>
+            <span className="animate-spin text-indigo-500 text-lg" aria-hidden="true">⟳</span>
             <span>
               {analysis.status === "pending"
                 ? "Queued — waiting for a worker…"

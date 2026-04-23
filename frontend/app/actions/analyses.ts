@@ -25,10 +25,15 @@ export async function submitAnalysis(
     return { errors: validated.error.flatten().fieldErrors };
   }
 
-  const res = await apiFetch("/api/analyses/", {
-    method: "POST",
-    body: JSON.stringify(validated.data),
-  });
+  let res: Response;
+  try {
+    res = await apiFetch("/api/analyses/", {
+      method: "POST",
+      body: JSON.stringify(validated.data),
+    });
+  } catch {
+    return { message: "Could not reach the server. Please try again." };
+  }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -44,10 +49,15 @@ export async function submitAnalysis(
 }
 
 export async function setLabel(analysisId: string, label: string) {
-  const res = await apiFetch(`/api/analyses/${analysisId}/label/`, {
-    method: "PATCH",
-    body: JSON.stringify({ label }),
-  });
+  let res: Response;
+  try {
+    res = await apiFetch(`/api/analyses/${analysisId}/label/`, {
+      method: "PATCH",
+      body: JSON.stringify({ label }),
+    });
+  } catch {
+    throw new Error("Could not reach the server.");
+  }
 
   if (!res.ok) {
     throw new Error("Failed to update label.");
