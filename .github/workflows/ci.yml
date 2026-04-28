@@ -104,11 +104,48 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ---------------------------------------------------------------------------
-  # Job 5 — deploy to Railway (push to main only, after all checks pass)
+  # Job 5 — Playwright E2E tests (frontend)
   # ---------------------------------------------------------------------------
-  deploy:
+  e2e:
+    name: E2E tests (Playwright)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        working-directory: frontend
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/test-results/
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Job 6 — deploy to Railway (push to main only, after all checks pass)
+  # ---------------------------------------------------------------------------
+  deploy-backend:
     name: Deploy to Railway
-    needs: [test, audit, bandit, docker-build]
+    needs: [test, audit, bandit, docker-build, e2e]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
@@ -127,3 +164,19 @@ jobs:
         run: railway up --service ${{ vars.RAILWAY_SERVICE }} --detach
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # Job 7 — deploy to Vercel (push to main only, after all checks pass)
+  # ---------------------------------------------------------------------------
+  deploy-frontend:
+    name: Deploy to Vercel
+    needs: [test, audit, bandit, e2e]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Trigger Vercel deploy hook
+        # VERCEL_DEPLOY_HOOK_URL is a GitHub Actions secret — set it to the
+        # deploy hook URL from Vercel project Settings → Git → Deploy Hooks.
+        # The hook URL already encodes the target branch; no body required.
+        run: curl -s --fail -X POST "${{ secrets.VERCEL_DEPLOY_HOOK_URL }}"
