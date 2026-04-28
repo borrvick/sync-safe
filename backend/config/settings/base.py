@@ -45,6 +45,20 @@ class AppSettings(BaseSettings):
     # Format: scheme + host only, no trailing slash — e.g. https://app.sync-safe.com
     FRONTEND_URL: str = ""
 
+    # Sites framework — allauth uses this to build absolute URLs in auth emails.
+    # Set to the public hostname (no scheme, no trailing slash) in Railway env vars.
+    SITE_DOMAIN: str = "localhost"
+    SITE_NAME: str = "Sync-Safe"
+
+    # Email — set these in Railway env vars to enable transactional email.
+    # Leaving EMAIL_HOST empty keeps the console backend active (dev/staging default).
+    EMAIL_HOST: str = ""
+    EMAIL_PORT: int = 587
+    EMAIL_HOST_USER: str = ""
+    EMAIL_HOST_PASSWORD: str = ""
+    EMAIL_USE_TLS: bool = True
+    DEFAULT_FROM_EMAIL: str = "noreply@sync-safe.app"
+
     model_config = SettingsConfigDict(
         env_file=Path(__file__).resolve().parents[3] / ".env",
         extra="ignore",  # .env has Streamlit keys (LASTFM_API_KEY etc.) we don't need

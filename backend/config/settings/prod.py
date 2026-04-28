@@ -45,8 +45,17 @@ MIDDLEWARE = [
 
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
-# Email — no SMTP provider yet. Log emails to stdout so Railway captures them.
-# TODO: swap EMAIL_BACKEND for a real provider (SendGrid, SES) and set
-#       ACCOUNT_EMAIL_VERIFICATION = "mandatory" once configured.
-EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
-ACCOUNT_EMAIL_VERIFICATION = "none"
+# Email — use SMTP when EMAIL_HOST is set in Railway env vars; fall back to
+# console backend so Railway logs capture emails during initial bring-up.
+if APP_SETTINGS.EMAIL_HOST:
+    EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+    EMAIL_HOST = APP_SETTINGS.EMAIL_HOST
+    EMAIL_PORT = APP_SETTINGS.EMAIL_PORT
+    EMAIL_HOST_USER = APP_SETTINGS.EMAIL_HOST_USER
+    EMAIL_HOST_PASSWORD = APP_SETTINGS.EMAIL_HOST_PASSWORD
+    EMAIL_USE_TLS = APP_SETTINGS.EMAIL_USE_TLS
+    DEFAULT_FROM_EMAIL = APP_SETTINGS.DEFAULT_FROM_EMAIL
+    ACCOUNT_EMAIL_VERIFICATION = "mandatory"
+else:
+    EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+    ACCOUNT_EMAIL_VERIFICATION = "none"
