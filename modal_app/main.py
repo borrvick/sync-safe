@@ -67,18 +67,12 @@ _model_volume = modal.Volume.from_name("sync-safe-models", create_if_missing=Tru
 _MODEL_MOUNT_PATH = "/models"
 
 # ---------------------------------------------------------------------------
-# Source-code mount — services/, core/, data/, utils/ from repo root
+# Source-code — services/, core/, data/, utils/ baked into each image.
+# modal.Mount was removed in v1.x; add_local_dir() is the v1 equivalent.
 # Deployed via: modal deploy modal_app/main.py  (run from repo root)
 # ---------------------------------------------------------------------------
 
 _REPO_ROOT = Path(__file__).parent.parent
-_MOUNT_PREFIXES = ("services/", "core/", "data/", "utils/")
-
-_repo_mount = modal.Mount.from_local_dir(
-    str(_REPO_ROOT),
-    remote_path="/app",
-    condition=lambda p: any(p.startswith(prefix) for prefix in _MOUNT_PREFIXES),
-)
 
 # ---------------------------------------------------------------------------
 # Images
@@ -118,6 +112,10 @@ _cpu_image = (
         "https://github.com/explosion/spacy-models/releases/download/"
         "en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
     )
+    .add_local_dir(str(_REPO_ROOT / "services"), remote_path="/app/services")
+    .add_local_dir(str(_REPO_ROOT / "core"),     remote_path="/app/core")
+    .add_local_dir(str(_REPO_ROOT / "data"),     remote_path="/app/data")
+    .add_local_dir(str(_REPO_ROOT / "utils"),    remote_path="/app/utils")
 )
 
 # GPU image — allin1 + CUDA torch for structure analysis only.
@@ -135,6 +133,10 @@ _gpu_image = (
         "torchaudio>=2.1.0",
         "allin1>=1.0.0",
     )
+    .add_local_dir(str(_REPO_ROOT / "services"), remote_path="/app/services")
+    .add_local_dir(str(_REPO_ROOT / "core"),     remote_path="/app/core")
+    .add_local_dir(str(_REPO_ROOT / "data"),     remote_path="/app/data")
+    .add_local_dir(str(_REPO_ROOT / "utils"),    remote_path="/app/utils")
 )
 
 # ---------------------------------------------------------------------------
@@ -179,7 +181,7 @@ def _post_webhook(
     timeout=120,
     image=_cpu_image,
     secrets=_secrets,
-    mounts=[_repo_mount],
+
 )
 def run_ingestion(source_url: str) -> tuple[bytes, int]:
     """
@@ -209,7 +211,7 @@ def run_ingestion(source_url: str) -> tuple[bytes, int]:
     timeout=120,
     image=_cpu_image,
     secrets=_secrets,
-    mounts=[_repo_mount],
+
 )
 def run_forensics(audio_bytes: bytes, sample_rate: int) -> dict[str, Any]:
     """
@@ -240,7 +242,7 @@ def run_forensics(audio_bytes: bytes, sample_rate: int) -> dict[str, Any]:
     memory=8192,
     image=_gpu_image,
     secrets=_secrets,
-    mounts=[_repo_mount],
+
     volumes={_MODEL_MOUNT_PATH: _model_volume},
 )
 def run_analysis(audio_bytes: bytes, sample_rate: int) -> dict[str, Any]:
@@ -278,7 +280,7 @@ def run_analysis(audio_bytes: bytes, sample_rate: int) -> dict[str, Any]:
     timeout=300,
     image=_cpu_image,
     secrets=_secrets,
-    mounts=[_repo_mount],
+
 )
 def run_nlp(audio_bytes: bytes, sample_rate: int) -> list[dict[str, Any]]:
     """
@@ -407,7 +409,7 @@ def _transcribe_local(audio_bytes: bytes, sample_rate: int) -> list[dict[str, An
     timeout=180,
     image=_cpu_image,
     secrets=_secrets,
-    mounts=[_repo_mount],
+
 )
 def run_compliance(
     audio_bytes: bytes,
@@ -455,7 +457,7 @@ def run_compliance(
     timeout=900,  # ingestion + all stages; generous ceiling for cold GPU starts
     image=_cpu_image,
     secrets=_secrets,
-    keep_warm=1,  # one warm container to reduce cold-start latency for end users
+    min_containers=1,  # one warm container to reduce cold-start latency for end users
 )
 def run_orchestrator(job_id: str, source_url: str, config: dict[str, Any]) -> None:
     """
