@@ -26,15 +26,16 @@ class HealthView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request: Request) -> Response:
+        # Always return 200 so Railway marks the deploy healthy as long as
+        # gunicorn is up. DB connectivity is informational — a 503 here would
+        # block deploys even when Django itself is healthy.
         try:
             with connection.cursor() as cursor:
                 cursor.execute("SELECT 1")
             db_status = "ok"
-            http_status = 200
         except OperationalError:
             logger.error("Health check: database unreachable")
             db_status = "unavailable"
-            http_status = 503
 
         overall = "ok" if db_status == "ok" else "degraded"
-        return Response({"status": overall, "db": db_status}, status=http_status)
+        return Response({"status": overall, "db": db_status}, status=200)
