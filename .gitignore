@@ -58,3 +58,4 @@ spec/
 # Daily pipeline logs (local only — rotated automatically at startup)
 logs/
 *.log
+.vercel
