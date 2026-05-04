@@ -1,0 +1,12 @@
+.venv
+.git
+local
+__pycache__
+frontend/node_modules
+frontend/.next
+frontend/test-results
+frontend/coverage
+backend/.venv
+backend/__pycache__
+backend/db.sqlite3
+backend/staticfiles
