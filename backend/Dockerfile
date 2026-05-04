@@ -58,14 +58,9 @@ USER appuser
 
 EXPOSE 8000
 
-# True exec form — gunicorn is PID 1 and receives SIGTERM directly.
-# PORT is hardcoded to 8000; override at runtime with -e PORT=... if needed.
-CMD ["gunicorn", "config.wsgi:application", \
-     "--bind", "0.0.0.0:8000", \
-     "--workers", "2", \
-     "--timeout", "120", \
-     "--log-file", "-", \
-     "--capture-output"]
+# Railway injects $PORT at runtime; default to 8000 for local docker run.
+# Shell form needed to expand $PORT — exec form cannot do variable substitution.
+CMD ["sh", "-c", "gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 2 --timeout 120 --log-file - --capture-output"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD python -c '\
