@@ -2,8 +2,8 @@
 backend/core/providers/modal_worker.py
 ModalMLWorkerProvider — production implementation of MLWorkerProvider.
 
-Thin wrapper around modal_app.client.ModalWorkerClient. Django never imports
-modal directly — modal_app/client.py is the single Modal boundary.
+Thin wrapper around core.providers.modal_client.ModalWorkerClient. Django never
+imports modal directly — modal_client.py is the single Modal boundary.
 
 Django returns immediately on dispatch(); Modal POSTs results back via
 POST /api/webhooks/analysis-complete/ when the job finishes.
@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from modal_app.client import ModalWorkerClient
+from core.providers.modal_client import ModalWorkerClient
 
 logger = logging.getLogger(__name__)
 
