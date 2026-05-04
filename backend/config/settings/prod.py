@@ -12,6 +12,13 @@ DEBUG = False
 # Railway injects DATABASE_URL pointing at Railway Postgres automatically.
 # dj-database-url in base.py parses it — no changes needed here.
 
+# Railway's internal health checker probes via localhost — always allow it
+# so the health check isn't rejected by DisallowedHost when ALLOWED_HOSTS
+# is set to just the public domain in Railway env vars.
+for _h in ("localhost", "127.0.0.1"):
+    if _h not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(_h)
+
 # Security headers — safe to enable once behind Railway's TLS terminator
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_SSL_REDIRECT = True
