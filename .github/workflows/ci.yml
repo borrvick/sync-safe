@@ -158,12 +158,13 @@ jobs:
       - name: Deploy
         # --detach returns immediately; Railway streams logs in its dashboard.
         # Health check at /health/ must return 200 within 60s or Railway rolls back.
-        # RAILWAY_SERVICE is a GitHub Actions variable (not secret) — set it to the
-        # Railway service name (e.g. "sync-safe-backend") in repo Settings → Variables.
+        # RAILWAY_SERVICE and RAILWAY_PROJECT_ID are GitHub Actions variables (not
+        # secrets) — set them in repo Settings → Variables.
         working-directory: backend
         run: railway up --service ${{ vars.RAILWAY_SERVICE }} --detach
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
 
   # ---------------------------------------------------------------------------
   # Job 7 — deploy to Vercel (push to main only, after all checks pass)
