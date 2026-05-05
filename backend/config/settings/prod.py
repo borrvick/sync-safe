@@ -24,7 +24,7 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_SSL_REDIRECT = True
 # Railway's internal health checker hits /health/ over plain HTTP — exempt it
 # so the health check isn't redirected to HTTPS before Django can respond.
-SECURE_REDIRECT_EXEMPT = [r"^/health/"]
+SECURE_REDIRECT_EXEMPT = [r"^health/"]
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 
