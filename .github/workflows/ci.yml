@@ -156,11 +156,10 @@ jobs:
         run: npm install -g @railway/cli
 
       - name: Deploy
+        # Run from repo root so railway.json's rootDirectory: backend is resolved
+        # correctly. Running from backend/ would make Railway look for
+        # backend/backend/Dockerfile (which doesn't exist) and fail the build.
         # --detach returns immediately; Railway streams logs in its dashboard.
-        # Health check at /health/ must return 200 within 60s or Railway rolls back.
-        # RAILWAY_SERVICE and RAILWAY_PROJECT_ID are GitHub Actions variables (not
-        # secrets) — set them in repo Settings → Variables.
-        working-directory: backend
         run: railway up --service ${{ vars.RAILWAY_SERVICE }} --detach
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
