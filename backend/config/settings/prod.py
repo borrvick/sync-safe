@@ -9,6 +9,18 @@ from .base import *  # noqa: F401, F403
 
 DEBUG = False
 
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {"class": "logging.StreamHandler"},
+    },
+    "root": {"handlers": ["console"], "level": "WARNING"},
+    "loggers": {
+        "django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False},
+    },
+}
+
 # Railway injects DATABASE_URL pointing at Railway Postgres automatically.
 # dj-database-url in base.py parses it — no changes needed here.
 
