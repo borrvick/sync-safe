@@ -67,18 +67,42 @@ class AnalysisListCreateView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
+        # Deduplication: reuse a completed result for the same URL unless the
+        # caller explicitly requests a fresh run. result_json is ML output only
+        # (BPM, sections, transcription) — no user data — so reuse across users
+        # is safe and eliminates redundant GPU spend.
+        if not data["force_rerun"]:
+            existing = (
+                Analysis.objects.filter(
+                    source_url=data["source_url"],
+                    status=Analysis.Status.COMPLETE,
+                )
+                .order_by("-created_at")
+                .first()
+            )
+            if existing is not None:
+                cloned = Analysis.objects.create(
+                    user=request.user,
+                    source_url=existing.source_url,
+                    title=data["title"] or existing.title,
+                    artist=data["artist"] or existing.artist,
+                    status=Analysis.Status.COMPLETE,
+                    result_json=existing.result_json,
+                )
+                return Response(AnalysisSerializer(cloned).data, status=status.HTTP_201_CREATED)
+
         analysis = Analysis.objects.create(
             user=request.user,
             source_url=data["source_url"],
-            title=data.get("title", ""),
-            artist=data.get("artist", ""),
+            title=data["title"],
+            artist=data["artist"],
             status=Analysis.Status.PENDING,
         )
 
         _worker.dispatch(
             job_id=str(analysis.id),
             source_url=data["source_url"],
-            config={"title": data.get("title", ""), "artist": data.get("artist", "")},
+            config={"title": data["title"], "artist": data["artist"]},
         )
 
         return Response(AnalysisSerializer(analysis).data, status=status.HTTP_202_ACCEPTED)

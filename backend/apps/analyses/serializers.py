@@ -19,9 +19,11 @@ class AnalysisSerializer(serializers.ModelSerializer):
 
 
 class SubmitAnalysisSerializer(serializers.Serializer):
-    source_url = serializers.URLField()
-    title      = serializers.CharField(max_length=255, required=False, default="")
-    artist     = serializers.CharField(max_length=255, required=False, default="")
+    source_url   = serializers.URLField()
+    title        = serializers.CharField(max_length=255, required=False, default="")
+    artist       = serializers.CharField(max_length=255, required=False, default="")
+    # When True, skip deduplication and always dispatch a fresh Modal job.
+    force_rerun  = serializers.BooleanField(required=False, default=False)
 
 
 class LabelSerializer(serializers.Serializer):

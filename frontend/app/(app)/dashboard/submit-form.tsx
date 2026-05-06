@@ -97,6 +97,18 @@ export function SubmitForm() {
           </div>
         </div>
 
+        <div className="flex items-center gap-2 pt-1">
+          <input
+            id="force_rerun"
+            name="force_rerun"
+            type="checkbox"
+            className="h-3.5 w-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+          />
+          <label htmlFor="force_rerun" className="text-xs text-gray-500 select-none">
+            Force re-run (ignore cached result)
+          </label>
+        </div>
+
         <div className="flex gap-2 pt-1">
           <button
             type="submit"

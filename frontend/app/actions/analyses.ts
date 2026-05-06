@@ -6,9 +6,10 @@ import { apiFetch } from "@/app/lib/api";
 import type { FormState } from "@/app/lib/definitions";
 
 const SubmitSchema = z.object({
-  source_url: z.url({ error: "Enter a valid YouTube URL." }),
-  title: z.string().trim().optional(),
-  artist: z.string().trim().optional(),
+  source_url:  z.url({ error: "Enter a valid YouTube URL." }),
+  title:       z.string().trim().optional(),
+  artist:      z.string().trim().optional(),
+  force_rerun: z.boolean().optional().default(false),
 });
 
 export async function submitAnalysis(
@@ -16,9 +17,11 @@ export async function submitAnalysis(
   formData: FormData
 ): Promise<FormState> {
   const validated = SubmitSchema.safeParse({
-    source_url: formData.get("source_url"),
-    title: formData.get("title") || undefined,
-    artist: formData.get("artist") || undefined,
+    source_url:  formData.get("source_url"),
+    title:       formData.get("title") || undefined,
+    artist:      formData.get("artist") || undefined,
+    // Checkbox sends "on" when checked, null when unchecked.
+    force_rerun: formData.get("force_rerun") === "on",
   });
 
   if (!validated.success) {
