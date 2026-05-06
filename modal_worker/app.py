@@ -50,16 +50,22 @@ app = modal.App("sync-safe-ml-worker")
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("ffmpeg")
-    .pip_install(
-        "requests==2.32.3",
-        "pydantic-settings==2.13.1",
-        "yt-dlp==2025.3.31",
-        "openai-whisper==20231117",
-        "torch==2.2.2",
-        "torchaudio==2.2.2",
-        "librosa==0.10.2",
-        "allin1==0.1.5",
-        "numpy==1.26.4",
+    # setuptools<80: setuptools 80+ removed pkg_resources; openai-whisper and
+    # allin1 still import it in their setup.py, so we pin below the breaking
+    # release and use --no-build-isolation so the system setuptools is used
+    # instead of pip spinning up a fresh isolated build env with the latest.
+    .run_commands("pip install 'setuptools<80' wheel")
+    .run_commands(
+        "pip install --no-build-isolation "
+        "requests==2.32.3 "
+        "pydantic-settings==2.13.1 "
+        "yt-dlp==2025.3.31 "
+        "openai-whisper==20231117 "
+        "torch==2.2.2 "
+        "torchaudio==2.2.2 "
+        "librosa==0.10.2 "
+        "numpy==1.26.4 "
+        "allin1==1.1.0"
     )
 )
 
@@ -71,6 +77,7 @@ image = (
 @app.function(
     image=image,
     gpu="any",
+    secrets=[modal.Secret.from_name("sync-safe-secrets")],
     timeout=_settings.MODAL_TIMEOUT,
     retries=_settings.MODAL_RETRIES,
 )
