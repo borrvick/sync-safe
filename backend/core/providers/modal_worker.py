@@ -20,17 +20,17 @@ logger = logging.getLogger(__name__)
 
 class ModalMLWorkerProvider:
     """
-    Production ML worker that dispatches jobs to Modal run_orchestrator.
+    Production ML worker that dispatches jobs to Modal run_analysis.
 
     Constructor args:
-        app_name:       Modal app name (default: "sync-safe").
-        function_name:  Modal function name (default: "run_orchestrator").
+        app_name:       Modal app name (default: "sync-safe-ml-worker").
+        function_name:  Modal function name (default: "run_analysis").
     """
 
     def __init__(
         self,
-        app_name: str = "sync-safe",
-        function_name: str = "run_orchestrator",
+        app_name: str = "sync-safe-ml-worker",
+        function_name: str = "run_analysis",
     ) -> None:
         self._client = ModalWorkerClient(app_name=app_name, function_name=function_name)
 

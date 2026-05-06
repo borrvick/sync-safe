@@ -23,20 +23,20 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Modal orchestrator coordinates
-_APP_NAME = "sync-safe"
-_FUNCTION_NAME = "run_orchestrator"
+_APP_NAME = "sync-safe-ml-worker"
+_FUNCTION_NAME = "run_analysis"
 
 
 class ModalWorkerClient:
     """
-    Implements MLWorkerProvider by spawning the Modal run_orchestrator function.
+    Implements MLWorkerProvider by spawning the Modal run_analysis function.
 
     dispatch() returns immediately — Modal calls back via
     POST /api/webhooks/analysis-complete/ when the job finishes.
 
     Constructor args:
-        app_name:      Modal app name (default: "sync-safe").
-        function_name: Modal function name (default: "run_orchestrator").
+        app_name:      Modal app name (default: "sync-safe-ml-worker").
+        function_name: Modal function name (default: "run_analysis").
     """
 
     def __init__(

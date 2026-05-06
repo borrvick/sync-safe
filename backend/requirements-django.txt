@@ -10,3 +10,4 @@ cryptography==46.0.7
 psycopg2-binary==2.9.10
 gunicorn==23.0.0
 whitenoise==6.9.0
+modal==1.4.2
