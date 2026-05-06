@@ -64,7 +64,7 @@ class ModalWorkerClient:
             ) from exc
 
         try:
-            fn = modal.Function.lookup(self._app_name, self._function_name)
+            fn = modal.Function.from_name(self._app_name, self._function_name)
             fn.spawn(job_id=job_id, source_url=source_url, config=config)
             logger.info(
                 "ModalWorkerClient dispatched job_id=%s source_url=%s",
