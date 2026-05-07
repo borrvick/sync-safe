@@ -28,14 +28,18 @@ function formatDate(iso: string) {
   });
 }
 
-async function getAnalyses(): Promise<PaginatedAnalyses | null> {
-  const res = await apiFetch("/api/analyses/");
-  if (!res.ok) return null;
-  return res.json() as Promise<PaginatedAnalyses>;
+async function getAnalyses(): Promise<{ data: PaginatedAnalyses | null; error: boolean }> {
+  try {
+    const res = await apiFetch("/api/analyses/");
+    if (!res.ok) return { data: null, error: true };
+    return { data: await res.json() as PaginatedAnalyses, error: false };
+  } catch {
+    return { data: null, error: true };
+  }
 }
 
 export default async function DashboardPage() {
-  const data = await getAnalyses();
+  const { data, error } = await getAnalyses();
 
   return (
     <>
@@ -44,7 +48,14 @@ export default async function DashboardPage() {
         <SubmitForm />
       </div>
 
-      {!data || data.results.length === 0 ? (
+      {error ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-6 py-12 text-center">
+          <p className="text-sm text-red-700">Could not load analyses.</p>
+          <p className="mt-1 text-xs text-red-400">
+            Check your connection and refresh the page.
+          </p>
+        </div>
+      ) : !data || data.results.length === 0 ? (
         <div className="rounded-xl border border-dashed border-gray-300 bg-white px-6 py-12 text-center">
           <p className="text-sm text-gray-500">No analyses yet.</p>
           <p className="mt-1 text-xs text-gray-400">

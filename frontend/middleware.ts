@@ -9,7 +9,7 @@ const PUBLIC_PATHS = [
   "/favicon.ico",
 ];
 
-export function proxy(request: NextRequest) {
+export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
