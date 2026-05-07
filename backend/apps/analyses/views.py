@@ -31,11 +31,24 @@ def _build_worker() -> MLWorkerProvider:
     """
     Return the appropriate MLWorkerProvider based on settings.
 
-    USE_MODAL_WORKER=False (default) → StubMLWorkerProvider (safe for dev/tests).
-    USE_MODAL_WORKER=True            → ModalMLWorkerProvider (requires modal package).
+    USE_FIXTURE_WORKER=True → FixtureWorkerClient (dev: fires golden fixture webhook).
+    USE_MODAL_WORKER=True   → ModalMLWorkerProvider (prod: dispatches to Modal GPU).
+    default                 → StubMLWorkerProvider (no-op; safe for tests).
 
+    USE_FIXTURE_WORKER takes precedence over USE_MODAL_WORKER.
     Called once at module load; the result is cached in _worker.
     """
+    if settings.APP_SETTINGS.USE_FIXTURE_WORKER and settings.APP_SETTINGS.USE_MODAL_WORKER:
+        raise RuntimeError(
+            "USE_FIXTURE_WORKER and USE_MODAL_WORKER cannot both be True. "
+            "Set USE_MODAL_WORKER=False in dev or USE_FIXTURE_WORKER=False in prod."
+        )
+    if settings.APP_SETTINGS.USE_FIXTURE_WORKER:
+        from core.providers.fixture_worker import FixtureWorkerClient
+        return FixtureWorkerClient(
+            django_base_url=settings.APP_SETTINGS.DJANGO_BASE_URL,
+            webhook_secret=settings.APP_SETTINGS.MODAL_WEBHOOK_SECRET,
+        )
     if settings.APP_SETTINGS.USE_MODAL_WORKER:
         from core.providers.modal_worker import ModalMLWorkerProvider
         return ModalMLWorkerProvider()

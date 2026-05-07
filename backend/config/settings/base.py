@@ -32,6 +32,9 @@ class AppSettings(BaseSettings):
     DJANGO_BASE_URL: str = "http://localhost:8000"
     # Set to True in prod to dispatch jobs to Modal instead of StubMLWorkerProvider
     USE_MODAL_WORKER: bool = False
+    # Set to True in dev to fire the golden fixture webhook instead of calling Modal.
+    # Takes precedence over USE_MODAL_WORKER. Never set both to True.
+    USE_FIXTURE_WORKER: bool = False
 
     # Seconds to cache complete/failed analysis results in the detail endpoint.
     # Pending/running results are never cached — they change on every webhook tick.
