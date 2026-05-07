@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 interface Props {
@@ -8,35 +8,54 @@ interface Props {
   status: string;
 }
 
+const POLL_INITIAL_MS  = 2_000;  // start at 2 s
+const POLL_MAX_MS      = 30_000; // cap at 30 s
+const POLL_BACKOFF     = 1.5;    // multiply interval by 1.5× on each tick
+
 export function Poller({ analysisId, status }: Props) {
   const router = useRouter();
   const [pollError, setPollError] = useState(false);
+  const intervalMs = useRef(POLL_INITIAL_MS);
+  const timeoutId  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (status === "complete" || status === "failed") return;
 
-    const interval = setInterval(async () => {
+    let cancelled = false;
+
+    async function tick() {
       try {
         const res = await fetch(`/api/analyses/${analysisId}`);
         if (!res.ok) {
-          // Non-2xx from the proxy route — stop polling and surface the error.
-          clearInterval(interval);
-          setPollError(true);
+          if (!cancelled) setPollError(true);
           return;
         }
         const data = (await res.json()) as { status: string };
         if (data.status === "complete" || data.status === "failed") {
-          clearInterval(interval);
           router.refresh();
+          return;
         }
       } catch {
-        // Network failure — stop polling rather than silently retrying forever.
-        clearInterval(interval);
-        setPollError(true);
+        if (!cancelled) setPollError(true);
+        return;
       }
-    }, 2000);
 
-    return () => clearInterval(interval);
+      if (!cancelled) {
+        // Back off on each tick up to the cap.
+        intervalMs.current = Math.min(
+          Math.round(intervalMs.current * POLL_BACKOFF),
+          POLL_MAX_MS,
+        );
+        timeoutId.current = setTimeout(tick, intervalMs.current);
+      }
+    }
+
+    timeoutId.current = setTimeout(tick, intervalMs.current);
+
+    return () => {
+      cancelled = true;
+      if (timeoutId.current !== null) clearTimeout(timeoutId.current);
+    };
   }, [analysisId, status, router]);
 
   if (pollError) {

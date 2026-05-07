@@ -19,7 +19,11 @@ export function middleware(request: NextRequest) {
   const token = request.cookies.get("access_token")?.value;
   if (!token) {
     const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("next", pathname);
+    // Only allow same-origin `next` redirects — reject absolute URLs and
+    // protocol-relative paths to prevent open-redirect abuse.
+    if (pathname.startsWith("/") && !pathname.startsWith("//")) {
+      loginUrl.searchParams.set("next", pathname);
+    }
     return NextResponse.redirect(loginUrl);
   }
 

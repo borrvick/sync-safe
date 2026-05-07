@@ -39,10 +39,17 @@ class AppSettings(BaseSettings):
     # Seconds to cache complete/failed analysis results in the detail endpoint.
     # Pending/running results are never cached — they change on every webhook tick.
     ANALYSIS_CACHE_TTL_SECONDS: int = 300
+    # Seconds to cache the static TrackLabel list (seeded via migration; rarely changes).
+    TRACK_LABELS_CACHE_TTL_SECONDS: int = 3600
 
     # Max analysis submissions per authenticated user per window (e.g. "10/hour").
     # GPU quota makes this endpoint expensive — keep this conservative.
     ANALYZE_RATE_LIMIT: str = "10/hour"
+
+    # Redis URL for caching (analysis results, TrackLabel list).
+    # Leave empty to fall back to in-memory LocMemCache (dev/test only — not
+    # shared across processes; do not use in multi-worker prod deployments).
+    REDIS_URL: str = ""
 
     # Deployed frontend origin added to CORS_ALLOWED_ORIGINS when non-empty.
     # Format: scheme + host only, no trailing slash — e.g. https://app.sync-safe.com
@@ -146,6 +153,26 @@ WSGI_APPLICATION = "config.wsgi.application"
 DATABASES = {
     "default": dj_database_url.parse(_app_settings.DATABASE_URL, conn_max_age=600),
 }
+
+# ---------------------------------------------------------------------------
+# Cache — Redis in prod, LocMemCache in dev (not shared across processes).
+# LocMemCache is fine for single-process dev; switch to Redis via REDIS_URL
+# before running more than one gunicorn worker.
+# ---------------------------------------------------------------------------
+
+if _app_settings.REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": _app_settings.REDIS_URL,
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        }
+    }
 
 # ---------------------------------------------------------------------------
 # Custom User model

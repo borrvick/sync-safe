@@ -10,6 +10,7 @@ import hmac
 import logging
 
 from django.conf import settings
+from django.db import transaction
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
@@ -50,25 +51,31 @@ class AnalysisCompleteWebhookView(APIView):
             return Response({"detail": "Invalid payload."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            analysis = Analysis.objects.get(pk=job_id)
+            # select_for_update prevents two simultaneous webhook deliveries for
+            # the same job from both passing the idempotence check and clobbering
+            # each other's result_json write.
+            with transaction.atomic():
+                analysis = Analysis.objects.select_for_update().get(pk=job_id)
+
+                # Idempotence: terminal states are final — ignore duplicates.
+                if analysis.status in (Analysis.Status.COMPLETE, Analysis.Status.FAILED):
+                    logger.info("Webhook duplicate for already-terminal job_id=%s — skipping", job_id)
+                    return Response({"detail": "ok"})
+
+                if outcome == "complete":
+                    analysis.status      = Analysis.Status.COMPLETE
+                    analysis.result_json = request.data.get("result")
+                    analysis.error       = ""
+                else:
+                    analysis.status = Analysis.Status.FAILED
+                    analysis.error  = request.data.get("error", "Unknown error")
+
+                analysis.save(update_fields=["status", "result_json", "error", "updated_at"])
+
         except Analysis.DoesNotExist:
             logger.error("Webhook for unknown job_id=%s", job_id)
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        # Idempotence: terminal states are final — ignore duplicate deliveries.
-        if analysis.status in (Analysis.Status.COMPLETE, Analysis.Status.FAILED):
-            logger.info("Webhook duplicate for already-terminal job_id=%s — skipping", job_id)
-            return Response({"detail": "ok"})
-
-        if outcome == "complete":
-            analysis.status      = Analysis.Status.COMPLETE
-            analysis.result_json = request.data.get("result")
-            analysis.error       = ""
-        else:
-            analysis.status = Analysis.Status.FAILED
-            analysis.error  = request.data.get("error", "Unknown error")
-
-        analysis.save(update_fields=["status", "result_json", "error", "updated_at"])
         logger.info("Analysis %s → %s", job_id, outcome)
         return Response({"detail": "ok"})
 

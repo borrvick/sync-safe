@@ -54,6 +54,11 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 # third-party requests (analytics, CDN assets) embedded in future frontend pages.
 SECURE_REFERRER_POLICY = "same-origin"
 
+# Content-Security-Policy — restricts what the browser may load.
+# This is a Django REST API; it serves no HTML pages, so a tight policy is
+# straightforward. Adjust frame-ancestors if you embed the API in an iframe.
+SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
+
 # Static files — whitenoise serves them directly from gunicorn (no nginx needed)
 STATIC_ROOT = Path(__file__).resolve().parents[3] / "staticfiles"
 

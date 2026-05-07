@@ -31,8 +31,9 @@ class Settings(BaseSettings):
     WHISPER_MODEL:        str   = "base"
     WHISPER_TEMPERATURE:  float = 0.0
     # Modal function infrastructure — read at deploy time (modal deploy)
-    MODAL_TIMEOUT:        int   = 600   # seconds; Whisper Base on T4 takes ~1–3 min
-    MODAL_RETRIES:        int   = 1     # one automatic retry on transient failure
+    MODAL_TIMEOUT:        int   = 600          # seconds; Whisper Base on T4 takes ~1–3 min
+    # Must match _MAX_AUDIO_BYTES in backend/apps/analyses/serializers.py.
+    MAX_AUDIO_BYTES:      int   = 20 * 1024 * 1024
 
     model_config = SettingsConfigDict(extra="ignore")
 
@@ -47,6 +48,7 @@ _settings = Settings()
 app = modal.App("sync-safe-ml-worker")
 
 # ffmpeg is required by yt-dlp (audio extraction) and librosa (decoding).
+# Layers are ordered rare→frequent so a dep update doesn't bust the torch cache.
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("ffmpeg")
@@ -55,17 +57,27 @@ image = (
     # release and use --no-build-isolation so the system setuptools is used
     # instead of pip spinning up a fresh isolated build env with the latest.
     .run_commands("pip install 'setuptools<80' wheel")
+    # Heavy ML deps — rarely changed; kept in their own layer for cache hits.
+    .run_commands(
+        "pip install --no-build-isolation "
+        "torch==2.2.2 "
+        "torchaudio==2.2.2"
+    )
+    # ML models — changed less often than utility libs.
+    .run_commands(
+        "pip install --no-build-isolation "
+        "openai-whisper==20231117 "
+        "allin1==1.1.0 "
+        "librosa==0.10.2 "
+        "numpy==1.26.4"
+    )
+    # Frequently-updated utility deps — in their own layer so they don't
+    # invalidate the large torch/whisper layers above.
     .run_commands(
         "pip install --no-build-isolation "
         "requests==2.32.3 "
         "pydantic-settings==2.13.1 "
-        "yt-dlp==2025.3.31 "
-        "openai-whisper==20231117 "
-        "torch==2.2.2 "
-        "torchaudio==2.2.2 "
-        "librosa==0.10.2 "
-        "numpy==1.26.4 "
-        "allin1==1.1.0"
+        "yt-dlp==2025.3.31"
     )
 )
 
@@ -76,10 +88,11 @@ image = (
 
 @app.function(
     image=image,
-    gpu="any",
+    gpu="t4",  # T4 is sufficient for Whisper Base + allin1; "any" risks expensive A100
     secrets=[modal.Secret.from_name("sync-safe-secrets")],
     timeout=_settings.MODAL_TIMEOUT,
-    retries=_settings.MODAL_RETRIES,
+    retries=0,  # No automatic retry — GPU retry on webhook failure doubles cost.
+                # Webhook delivery has its own retry loop below.
 )
 def run_analysis(job_id: str, source_url: str, config: dict[str, Any]) -> None:
     """
@@ -104,7 +117,7 @@ def run_analysis(job_id: str, source_url: str, config: dict[str, Any]) -> None:
             config=config,
             s=s,
         )
-        _post_result(
+        _post_result_with_retries(
             webhook_url=webhook_url,
             webhook_secret=s.MODAL_WEBHOOK_SECRET,
             job_id=job_id,
@@ -113,23 +126,15 @@ def run_analysis(job_id: str, source_url: str, config: dict[str, Any]) -> None:
         )
     except Exception as exc:  # noqa: BLE001 — top-level boundary; guarantees webhook POST
         logger.exception("Analysis failed for job_id=%s: %s", job_id, exc)
-        # Attempt to notify Django of the failure. If the webhook endpoint is also
-        # unreachable, log and re-raise so Modal's retry fires.
-        try:
-            _post_result(
-                webhook_url=webhook_url,
-                webhook_secret=s.MODAL_WEBHOOK_SECRET,
-                job_id=job_id,
-                job_status="failed",
-                result={"error": str(exc)},
-            )
-        except Exception as post_exc:  # noqa: BLE001
-            logger.exception(
-                "Webhook POST also failed for job_id=%s: %s — re-raising for Modal retry",
-                job_id,
-                post_exc,
-            )
-            raise
+        # Attempt to notify Django of the failure using the same retry loop.
+        # We do not re-raise — webhook delivery failures must not trigger GPU retries.
+        _post_result_with_retries(
+            webhook_url=webhook_url,
+            webhook_secret=s.MODAL_WEBHOOK_SECRET,
+            job_id=job_id,
+            job_status="failed",
+            result={"error": str(exc)},
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +162,7 @@ def _run_analysis_pipeline(
                 audio_base64=config["audio_base64"],
                 filename=config.get("audio_filename", "audio.mp3"),
                 tmpdir=tmpdir,
+                s=s,
             )
         else:
             audio_path = _download_audio(source_url=source_url, tmpdir=tmpdir)
@@ -237,27 +243,46 @@ def _load_bytes(audio_path: str) -> io.BytesIO:
     return buf
 
 
-def _decode_audio(audio_base64: str, filename: str, tmpdir: str) -> str:
+_ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".wav", ".flac", ".m4a"}
+
+
+def _decode_audio(audio_base64: str, filename: str, tmpdir: str, s: Settings) -> str:
     """
     Decode a base64-encoded audio file into tmpdir and return its path.
 
     Args:
         audio_base64: Base64-encoded audio bytes.
-        filename:     Original filename (used to preserve the extension).
+        filename:     Original filename (used to preserve the extension only).
         tmpdir:       Temporary directory managed by the caller.
 
     Returns:
         Absolute path to the decoded audio file inside tmpdir.
 
     Raises:
-        OSError: if the decoded file is empty.
+        OSError: if the decoded file is empty or exceeds size limit.
+        ValueError: if the extension is not in the allowed set.
     """
     import base64 as _base64
-    ext      = os.path.splitext(filename)[1].lower() or ".mp3"
+
+    # Path traversal: strip all directory components and only keep the extension.
+    bare = os.path.basename(filename)
+    ext  = os.path.splitext(bare)[1].lower() or ".mp3"
+    if ext not in _ALLOWED_AUDIO_EXTENSIONS:
+        raise ValueError(f"Unsupported audio extension: {ext!r}")
+
     out_path = os.path.join(tmpdir, f"audio{ext}")
+    decoded  = _base64.b64decode(audio_base64)
+
+    # Decompression-bomb guard — reject payloads that exceed the agreed limit.
+    if len(decoded) > s.MAX_AUDIO_BYTES:
+        raise OSError(
+            f"Decoded audio is {len(decoded)} bytes, which exceeds the "
+            f"{s.MAX_AUDIO_BYTES // (1024 * 1024)} MB limit."
+        )
+
     with open(out_path, "wb") as f:
-        f.write(_base64.b64decode(audio_base64))
-    if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
+        f.write(decoded)
+    if os.path.getsize(out_path) == 0:
         raise OSError("Decoded audio file is empty.")
     logger.info("Decoded uploaded audio to %s (%d bytes)", out_path, os.path.getsize(out_path))
     return out_path
@@ -286,7 +311,7 @@ def _transcribe(audio_path: str, s: Settings) -> list[dict[str, Any]]:
 
     try:
         model  = whisper.load_model(s.WHISPER_MODEL)
-        result = model.transcribe(audio_path, fp16=False, temperature=s.WHISPER_TEMPERATURE)
+        result = model.transcribe(audio_path, fp16=True, temperature=s.WHISPER_TEMPERATURE)
     except Exception as exc:
         raise RuntimeError(f"Whisper transcription failed: {exc}") from exc
 
@@ -350,6 +375,45 @@ def _analyse_structure(
 # ---------------------------------------------------------------------------
 # Webhook callback
 # ---------------------------------------------------------------------------
+
+def _post_result_with_retries(
+    webhook_url: str,
+    webhook_secret: str,
+    job_id: str,
+    job_status: str,
+    result: dict[str, Any],
+    max_retries: int = 3,
+) -> None:
+    """
+    Deliver the webhook with exponential backoff. Logs on final failure but
+    does not raise — webhook delivery failure must never re-run GPU work.
+    """
+    import time
+
+    for attempt in range(max_retries):
+        try:
+            _post_result(
+                webhook_url=webhook_url,
+                webhook_secret=webhook_secret,
+                job_id=job_id,
+                job_status=job_status,
+                result=result,
+            )
+            return
+        except Exception as exc:  # noqa: BLE001
+            if attempt < max_retries - 1:
+                delay = 2 ** attempt  # 1s, 2s, 4s
+                logger.warning(
+                    "Webhook attempt %d/%d failed for job_id=%s: %s — retrying in %ds",
+                    attempt + 1, max_retries, job_id, exc, delay,
+                )
+                time.sleep(delay)
+            else:
+                logger.error(
+                    "Webhook delivery failed after %d attempts for job_id=%s: %s",
+                    max_retries, job_id, exc,
+                )
+
 
 def _post_result(
     webhook_url: str,

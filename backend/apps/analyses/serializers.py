@@ -14,6 +14,8 @@ _MAX_AUDIO_BYTES = 20 * 1024 * 1024  # 20 MB
 
 
 class AnalysisSerializer(serializers.ModelSerializer):
+    """Full serializer — includes result_json. Used by detail endpoint."""
+
     class Meta:
         model = Analysis
         fields = (
@@ -21,6 +23,18 @@ class AnalysisSerializer(serializers.ModelSerializer):
             "result_json", "error", "created_at", "updated_at",
         )
         read_only_fields = ("id", "status", "result_json", "error", "created_at", "updated_at")
+
+
+class AnalysisListSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for list endpoint — omits result_json to reduce payload."""
+
+    class Meta:
+        model = Analysis
+        fields = (
+            "id", "status", "source_url", "title", "artist", "label",
+            "error", "created_at", "updated_at",
+        )
+        read_only_fields = fields
 
 
 class SubmitAnalysisSerializer(serializers.Serializer):

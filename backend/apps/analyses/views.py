@@ -7,20 +7,25 @@ import base64
 
 from django.conf import settings
 from django.core.cache import cache
+from django.db import transaction
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.throttling import BaseThrottle
 from rest_framework.views import APIView
 
-from rest_framework.permissions import AllowAny
-
 from core.protocols import MLWorkerProvider
 
 from .models import Analysis, TrackLabel
-from .serializers import AnalysisSerializer, LabelSerializer, SubmitAnalysisSerializer, TrackLabelSerializer
+from .serializers import (
+    AnalysisListSerializer,
+    AnalysisSerializer,
+    LabelSerializer,
+    SubmitAnalysisSerializer,
+    TrackLabelSerializer,
+)
 from .throttles import AnalyzeRateThrottle
 
 class AnalysisPagination(PageNumberPagination):
@@ -72,10 +77,12 @@ class AnalysisListCreateView(APIView):
         return []
 
     def get(self, request: Request) -> Response:
-        analyses = Analysis.objects.for_user(request.user)
+        # defer() excludes result_json from the DB query — it can be hundreds of KB
+        # per row and the list view never needs it.
+        analyses = Analysis.objects.for_user(request.user).defer("result_json")
         paginator = AnalysisPagination()
         page = paginator.paginate_queryset(analyses, request)
-        return paginator.get_paginated_response(AnalysisSerializer(page, many=True).data)
+        return paginator.get_paginated_response(AnalysisListSerializer(page, many=True).data)
 
     def post(self, request: Request) -> Response:
         serializer = SubmitAnalysisSerializer(data=request.data)
@@ -107,33 +114,38 @@ class AnalysisListCreateView(APIView):
             return Response(AnalysisSerializer(analysis).data, status=status.HTTP_202_ACCEPTED)
 
         # URL path — deduplicate against prior completed runs to avoid GPU spend.
-        if not data["force_rerun"]:
-            existing = (
-                Analysis.objects.filter(
-                    source_url=data["source_url"],
-                    status=Analysis.Status.COMPLETE,
+        # select_for_update() prevents two concurrent requests for the same URL
+        # from both racing past the check and dispatching duplicate Modal jobs.
+        with transaction.atomic():
+            if not data["force_rerun"]:
+                existing = (
+                    Analysis.objects.select_for_update()
+                    .filter(
+                        source_url=data["source_url"],
+                        status=Analysis.Status.COMPLETE,
+                    )
+                    .order_by("-created_at")
+                    .first()
                 )
-                .order_by("-created_at")
-                .first()
-            )
-            if existing is not None:
-                cloned = Analysis.objects.create(
-                    user=request.user,
-                    source_url=existing.source_url,
-                    title=data["title"] or existing.title,
-                    artist=data["artist"] or existing.artist,
-                    status=Analysis.Status.COMPLETE,
-                    result_json=existing.result_json,
-                )
-                return Response(AnalysisSerializer(cloned).data, status=status.HTTP_201_CREATED)
+                if existing is not None:
+                    cloned = Analysis.objects.create(
+                        user=request.user,
+                        source_url=existing.source_url,
+                        title=data["title"] or existing.title,
+                        artist=data["artist"] or existing.artist,
+                        status=Analysis.Status.COMPLETE,
+                        result_json=existing.result_json,
+                    )
+                    return Response(AnalysisSerializer(cloned).data, status=status.HTTP_201_CREATED)
 
-        analysis = Analysis.objects.create(
-            user=request.user,
-            source_url=data["source_url"],
-            title=data["title"],
-            artist=data["artist"],
-            status=Analysis.Status.PENDING,
-        )
+            analysis = Analysis.objects.create(
+                user=request.user,
+                source_url=data["source_url"],
+                title=data["title"],
+                artist=data["artist"],
+                status=Analysis.Status.PENDING,
+            )
+
         _worker.dispatch(
             job_id=str(analysis.id),
             source_url=data["source_url"],
@@ -178,11 +190,18 @@ class AnalysisLabelView(APIView):
         return Response(AnalysisSerializer(analysis).data)
 
 
+_TRACK_LABELS_CACHE_KEY = "track_labels_list"
+
+
 class TrackLabelListView(APIView):
     """Return the predefined sync category list. Public — no auth required."""
 
     permission_classes = [AllowAny]
 
     def get(self, request: Request) -> Response:
-        labels = TrackLabel.objects.all()
-        return Response(TrackLabelSerializer(labels, many=True).data)
+        data = cache.get(_TRACK_LABELS_CACHE_KEY)
+        if data is None:
+            labels = TrackLabel.objects.all()
+            data = TrackLabelSerializer(labels, many=True).data
+            cache.set(_TRACK_LABELS_CACHE_KEY, data, timeout=settings.APP_SETTINGS.TRACK_LABELS_CACHE_TTL_SECONDS)
+        return Response(data)
