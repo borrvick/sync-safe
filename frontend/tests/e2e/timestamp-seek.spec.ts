@@ -22,29 +22,23 @@ test.describe("Timestamp seek", () => {
     await expect(btn).toBeVisible();
   });
 
-  test("clicking a timestamp button invokes __syncSafeSeek with correct seconds", async ({
+  test("clicking a timestamp button dispatches seek-to-seconds event with correct seconds", async ({
     page,
   }) => {
-    // Wait for YouTubePlayer useEffect to register window.__syncSafeSeek.
-    await page.waitForFunction(
-      () => typeof window.__syncSafeSeek === "function"
-    );
-
-    // Wrap the seek bridge to capture the argument.
-    await page.evaluate(() => {
-      const orig = window.__syncSafeSeek;
-      (window as unknown as Record<string, unknown>).__seekResult = undefined;
-      window.__syncSafeSeek = (s: number) => {
-        (window as unknown as Record<string, unknown>).__seekResult = s;
-        orig?.(s);
-      };
+    // Register listener before clicking so the event is never missed.
+    const eventPromise = page.evaluate(() => {
+      return new Promise<number>((resolve) => {
+        window.addEventListener(
+          "seek-to-seconds",
+          (e) => resolve((e as CustomEvent<{ seconds: number }>).detail.seconds),
+          { once: true }
+        );
+      });
     });
 
     await page.getByRole("button", { name: /Seek to 0:45/ }).click();
 
-    const seekResult = await page.evaluate(
-      () => (window as unknown as Record<string, unknown>).__seekResult
-    );
-    expect(seekResult).toBe(SEEK_SECONDS);
+    const seconds = await eventPromise;
+    expect(seconds).toBe(SEEK_SECONDS);
   });
 });

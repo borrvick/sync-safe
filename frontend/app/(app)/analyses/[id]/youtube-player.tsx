@@ -58,13 +58,13 @@ export function YouTubePlayer({ sourceUrl }: { sourceUrl: string }) {
       window.onYouTubeIframeAPIReady = init;
     }
 
-    window.__syncSafeSeek = (seconds: number) => {
+    function handleSeek(e: Event) {
+      const { seconds } = (e as CustomEvent<SeekToSecondsEventDetail>).detail;
       playerRef.current?.seekTo(seconds, true);
-    };
+    }
 
-    return () => {
-      window.__syncSafeSeek = undefined;
-    };
+    window.addEventListener("seek-to-seconds", handleSeek);
+    return () => window.removeEventListener("seek-to-seconds", handleSeek);
   }, [videoId]);
 
   if (!videoId) return null;
