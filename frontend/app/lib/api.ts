@@ -11,8 +11,10 @@ export async function apiFetch(
   options: FetchOptions = {}
 ): Promise<Response> {
   const token = await getAccessToken();
+  // Omit Content-Type for FormData — fetch sets it automatically with the correct boundary.
+  const isFormData = options.body instanceof FormData;
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    ...(isFormData ? {} : { "Content-Type": "application/json" }),
     ...options.headers,
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;

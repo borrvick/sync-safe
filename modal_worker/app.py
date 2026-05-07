@@ -151,8 +151,15 @@ def _run_analysis_pipeline(
     """
     tmpdir_obj = tempfile.TemporaryDirectory()
     try:
-        tmpdir      = tmpdir_obj.name
-        audio_path  = _download_audio(source_url=source_url, tmpdir=tmpdir)
+        tmpdir = tmpdir_obj.name
+        if config.get("audio_base64"):
+            audio_path = _decode_audio(
+                audio_base64=config["audio_base64"],
+                filename=config.get("audio_filename", "audio.mp3"),
+                tmpdir=tmpdir,
+            )
+        else:
+            audio_path = _download_audio(source_url=source_url, tmpdir=tmpdir)
         audio_bytes = _load_bytes(audio_path)
 
         transcription = _transcribe(audio_path=audio_path, s=s)
@@ -228,6 +235,32 @@ def _load_bytes(audio_path: str) -> io.BytesIO:
         buf = io.BytesIO(f.read())
     buf.seek(0)
     return buf
+
+
+def _decode_audio(audio_base64: str, filename: str, tmpdir: str) -> str:
+    """
+    Decode a base64-encoded audio file into tmpdir and return its path.
+
+    Args:
+        audio_base64: Base64-encoded audio bytes.
+        filename:     Original filename (used to preserve the extension).
+        tmpdir:       Temporary directory managed by the caller.
+
+    Returns:
+        Absolute path to the decoded audio file inside tmpdir.
+
+    Raises:
+        OSError: if the decoded file is empty.
+    """
+    import base64 as _base64
+    ext      = os.path.splitext(filename)[1].lower() or ".mp3"
+    out_path = os.path.join(tmpdir, f"audio{ext}")
+    with open(out_path, "wb") as f:
+        f.write(_base64.b64decode(audio_base64))
+    if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
+        raise OSError("Decoded audio file is empty.")
+    logger.info("Decoded uploaded audio to %s (%d bytes)", out_path, os.path.getsize(out_path))
+    return out_path
 
 
 # ---------------------------------------------------------------------------

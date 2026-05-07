@@ -3,6 +3,8 @@ apps/analyses/views.py
 """
 from __future__ import annotations
 
+import base64
+
 from django.conf import settings
 from django.core.cache import cache
 from rest_framework import status
@@ -80,10 +82,31 @@ class AnalysisListCreateView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        # Deduplication: reuse a completed result for the same URL unless the
-        # caller explicitly requests a fresh run. result_json is ML output only
-        # (BPM, sections, transcription) — no user data — so reuse across users
-        # is safe and eliminates redundant GPU spend.
+        # File-upload path — no deduplication (different files, no shared URL key).
+        if data.get("audio_file"):
+            audio_file = data["audio_file"]
+            audio_b64  = base64.b64encode(audio_file.read()).decode()
+
+            analysis = Analysis.objects.create(
+                user=request.user,
+                source_url="",
+                title=data["title"],
+                artist=data["artist"],
+                status=Analysis.Status.PENDING,
+            )
+            _worker.dispatch(
+                job_id=str(analysis.id),
+                source_url="",
+                config={
+                    "title":          data["title"],
+                    "artist":         data["artist"],
+                    "audio_base64":   audio_b64,
+                    "audio_filename": audio_file.name,
+                },
+            )
+            return Response(AnalysisSerializer(analysis).data, status=status.HTTP_202_ACCEPTED)
+
+        # URL path — deduplicate against prior completed runs to avoid GPU spend.
         if not data["force_rerun"]:
             existing = (
                 Analysis.objects.filter(
@@ -111,13 +134,11 @@ class AnalysisListCreateView(APIView):
             artist=data["artist"],
             status=Analysis.Status.PENDING,
         )
-
         _worker.dispatch(
             job_id=str(analysis.id),
             source_url=data["source_url"],
             config={"title": data["title"], "artist": data["artist"]},
         )
-
         return Response(AnalysisSerializer(analysis).data, status=status.HTTP_202_ACCEPTED)
 
 
