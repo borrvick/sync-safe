@@ -160,7 +160,10 @@ jobs:
         # correctly. Running from backend/ would make Railway look for
         # backend/backend/Dockerfile (which doesn't exist) and fail the build.
         # --detach returns immediately; Railway streams logs in its dashboard.
-        run: railway up --service ${{ vars.RAILWAY_SERVICE }} --detach
+        # RAILWAY_SERVICE_ID pins to the service UUID (immutable) rather than
+        # the name — prevents Railway from creating a new service if the name
+        # ever changes or the var is misconfigured.
+        run: railway up --service ${{ vars.RAILWAY_SERVICE_ID }} --detach
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
