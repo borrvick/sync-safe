@@ -1,0 +1,21 @@
+{
+  "c2pa_flag": false,
+  "is_vocal": true,
+  "ibi_variance": 162.8629773180313,
+  "loop_score": 0.8041127920150757,
+  "loop_autocorr_score": 0.8978260869565218,
+  "spectral_slop": 0.0,
+  "synthid_score": 0.0,
+  "mfcc_variance_score": -1.0,
+  "plr_std": -1.0,
+  "centroid_instability_score": 0.36397671527846337,
+  "harmonic_ratio_score": 0.6187215010730227,
+  "ai_probability": 0.75,
+  "flags": [
+    "Human-Feel Timing (Organic)",
+    "Sample-Heavy / Loop-Based (Organic Production) (autocorr score 0.898)",
+    "Formant Drift Detected (centroid CV 0.364) — erratic within-note spectral shift (AI signal)",
+    "Unnaturally Clean Harmonics (HNR 0.619) — no breath/noise artifacts detected within sustained notes (AI signal)"
+  ],
+  "verdict": "AI"
+}

@@ -1,0 +1,18 @@
+{
+  "c2pa_flag": false,
+  "ibi_variance": 193.575438314352,
+  "loop_score": 0.7686053514480591,
+  "loop_autocorr_score": 0.90175,
+  "spectral_slop": 0.0,
+  "synthid_score": 0.0,
+  "mfcc_variance_score": -1.0,
+  "plr_std": -1.0,
+  "centroid_instability_score": 0.31933815096680856,
+  "harmonic_ratio_score": 0.3683138503147785,
+  "ai_probability": 0.0,
+  "flags": [
+    "Human-Feel Timing (Organic)",
+    "Sample-Heavy / Loop-Based (Organic Production) (autocorr score 0.902)"
+  ],
+  "verdict": "Human (Sample/Loop)"
+}

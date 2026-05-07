@@ -1,0 +1,17 @@
+{
+  "c2pa_flag": false,
+  "ibi_variance": 318.02278149439206,
+  "loop_score": 0.7889936566352844,
+  "loop_autocorr_score": 0.6951666666666667,
+  "spectral_slop": 0.0,
+  "synthid_score": 0.0,
+  "mfcc_variance_score": -1.0,
+  "plr_std": 1.7459,
+  "centroid_instability_score": 0.2050575518500358,
+  "harmonic_ratio_score": 0.4849409081145586,
+  "ai_probability": 0.0,
+  "flags": [
+    "Human-Feel Timing (Organic)"
+  ],
+  "verdict": "Human"
+}

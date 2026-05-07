@@ -1,0 +1,20 @@
+{
+  "c2pa_flag": false,
+  "is_vocal": true,
+  "ibi_variance": 942.8873566350038,
+  "loop_score": 0.8002939224243164,
+  "loop_autocorr_score": 0.8300740740740741,
+  "spectral_slop": 0.0,
+  "synthid_score": 0.0,
+  "mfcc_variance_score": -1.0,
+  "plr_std": -1.0,
+  "centroid_instability_score": 0.3784964285298085,
+  "harmonic_ratio_score": 0.6641431960273491,
+  "ai_probability": 0.55,
+  "flags": [
+    "Human-Feel Timing (Organic)",
+    "Sample-Heavy / Loop-Based (Organic Production) (autocorr score 0.830)",
+    "Formant Drift Detected (centroid CV 0.378) — erratic within-note spectral shift (AI signal)"
+  ],
+  "verdict": "Possible Hybrid AI Cover"
+}

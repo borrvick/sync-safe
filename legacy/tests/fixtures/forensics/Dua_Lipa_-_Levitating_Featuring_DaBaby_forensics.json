@@ -1,0 +1,20 @@
+{
+  "c2pa_flag": false,
+  "ibi_variance": 364.8693531990104,
+  "loop_score": 0.9809504151344299,
+  "loop_autocorr_score": 0.9373037974683545,
+  "spectral_slop": 0.0,
+  "synthid_score": 0.0,
+  "mfcc_variance_score": -1.0,
+  "plr_std": -1.0,
+  "centroid_instability_score": 0.29909076780375954,
+  "harmonic_ratio_score": 0.502606276682962,
+  "ai_probability": 0.7000000000000001,
+  "flags": [
+    "Human-Feel Timing (Organic)",
+    "Likely Stock Loop/Sample (score 0.981)",
+    "Sample-Heavy / Loop-Based (Organic Production) (autocorr score 0.937)",
+    "Formant Drift Detected (centroid CV 0.299) — erratic within-note spectral shift (AI signal)"
+  ],
+  "verdict": "AI"
+}
